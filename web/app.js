@@ -55,6 +55,7 @@ const state = {
   videoItems: [],
   latestCsvLines: [],
   latestCsvExpanded: false,
+  lastSettledRefreshKey: "",
 };
 
 async function apiGet(url) {
@@ -100,6 +101,15 @@ function setStatus(current) {
     // Always keep newest lines visible while the run is progressing.
     el.runLog.scrollTop = el.runLog.scrollHeight;
   }
+}
+
+function settledRefreshKey(current) {
+  const status = current?.status || "";
+  if (status !== "done" && status !== "error") return "";
+  const runId = current?.run_id || "";
+  const finishedAt = current?.finished_at || "";
+  const exitCode = current?.exit_code ?? "";
+  return `${status}|${runId}|${finishedAt}|${exitCode}`;
 }
 
 function videoThumbUrl(videoPath) {
@@ -271,7 +281,12 @@ function renderRunSelect(runs) {
 
 async function loadRuns() {
   const data = await apiGet("/api/runs");
-  setStatus(data.current || {});
+  const current = data.current || {};
+  setStatus(current);
+  const currentSettledKey = settledRefreshKey(current);
+  if (currentSettledKey) {
+    state.lastSettledRefreshKey = currentSettledKey;
+  }
 
   const runs = data.runs || [];
   state.latestRunId = runs.length > 0 ? runs[0].id : null;
@@ -505,7 +520,9 @@ async function pollCurrent() {
   try {
     const current = await apiGet("/api/runs/current");
     setStatus(current);
-    if (current.status === "done" || current.status === "error") {
+    const key = settledRefreshKey(current);
+    if (key && key !== state.lastSettledRefreshKey) {
+      state.lastSettledRefreshKey = key;
       await loadRuns();
     }
   } catch (err) {
