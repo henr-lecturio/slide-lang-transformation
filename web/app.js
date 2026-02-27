@@ -29,6 +29,7 @@ const el = {
   selectedVideoThumb: document.getElementById("selected-video-thumb"),
   runLog: document.getElementById("run-log"),
   latestSummary: document.getElementById("latest-summary"),
+  latestViewMode: document.getElementById("latest-view-mode"),
   toggleLatestCsvTable: document.getElementById("toggle-latest-csv-table"),
   latestCsvTableWrap: document.getElementById("latest-csv-table-wrap"),
   latestCsvTable: document.getElementById("latest-csv-table"),
@@ -55,6 +56,7 @@ const state = {
   videoItems: [],
   latestCsvLines: [],
   latestCsvExpanded: false,
+  latestSlidesMode: "final",
   lastSettledRefreshKey: "",
 };
 
@@ -478,6 +480,59 @@ async function renderFinalSlides(runId, target) {
   }
 }
 
+async function renderBaseEvents(runId, target) {
+  if (!runId) {
+    target.innerHTML = "";
+    return;
+  }
+  const data = await apiGet(`/api/runs/${encodeURIComponent(runId)}/base-events`);
+  const items = data.items || [];
+
+  target.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No base events available for this run.";
+    target.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "slide-row";
+
+    const media = document.createElement("div");
+    media.className = "slide-media";
+
+    if (item.image_url) {
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.src = `${item.image_url}?v=${Date.now()}`;
+      img.alt = item.image_name || `event_${item.event_id}`;
+      img.addEventListener("click", () => openImageModal(item.image_url, item.image_name || `event_${item.event_id}`));
+      media.appendChild(img);
+    } else {
+      const missing = document.createElement("div");
+      missing.className = "slide-missing muted";
+      missing.textContent = "No image";
+      media.appendChild(missing);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "slide-meta";
+    meta.textContent = `event ${item.event_id} | ${Number(item.time_sec).toFixed(2)}s | frame ${item.event_frame}`;
+    media.appendChild(meta);
+
+    const info = document.createElement("div");
+    info.className = "slide-text";
+    info.textContent = `timecode: ${item.timecode || ""}\ntransition_no: ${item.transition_no}\nframe_id_0: ${item.frame_id_0}\nframe_id_1: ${item.frame_id_1}`;
+
+    row.appendChild(media);
+    row.appendChild(info);
+    target.appendChild(row);
+  }
+}
+
 function openImageModal(url, name) {
   const sep = url.includes("?") ? "&" : "?";
   el.imageModalImg.src = `${url}${sep}v=${Date.now()}`;
@@ -497,6 +552,10 @@ async function loadLatestSlides() {
   const runId = state.latestRunId;
   if (!runId) {
     el.latestSlidesList.innerHTML = "";
+    return;
+  }
+  if (state.latestSlidesMode === "base") {
+    await renderBaseEvents(runId, el.latestSlidesList);
     return;
   }
   await renderFinalSlides(runId, el.latestSlidesList);
@@ -540,6 +599,10 @@ function bindEvents() {
   el.startRun.addEventListener("click", () => runTask(startRun));
   el.refreshRuns.addEventListener("click", () => runTaskImmediate(loadRuns));
   el.pickVideo.addEventListener("click", () => runTask(openVideoPicker));
+  el.latestViewMode.addEventListener("change", () => {
+    state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
+    runTaskImmediate(loadLatestSlides);
+  });
   el.toggleLatestCsvTable.addEventListener("click", toggleLatestCsvTable);
   el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
   el.imageModalClose.addEventListener("click", closeImageModal);
@@ -579,6 +642,7 @@ async function runTaskImmediate(fn) {
 
 async function init() {
   bindEvents();
+  state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
   setActiveTab("home");
   await runTask(loadConfig);
   await runTask(loadOverlay);

@@ -307,10 +307,18 @@ def run_images(run_id: str, image_type: str) -> list[dict]:
     return items
 
 
-def _find_event_image_rel(run_dir: Path, event_id: int, variants: list[str]) -> str | None:
+def _find_event_image_rel(
+    run_dir: Path,
+    event_id: int,
+    variants: list[str],
+    *,
+    include_final: bool = True,
+) -> str | None:
     if event_id <= 0:
         return None
-    candidates = [run_dir / "slitranet" / "keyframes" / "final" / v for v in variants]
+    candidates: list[Path] = []
+    if include_final:
+        candidates.extend(run_dir / "slitranet" / "keyframes" / "final" / v for v in variants)
     candidates.extend(run_dir / "slitranet" / "keyframes" / v for v in variants)
     for image_dir in candidates:
         if not image_dir.exists():
@@ -340,9 +348,9 @@ def run_final_slides(run_id: str) -> list[dict]:
                 continue
             if event_id == 1:
                 # Intro/thumbnail should be shown as full frame, not ROI crop.
-                rel = _find_event_image_rel(run_dir, event_id, ["full", "slide"])
+                rel = _find_event_image_rel(run_dir, event_id, ["full", "slide"], include_final=True)
             else:
-                rel = _find_event_image_rel(run_dir, event_id, ["slide", "full"])
+                rel = _find_event_image_rel(run_dir, event_id, ["slide", "full"], include_final=True)
             items.append(
                 {
                     "index": idx,
@@ -353,6 +361,44 @@ def run_final_slides(run_id: str) -> list[dict]:
                     "text": (row.get("text", "") or "").strip(),
                     "segments_count": int(row.get("segments_count", "0") or "0"),
                     "source_segment_ids": row.get("source_segment_ids", "") or "",
+                    "image_url": f"/api/runs/{run_id}/file/{rel}" if rel else "",
+                    "image_name": Path(rel).name if rel else "",
+                }
+            )
+    return items
+
+
+def run_base_events(run_id: str) -> list[dict]:
+    if not RUN_ID_PATTERN.match(run_id):
+        raise ValueError("Invalid run id")
+    run_dir = ensure_within(RUNS_DIR, RUNS_DIR / run_id)
+    base_csv = run_dir / "slitranet" / "slide_changes.csv"
+    if not base_csv.exists():
+        return []
+
+    items: list[dict] = []
+    with base_csv.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for idx, row in enumerate(reader, start=1):
+            event_id = int(row.get("event_id", "0") or "0")
+            if event_id <= 0:
+                continue
+
+            if event_id == 1:
+                rel = _find_event_image_rel(run_dir, event_id, ["full", "slide"], include_final=False)
+            else:
+                rel = _find_event_image_rel(run_dir, event_id, ["slide", "full"], include_final=False)
+
+            items.append(
+                {
+                    "index": idx,
+                    "event_id": event_id,
+                    "transition_no": int(row.get("transition_no", "0") or "0"),
+                    "frame_id_0": int(row.get("frame_id_0", "0") or "0"),
+                    "frame_id_1": int(row.get("frame_id_1", "0") or "0"),
+                    "event_frame": int(row.get("event_frame", "0") or "0"),
+                    "time_sec": float(row.get("time_sec", "0") or "0"),
+                    "timecode": row.get("timecode", "") or "",
                     "image_url": f"/api/runs/{run_id}/file/{rel}" if rel else "",
                     "image_name": Path(rel).name if rel else "",
                 }
@@ -550,6 +596,11 @@ class Handler(BaseHTTPRequestHandler):
                 if len(parts) >= 2 and parts[1] == "final-slides":
                     run_id = parts[0]
                     items = run_final_slides(run_id)
+                    return self._send_json(200, {"items": items})
+
+                if len(parts) >= 2 and parts[1] == "base-events":
+                    run_id = parts[0]
+                    items = run_base_events(run_id)
                     return self._send_json(200, {"items": items})
 
                 if len(parts) >= 3 and parts[1] == "file":
