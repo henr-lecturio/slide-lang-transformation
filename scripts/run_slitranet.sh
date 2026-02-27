@@ -28,7 +28,7 @@ fi
 VIDEO_NAME="$(basename "$VIDEO_ABS")"
 VIDEO_BASE="${VIDEO_NAME%.*}"
 
-RUN_ID="$(date +%Y%m%d_%H%M%S)"
+RUN_ID="$(date +%Y-%m-%d_%H-%M-%S)"
 RUN_DIR="$ROOT_DIR/output/runs/$RUN_ID"
 DATASET_DIR="$RUN_DIR/dataset"
 OUT_BASE="$RUN_DIR/slitranet"
@@ -69,14 +69,23 @@ if [ ! -f "$TRANSITIONS_FILE" ]; then
   echo "ERROR: Expected output file not found: $TRANSITIONS_FILE" >&2
   exit 1
 fi
+STAGE1_FILE="$PRED_DIR/${VIDEO_BASE}_results.txt"
+STAGE1_ARGS=()
+if [ -f "$STAGE1_FILE" ]; then
+  STAGE1_ARGS+=(--stage1-file "$STAGE1_FILE")
+else
+  echo "WARN: Stage-1 result file not found, initial event will be skipped: $STAGE1_FILE" >&2
+fi
 
 python "$ROOT_DIR/scripts/postprocess_slitranet.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --roi-file "$ROI_FILE" \
   --transitions-file "$TRANSITIONS_FILE" \
+  "${STAGE1_ARGS[@]}" \
   --out-csv "$OUT_BASE/slide_changes.csv" \
   --out-full-dir "$OUT_BASE/keyframes/full" \
-  --out-slide-dir "$OUT_BASE/keyframes/slide"
+  --out-slide-dir "$OUT_BASE/keyframes/slide" \
+  --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}"
 
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then

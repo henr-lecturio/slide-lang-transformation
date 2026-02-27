@@ -25,7 +25,7 @@ OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
 VENV_PY = ROOT_DIR / ".venv" / "bin" / "python"
 PYTHON_BIN = str(VENV_PY if VENV_PY.exists() else Path(sys.executable))
 
-RUN_ID_PATTERN = re.compile(r"^\d{8}_\d{6}$")
+RUN_ID_PATTERN = re.compile(r"^(?:\d{8}_\d{6}|\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})$")
 
 RUN_LOCK = threading.Lock()
 RUN_STATE = {
@@ -42,7 +42,7 @@ RUN_STATE = {
 def latest_run_id() -> str | None:
     if not RUNS_DIR.exists():
         return None
-    for entry in sorted(RUNS_DIR.iterdir(), key=lambda p: p.name, reverse=True):
+    for entry in sorted(RUNS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if entry.is_dir() and RUN_ID_PATTERN.match(entry.name):
             return entry.name
     return None
@@ -59,9 +59,9 @@ def parse_env(path: Path) -> dict[str, str]:
     return values
 
 
-def write_config_roi(path: Path, roi: dict[str, int]) -> None:
+def write_config_values(path: Path, values: dict[str, int]) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
-    keys = ("ROI_X0", "ROI_Y0", "ROI_X1", "ROI_Y1")
+    keys = tuple(values.keys())
     found = set()
     out_lines: list[str] = []
 
@@ -69,7 +69,7 @@ def write_config_roi(path: Path, roi: dict[str, int]) -> None:
         stripped = line.strip()
         key = stripped.split("=", 1)[0] if "=" in stripped else ""
         if key in keys:
-            out_lines.append(f"{key}={roi[key]}")
+            out_lines.append(f"{key}={values[key]}")
             found.add(key)
         else:
             out_lines.append(line)
@@ -78,7 +78,7 @@ def write_config_roi(path: Path, roi: dict[str, int]) -> None:
         out_lines.append("")
         for key in keys:
             if key not in found:
-                out_lines.append(f"{key}={roi[key]}")
+                out_lines.append(f"{key}={values[key]}")
 
     path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
@@ -124,7 +124,7 @@ def list_runs() -> list[dict]:
     if not RUNS_DIR.exists():
         return runs
 
-    for entry in sorted(RUNS_DIR.iterdir(), key=lambda p: p.name, reverse=True):
+    for entry in sorted(RUNS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not entry.is_dir() or not RUN_ID_PATTERN.match(entry.name):
             continue
         csv_path = entry / "slitranet" / "slide_changes.csv"
@@ -325,6 +325,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(env.get("ROI_Y0", "0")),
                     "ROI_X1": int(env.get("ROI_X1", "0")),
                     "ROI_Y1": int(env.get("ROI_Y1", "0")),
+                    "KEYFRAME_SETTLE_FRAMES": int(env.get("KEYFRAME_SETTLE_FRAMES", "4")),
                 }
                 return self._send_json(200, payload)
 
@@ -389,16 +390,19 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/config":
                 data = self._read_json_body()
-                roi = {
+                cfg = {
                     "ROI_X0": int(data["ROI_X0"]),
                     "ROI_Y0": int(data["ROI_Y0"]),
                     "ROI_X1": int(data["ROI_X1"]),
                     "ROI_Y1": int(data["ROI_Y1"]),
+                    "KEYFRAME_SETTLE_FRAMES": int(data["KEYFRAME_SETTLE_FRAMES"]),
                 }
-                if roi["ROI_X0"] >= roi["ROI_X1"] or roi["ROI_Y0"] >= roi["ROI_Y1"]:
+                if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
-                write_config_roi(CONFIG_PATH, roi)
-                return self._send_json(200, {"ok": True, **roi})
+                if cfg["KEYFRAME_SETTLE_FRAMES"] < 0:
+                    raise ValueError("KEYFRAME_SETTLE_FRAMES must be >= 0")
+                write_config_values(CONFIG_PATH, cfg)
+                return self._send_json(200, {"ok": True, **cfg})
 
             if path == "/api/overlay":
                 data = self._read_json_body(optional=True)

@@ -14,15 +14,16 @@
 
     <main>
       <section class="card">
-        <h2>ROI Config</h2>
+        <h2>ROI + Run Config</h2>
         <div class="grid roi-grid">
           <label>ROI_X0 <input id="roi_x0" type="number" /></label>
           <label>ROI_Y0 <input id="roi_y0" type="number" /></label>
           <label>ROI_X1 <input id="roi_x1" type="number" /></label>
           <label>ROI_Y1 <input id="roi_y1" type="number" /></label>
+          <label>KEYFRAME_SETTLE_FRAMES <input id="keyframe_settle_frames" type="number" min="0" step="1" /></label>
         </div>
         <div class="row">
-          <button id="save-roi">Save ROI</button>
+          <button id="save-roi">Save Config</button>
           <span id="config-meta" class="muted"></span>
         </div>
       </section>

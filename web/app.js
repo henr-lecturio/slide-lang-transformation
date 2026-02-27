@@ -6,6 +6,7 @@ const el = {
   roiY0: document.getElementById("roi_y0"),
   roiX1: document.getElementById("roi_x1"),
   roiY1: document.getElementById("roi_y1"),
+  keyframeSettleFrames: document.getElementById("keyframe_settle_frames"),
   overlayTime: document.getElementById("overlay-time"),
   regenOverlay: document.getElementById("regen-overlay"),
   refreshOverlay: document.getElementById("refresh-overlay"),
@@ -71,7 +72,8 @@ function setConfig(cfg) {
   el.roiY0.value = cfg.ROI_Y0;
   el.roiX1.value = cfg.ROI_X1;
   el.roiY1.value = cfg.ROI_Y1;
-  el.configMeta.textContent = `VIDEO_PATH: ${cfg.VIDEO_PATH}`;
+  el.keyframeSettleFrames.value = cfg.KEYFRAME_SETTLE_FRAMES;
+  el.configMeta.textContent = `VIDEO_PATH: ${cfg.VIDEO_PATH} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES}`;
 }
 
 async function loadConfig() {
@@ -85,6 +87,7 @@ async function saveConfig() {
     ROI_Y0: Number(el.roiY0.value),
     ROI_X1: Number(el.roiX1.value),
     ROI_Y1: Number(el.roiY1.value),
+    KEYFRAME_SETTLE_FRAMES: Number(el.keyframeSettleFrames.value),
   };
   await apiPost("/api/config", payload);
   await loadConfig();
@@ -199,7 +202,7 @@ function bindEvents() {
   el.regenOverlay.addEventListener("click", () => runTask(regenerateOverlay));
   el.refreshOverlay.addEventListener("click", () => runTask(loadOverlay));
   el.startRun.addEventListener("click", () => runTask(startRun));
-  el.refreshRuns.addEventListener("click", () => runTask(loadRuns));
+  el.refreshRuns.addEventListener("click", () => runTaskImmediate(loadRuns));
   el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
   el.loadImages.addEventListener("click", () => runTask(loadImages));
 }
@@ -214,6 +217,14 @@ async function runTask(fn) {
     alert(err.message || String(err));
   } finally {
     busy = false;
+  }
+}
+
+async function runTaskImmediate(fn) {
+  try {
+    await fn();
+  } catch (err) {
+    alert(err.message || String(err));
   }
 }
 
