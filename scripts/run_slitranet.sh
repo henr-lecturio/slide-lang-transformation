@@ -85,7 +85,9 @@ python "$ROOT_DIR/scripts/postprocess_slitranet.py" \
   --out-csv "$OUT_BASE/slide_changes.csv" \
   --out-full-dir "$OUT_BASE/keyframes/full" \
   --out-slide-dir "$OUT_BASE/keyframes/slide" \
-  --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}"
+  --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}" \
+  --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
+  --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
 
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then

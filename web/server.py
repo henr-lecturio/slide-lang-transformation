@@ -326,6 +326,8 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_X1": int(env.get("ROI_X1", "0")),
                     "ROI_Y1": int(env.get("ROI_Y1", "0")),
                     "KEYFRAME_SETTLE_FRAMES": int(env.get("KEYFRAME_SETTLE_FRAMES", "4")),
+                    "KEYFRAME_STABLE_END_GUARD_FRAMES": int(env.get("KEYFRAME_STABLE_END_GUARD_FRAMES", "2")),
+                    "KEYFRAME_STABLE_LOOKAHEAD_FRAMES": int(env.get("KEYFRAME_STABLE_LOOKAHEAD_FRAMES", "2")),
                 }
                 return self._send_json(200, payload)
 
@@ -396,11 +398,17 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_X1": int(data["ROI_X1"]),
                     "ROI_Y1": int(data["ROI_Y1"]),
                     "KEYFRAME_SETTLE_FRAMES": int(data["KEYFRAME_SETTLE_FRAMES"]),
+                    "KEYFRAME_STABLE_END_GUARD_FRAMES": int(data["KEYFRAME_STABLE_END_GUARD_FRAMES"]),
+                    "KEYFRAME_STABLE_LOOKAHEAD_FRAMES": int(data["KEYFRAME_STABLE_LOOKAHEAD_FRAMES"]),
                 }
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
                 if cfg["KEYFRAME_SETTLE_FRAMES"] < 0:
                     raise ValueError("KEYFRAME_SETTLE_FRAMES must be >= 0")
+                if cfg["KEYFRAME_STABLE_END_GUARD_FRAMES"] < 0:
+                    raise ValueError("KEYFRAME_STABLE_END_GUARD_FRAMES must be >= 0")
+                if cfg["KEYFRAME_STABLE_LOOKAHEAD_FRAMES"] < 1:
+                    raise ValueError("KEYFRAME_STABLE_LOOKAHEAD_FRAMES must be >= 1")
                 write_config_values(CONFIG_PATH, cfg)
                 return self._send_json(200, {"ok": True, **cfg})
 

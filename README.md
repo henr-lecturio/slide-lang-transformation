@@ -24,6 +24,9 @@ Dieses Projekt nutzt das originale SliTraNet (`./slitranet`) und ergänzt einen 
 
 ROI direkt in `config/slitranet.env` setzen:
 - `ROI_X0`, `ROI_Y0`, `ROI_X1`, `ROI_Y1`
+- `KEYFRAME_SETTLE_FRAMES`
+- `KEYFRAME_STABLE_END_GUARD_FRAMES`
+- `KEYFRAME_STABLE_LOOKAHEAD_FRAMES`
 
 Overlay zur Kontrolle erzeugen:
 

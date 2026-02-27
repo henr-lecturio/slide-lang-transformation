@@ -18,13 +18,40 @@ body {
   color: var(--text);
 }
 
-header {
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #111827;
+  color: #f9fafb;
+  border-bottom: 1px solid #374151;
+}
+
+.topbar-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
-  background: #111827;
-  color: #f9fafb;
+  padding: 14px 20px 10px;
+}
+
+.topnav {
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 12px;
+}
+
+.tab-btn {
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.tab-btn.active {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
 }
 
 h1 {
@@ -42,8 +69,15 @@ main {
   max-width: 1200px;
   margin: 18px auto;
   padding: 0 14px;
-  display: grid;
+}
+
+.panel {
+  display: none;
   gap: 14px;
+}
+
+.panel.active {
+  display: grid;
 }
 
 .card {
@@ -111,7 +145,8 @@ button:disabled {
 .badge {
   padding: 4px 8px;
   border-radius: 999px;
-  background: #374151;
+  background: #1f2937;
+  border: 1px solid #4b5563;
   font-size: 0.85rem;
 }
 
@@ -173,6 +208,17 @@ button:disabled {
 }
 
 @media (max-width: 900px) {
+  .topbar-main {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .topnav {
+    width: 100%;
+    overflow: auto;
+  }
+
   .roi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
