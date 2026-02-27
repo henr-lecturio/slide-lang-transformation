@@ -1,0 +1,179 @@
+:root {
+  --bg: #f3f4f6;
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #0f766e;
+  --border: #d1d5db;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: #111827;
+  color: #f9fafb;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 1.05rem;
+}
+
+main {
+  max-width: 1200px;
+  margin: 18px auto;
+  padding: 0 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+}
+
+.roi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+button {
+  padding: 7px 10px;
+  border: 1px solid #0d9488;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #374151;
+  font-size: 0.85rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.image-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  overflow: auto;
+}
+
+#overlay-image {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.log {
+  margin-top: 10px;
+  max-height: 220px;
+  overflow: auto;
+  background: #0b1020;
+  color: #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+}
+
+.thumbs {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.thumb {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  background: #fff;
+}
+
+.thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+}
+
+.thumb .name {
+  font-size: 0.78rem;
+  margin-top: 4px;
+  word-break: break-all;
+}
+
+@media (max-width: 900px) {
+  .roi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

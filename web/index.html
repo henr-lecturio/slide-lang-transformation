@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scene Detection Runner</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Scene Detection Control</h1>
+      <div id="run-status" class="badge">status: idle</div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>ROI Config</h2>
+        <div class="grid roi-grid">
+          <label>ROI_X0 <input id="roi_x0" type="number" /></label>
+          <label>ROI_Y0 <input id="roi_y0" type="number" /></label>
+          <label>ROI_X1 <input id="roi_x1" type="number" /></label>
+          <label>ROI_Y1 <input id="roi_y1" type="number" /></label>
+        </div>
+        <div class="row">
+          <button id="save-roi">Save ROI</button>
+          <span id="config-meta" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>ROI Overlay</h2>
+        <div class="row">
+          <label>Time (sec)
+            <input id="overlay-time" type="number" step="0.1" value="30" />
+          </label>
+          <button id="regen-overlay">Generate Overlay</button>
+          <button id="refresh-overlay">Refresh Image</button>
+        </div>
+        <div class="image-wrap">
+          <img id="overlay-image" alt="ROI overlay preview" />
+        </div>
+        <pre id="overlay-log" class="log muted"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Run Control</h2>
+        <div class="row">
+          <button id="start-run">Start New Run</button>
+          <button id="refresh-runs">Refresh Runs</button>
+        </div>
+        <pre id="run-log" class="log"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Run Results</h2>
+        <div class="row wrap">
+          <label>Run
+            <select id="run-select"></select>
+          </label>
+          <label>Images
+            <select id="image-type">
+              <option value="slide">slide</option>
+              <option value="full">full</option>
+            </select>
+          </label>
+          <button id="load-images">Load Images</button>
+        </div>
+
+        <div id="run-summary" class="muted"></div>
+        <pre id="csv-preview" class="log"></pre>
+        <div id="thumbs" class="thumbs"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
