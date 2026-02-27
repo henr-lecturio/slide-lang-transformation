@@ -32,6 +32,11 @@
             <div class="row wrap">
               <button id="start-run">Start New Run</button>
               <button id="refresh-runs">Refresh Runs</button>
+              <button id="pick-video">Video wählen</button>
+            </div>
+            <div id="selected-video-path" class="muted"></div>
+            <div class="video-preview-wrap">
+              <img id="selected-video-thumb" alt="Selected video thumbnail" />
             </div>
           </section>
         </div>
@@ -39,7 +44,12 @@
         <section class="card home-main">
           <h2>Latest Output</h2>
           <div id="latest-summary" class="muted"></div>
-          <pre id="latest-csv-preview" class="log"></pre>
+          <div class="row wrap">
+            <button id="toggle-latest-csv-table" type="button">CSV-Tabelle anzeigen</button>
+          </div>
+          <div id="latest-csv-table-wrap" class="table-wrap hidden">
+            <table id="latest-csv-table" class="csv-table"></table>
+          </div>
           <div id="latest-slides-list" class="slides-list"></div>
         </section>
       </section>
@@ -104,6 +114,17 @@
         <button id="image-modal-close" class="image-modal-close" type="button" aria-label="Close preview">×</button>
         <img id="image-modal-img" alt="Image preview" />
         <div id="image-modal-caption" class="image-modal-caption"></div>
+      </div>
+    </div>
+
+    <div id="video-picker-modal" class="video-picker-modal" aria-hidden="true">
+      <div id="video-picker-backdrop" class="video-picker-backdrop"></div>
+      <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Video picker">
+        <div class="video-picker-head">
+          <strong>Video wählen</strong>
+          <button id="video-picker-close" class="video-picker-close" type="button" aria-label="Close video picker">×</button>
+        </div>
+        <div id="video-picker-list" class="video-picker-list"></div>
       </div>
     </div>
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import mimetypes
 import os
@@ -22,6 +23,9 @@ CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
 OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
+VIDEOS_DIR = ROOT_DIR / "videos"
+VIDEO_THUMB_DIR = OUTPUT_DIR / "ui" / "video_thumbs"
+VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
 
 VENV_PY = ROOT_DIR / ".venv" / "bin" / "python"
 PYTHON_BIN = str(VENV_PY if VENV_PY.exists() else Path(sys.executable))
@@ -63,6 +67,9 @@ def parse_env(path: Path) -> dict[str, str]:
 def _format_config_value(value: int | float | str) -> str:
     if isinstance(value, float):
         return f"{value:g}"
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f"\"{escaped}\""
     return str(value)
 
 
@@ -124,6 +131,95 @@ def csv_preview(path: Path, limit: int = 20) -> list[str]:
                 break
             out.append(line.rstrip("\n"))
     return out
+
+
+def is_video_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in VIDEO_EXTS
+
+
+def resolve_video_config_path(video_path: str) -> Path:
+    text = (video_path or "").strip()
+    if not text:
+        raise ValueError("VIDEO_PATH must not be empty")
+    target = ensure_within(ROOT_DIR, ROOT_DIR / text)
+    target = ensure_within(VIDEOS_DIR, target)
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError(str(target))
+    if not is_video_file(target):
+        raise ValueError(f"VIDEO_PATH is not a supported video: {video_path}")
+    return target
+
+
+def list_videos_catalog() -> list[dict]:
+    items: list[dict] = []
+    if not VIDEOS_DIR.exists():
+        return items
+
+    def walk(current: Path) -> None:
+        rel = current.relative_to(VIDEOS_DIR)
+        if current != VIDEOS_DIR:
+            depth = max(0, len(rel.parts) - 1)
+            items.append(
+                {
+                    "type": "dir",
+                    "name": current.name,
+                    "path": (Path("videos") / rel).as_posix(),
+                    "depth": depth,
+                }
+            )
+
+        children = sorted(current.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        for child in children:
+            if child.is_dir():
+                walk(child)
+            elif is_video_file(child):
+                rel_file = child.relative_to(VIDEOS_DIR)
+                items.append(
+                    {
+                        "type": "video",
+                        "name": child.name,
+                        "path": (Path("videos") / rel_file).as_posix(),
+                        "depth": max(0, len(rel_file.parts) - 1),
+                    }
+                )
+
+    walk(VIDEOS_DIR)
+    return items
+
+
+def ensure_video_thumbnail(video_config_path: str) -> Path:
+    video_path = resolve_video_config_path(video_config_path)
+    cache_key = hashlib.sha1(
+        f"{video_path.as_posix()}:{video_path.stat().st_mtime_ns}".encode("utf-8")
+    ).hexdigest()[:24]
+    thumb_path = VIDEO_THUMB_DIR / f"{cache_key}.jpg"
+    if thumb_path.exists():
+        return thumb_path
+
+    VIDEO_THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    import cv2
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Failed to open video: {video_path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    frame_count = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+    if fps > 0.0 and frame_count > 0.0:
+        probe_frame = min(frame_count - 1, max(0.0, fps * 1.0))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, probe_frame)
+    ok, frame = cap.read()
+    cap.release()
+    if not ok or frame is None:
+        raise RuntimeError(f"Failed to read frame from video: {video_path}")
+
+    h, w = frame.shape[:2]
+    target_w = min(420, w)
+    if target_w > 0 and target_w != w:
+        target_h = max(1, int(round(h * (target_w / w))))
+        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+    if not cv2.imwrite(str(thumb_path), frame):
+        raise RuntimeError(f"Failed to write thumbnail: {thumb_path}")
+    return thumb_path
 
 
 def list_runs() -> list[dict]:
@@ -211,13 +307,11 @@ def run_images(run_id: str, image_type: str) -> list[dict]:
     return items
 
 
-def _find_slide_image_rel(run_dir: Path, event_id: int) -> str | None:
+def _find_event_image_rel(run_dir: Path, event_id: int, variants: list[str]) -> str | None:
     if event_id <= 0:
         return None
-    candidates = [
-        run_dir / "slitranet" / "keyframes" / "final" / "slide",
-        run_dir / "slitranet" / "keyframes" / "slide",
-    ]
+    candidates = [run_dir / "slitranet" / "keyframes" / "final" / v for v in variants]
+    candidates.extend(run_dir / "slitranet" / "keyframes" / v for v in variants)
     for image_dir in candidates:
         if not image_dir.exists():
             continue
@@ -244,7 +338,11 @@ def run_final_slides(run_id: str) -> list[dict]:
             event_id = int(row.get("event_id", "0") or "0")
             if event_id <= 0:
                 continue
-            rel = _find_slide_image_rel(run_dir, event_id)
+            if event_id == 1:
+                # Intro/thumbnail should be shown as full frame, not ROI crop.
+                rel = _find_event_image_rel(run_dir, event_id, ["full", "slide"])
+            else:
+                rel = _find_event_image_rel(run_dir, event_id, ["slide", "full"])
             items.append(
                 {
                     "index": idx,
@@ -403,6 +501,21 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 return self._send_json(200, payload)
 
+            if path == "/api/videos":
+                env = parse_env(CONFIG_PATH)
+                payload = {
+                    "items": list_videos_catalog(),
+                    "selected_video": env.get("VIDEO_PATH", ""),
+                }
+                return self._send_json(200, payload)
+
+            if path == "/api/videos/thumbnail":
+                video_path = query.get("path", [""])[0]
+                if not video_path:
+                    raise ValueError("Missing query parameter: path")
+                thumb = ensure_video_thumbnail(video_path)
+                return self._serve_file(thumb)
+
             if path == "/api/overlay":
                 exists = OVERLAY_PATH.exists()
                 payload = {
@@ -469,7 +582,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/config":
                 data = self._read_json_body()
+                video_path = str(data["VIDEO_PATH"]).strip()
+                resolve_video_config_path(video_path)
                 cfg = {
+                    "VIDEO_PATH": video_path,
                     "ROI_X0": int(data["ROI_X0"]),
                     "ROI_Y0": int(data["ROI_Y0"]),
                     "ROI_X1": int(data["ROI_X1"]),

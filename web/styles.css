@@ -113,6 +113,26 @@ main {
   flex-wrap: wrap;
 }
 
+.hidden {
+  display: none;
+}
+
+.video-preview-wrap {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+  min-height: 120px;
+  max-width: 420px;
+}
+
+#selected-video-thumb {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -190,6 +210,39 @@ button:disabled {
   max-height: none;
   min-height: 300px;
   height: 38vh;
+}
+
+.table-wrap {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  overflow-x: auto;
+}
+
+.csv-table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.csv-table th,
+.csv-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  vertical-align: top;
+}
+
+.csv-table thead th {
+  background: #f3f4f6;
+  color: #111827;
+  font-weight: 600;
+}
+
+.csv-table tbody tr:nth-child(even) {
+  background: #fafafa;
 }
 
 .slides-list {
@@ -324,6 +377,83 @@ button:disabled {
   border-radius: 999px;
   line-height: 1;
   font-size: 1.1rem;
+}
+
+.video-picker-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: none;
+}
+
+.video-picker-modal.open {
+  display: block;
+}
+
+.video-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.video-picker-dialog {
+  position: relative;
+  width: min(880px, 94vw);
+  max-height: 90vh;
+  margin: 5vh auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.video-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #f9fafb;
+}
+
+.video-picker-close {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  line-height: 1;
+  font-size: 1.1rem;
+}
+
+.video-picker-list {
+  max-height: 70vh;
+  overflow: auto;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.video-item {
+  border-radius: 6px;
+}
+
+.video-dir {
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding-top: 6px;
+}
+
+.video-file {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #111827;
+}
+
+.video-file.selected {
+  border-color: #0f766e;
+  box-shadow: inset 0 0 0 1px #0f766e;
 }
 
 @media (max-width: 900px) {

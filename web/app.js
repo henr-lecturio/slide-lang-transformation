@@ -24,9 +24,14 @@ const el = {
   overlayLog: document.getElementById("overlay-log"),
   startRun: document.getElementById("start-run"),
   refreshRuns: document.getElementById("refresh-runs"),
+  pickVideo: document.getElementById("pick-video"),
+  selectedVideoPath: document.getElementById("selected-video-path"),
+  selectedVideoThumb: document.getElementById("selected-video-thumb"),
   runLog: document.getElementById("run-log"),
   latestSummary: document.getElementById("latest-summary"),
-  latestCsvPreview: document.getElementById("latest-csv-preview"),
+  toggleLatestCsvTable: document.getElementById("toggle-latest-csv-table"),
+  latestCsvTableWrap: document.getElementById("latest-csv-table-wrap"),
+  latestCsvTable: document.getElementById("latest-csv-table"),
   latestSlidesList: document.getElementById("latest-slides-list"),
   runSelect: document.getElementById("run-select"),
   runSummary: document.getElementById("run-summary"),
@@ -37,11 +42,19 @@ const el = {
   imageModalClose: document.getElementById("image-modal-close"),
   imageModalImg: document.getElementById("image-modal-img"),
   imageModalCaption: document.getElementById("image-modal-caption"),
+  videoPickerModal: document.getElementById("video-picker-modal"),
+  videoPickerBackdrop: document.getElementById("video-picker-backdrop"),
+  videoPickerClose: document.getElementById("video-picker-close"),
+  videoPickerList: document.getElementById("video-picker-list"),
 };
 
 const state = {
   selectedRunId: null,
   latestRunId: null,
+  selectedVideoPath: "",
+  videoItems: [],
+  latestCsvLines: [],
+  latestCsvExpanded: false,
 };
 
 async function apiGet(url) {
@@ -89,7 +102,22 @@ function setStatus(current) {
   }
 }
 
+function videoThumbUrl(videoPath) {
+  return `/api/videos/thumbnail?path=${encodeURIComponent(videoPath)}&v=${Date.now()}`;
+}
+
+function renderSelectedVideo() {
+  const path = state.selectedVideoPath || "";
+  el.selectedVideoPath.textContent = path ? `VIDEO_PATH: ${path}` : "VIDEO_PATH: (nicht gesetzt)";
+  if (!path) {
+    el.selectedVideoThumb.removeAttribute("src");
+    return;
+  }
+  el.selectedVideoThumb.src = videoThumbUrl(path);
+}
+
 function setConfig(cfg) {
+  state.selectedVideoPath = cfg.VIDEO_PATH || "";
   el.roiX0.value = cfg.ROI_X0;
   el.roiY0.value = cfg.ROI_Y0;
   el.roiX1.value = cfg.ROI_X1;
@@ -102,6 +130,7 @@ function setConfig(cfg) {
   el.speakerFilterMaxLaplacianVar.value = cfg.SPEAKER_FILTER_MAX_LAPLACIAN_VAR;
   el.speakerFilterMaxDurationSec.value = cfg.SPEAKER_FILTER_MAX_DURATION_SEC;
   el.configMeta.textContent = `VIDEO_PATH: ${cfg.VIDEO_PATH} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO}`;
+  renderSelectedVideo();
 }
 
 function setActiveTab(tabName) {
@@ -120,7 +149,12 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
+  const videoPath = (state.selectedVideoPath || "").trim();
+  if (!videoPath) {
+    throw new Error("Bitte zuerst ein Video auswählen.");
+  }
   const payload = {
+    VIDEO_PATH: videoPath,
     ROI_X0: Number(el.roiX0.value),
     ROI_Y0: Number(el.roiY0.value),
     ROI_X1: Number(el.roiX1.value),
@@ -135,6 +169,60 @@ async function saveConfig() {
   };
   await apiPost("/api/config", payload);
   await loadConfig();
+}
+
+function closeVideoPicker() {
+  el.videoPickerModal.classList.remove("open");
+  el.videoPickerModal.setAttribute("aria-hidden", "true");
+}
+
+function renderVideoPickerList() {
+  const items = state.videoItems || [];
+  el.videoPickerList.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Keine Videos unter videos/ gefunden.";
+    el.videoPickerList.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    if (item.type === "dir") {
+      const dir = document.createElement("div");
+      dir.className = "video-item video-dir";
+      dir.style.paddingLeft = `${item.depth * 18}px`;
+      dir.textContent = `[dir] ${item.path}`;
+      el.videoPickerList.appendChild(dir);
+      continue;
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "video-item video-file";
+    btn.style.paddingLeft = `${item.depth * 18 + 8}px`;
+    btn.textContent = item.path;
+    if (item.path === state.selectedVideoPath) {
+      btn.classList.add("selected");
+    }
+    btn.addEventListener("click", () => runTask(async () => {
+      state.selectedVideoPath = item.path;
+      await saveConfig();
+      closeVideoPicker();
+    }));
+    el.videoPickerList.appendChild(btn);
+  }
+}
+
+async function openVideoPicker() {
+  const data = await apiGet("/api/videos");
+  state.videoItems = data.items || [];
+  if (data.selected_video) {
+    state.selectedVideoPath = data.selected_video;
+  }
+  renderVideoPickerList();
+  el.videoPickerModal.classList.add("open");
+  el.videoPickerModal.setAttribute("aria-hidden", "false");
 }
 
 async function loadOverlay() {
@@ -156,7 +244,12 @@ async function regenerateOverlay() {
 
 function clearLatestOutput() {
   el.latestSummary.textContent = "No runs yet";
-  el.latestCsvPreview.textContent = "";
+  state.latestCsvLines = [];
+  state.latestCsvExpanded = false;
+  el.latestCsvTable.innerHTML = "";
+  el.latestCsvTableWrap.classList.add("hidden");
+  el.toggleLatestCsvTable.disabled = true;
+  el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
   el.latestSlidesList.innerHTML = "";
 }
 
@@ -222,7 +315,99 @@ async function loadLatestRunDetails() {
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
   el.latestSummary.textContent = `latest=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images}`;
-  el.latestCsvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
+  state.latestCsvLines = detail.final_csv_preview || detail.csv_preview || [];
+  const hasCsv = state.latestCsvLines.length > 0;
+  el.toggleLatestCsvTable.disabled = !hasCsv;
+  if (!hasCsv) {
+    state.latestCsvExpanded = false;
+    el.latestCsvTable.innerHTML = "";
+    el.latestCsvTableWrap.classList.add("hidden");
+    el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
+    return;
+  }
+  if (state.latestCsvExpanded) {
+    buildLatestCsvTable();
+    el.latestCsvTableWrap.classList.remove("hidden");
+    el.toggleLatestCsvTable.textContent = "CSV-Tabelle ausblenden";
+  } else {
+    el.latestCsvTable.innerHTML = "";
+    el.latestCsvTableWrap.classList.add("hidden");
+    el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
+  }
+}
+
+function parseCsvLine(line) {
+  const cells = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === "\"") {
+      if (inQuotes && line[i + 1] === "\"") {
+        cur += "\"";
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      cells.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  cells.push(cur);
+  return cells;
+}
+
+function buildLatestCsvTable() {
+  const lines = state.latestCsvLines || [];
+  el.latestCsvTable.innerHTML = "";
+  if (lines.length === 0) return;
+
+  const rows = lines.map((line) => parseCsvLine(line));
+  const colCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  if (colCount === 0) return;
+
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  const headers = rows[0] || [];
+  for (let i = 0; i < colCount; i += 1) {
+    const th = document.createElement("th");
+    th.textContent = headers[i] || `column_${i + 1}`;
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  el.latestCsvTable.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const row of rows.slice(1)) {
+    const tr = document.createElement("tr");
+    for (let i = 0; i < colCount; i += 1) {
+      const td = document.createElement("td");
+      td.textContent = row[i] || "";
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  el.latestCsvTable.appendChild(tbody);
+}
+
+function toggleLatestCsvTable() {
+  if (state.latestCsvExpanded) {
+    state.latestCsvExpanded = false;
+    el.latestCsvTableWrap.classList.add("hidden");
+    el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
+    return;
+  }
+  if ((state.latestCsvLines || []).length === 0) return;
+
+  buildLatestCsvTable();
+  state.latestCsvExpanded = true;
+  el.latestCsvTableWrap.classList.remove("hidden");
+  el.toggleLatestCsvTable.textContent = "CSV-Tabelle ausblenden";
 }
 
 async function renderFinalSlides(runId, target) {
@@ -337,12 +522,19 @@ function bindEvents() {
   el.refreshOverlay.addEventListener("click", () => runTask(loadOverlay));
   el.startRun.addEventListener("click", () => runTask(startRun));
   el.refreshRuns.addEventListener("click", () => runTaskImmediate(loadRuns));
+  el.pickVideo.addEventListener("click", () => runTask(openVideoPicker));
+  el.toggleLatestCsvTable.addEventListener("click", toggleLatestCsvTable);
   el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
   el.imageModalClose.addEventListener("click", closeImageModal);
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
+  el.videoPickerClose.addEventListener("click", closeVideoPicker);
+  el.videoPickerBackdrop.addEventListener("click", closeVideoPicker);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && el.imageModal.classList.contains("open")) {
       closeImageModal();
+    }
+    if (e.key === "Escape" && el.videoPickerModal.classList.contains("open")) {
+      closeVideoPicker();
     }
   });
 }
