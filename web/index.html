@@ -21,16 +21,22 @@
 
     <main>
       <section id="panel-home" class="panel active">
-        <section class="card">
-          <h2>Run Control</h2>
-          <div class="row wrap">
-            <button id="start-run">Start New Run</button>
-            <button id="refresh-runs">Refresh Runs</button>
-          </div>
-          <pre id="run-log" class="log"></pre>
-        </section>
+        <div class="home-top">
+          <section class="card">
+            <h2>Status</h2>
+            <pre id="run-log" class="log log-status"></pre>
+          </section>
 
-        <section class="card">
+          <section class="card">
+            <h2>Run Control</h2>
+            <div class="row wrap">
+              <button id="start-run">Start New Run</button>
+              <button id="refresh-runs">Refresh Runs</button>
+            </div>
+          </section>
+        </div>
+
+        <section class="card home-main">
           <h2>Latest Output</h2>
           <div id="latest-summary" class="muted"></div>
           <div class="row wrap">
@@ -103,6 +109,15 @@
         </section>
       </section>
     </main>
+
+    <div id="image-modal" class="image-modal" aria-hidden="true">
+      <div id="image-modal-backdrop" class="image-modal-backdrop"></div>
+      <div class="image-modal-dialog" role="dialog" aria-modal="true" aria-label="Image preview">
+        <button id="image-modal-close" class="image-modal-close" type="button" aria-label="Close preview">×</button>
+        <img id="image-modal-img" alt="Image preview" />
+        <div id="image-modal-caption" class="image-modal-caption"></div>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>

@@ -19,6 +19,7 @@ Dieses Projekt nutzt das originale SliTraNet (`./slitranet`) und ergänzt einen 
 - Linux/WSL mit funktionierendem CUDA für PyTorch
 - vorhandenes `.venv` im Projekt
 - Gewichte in `weights/`
+- `faster-whisper` in `.venv` (wird durch `scripts/setup_venv.sh` installiert)
 
 ## ROI einstellen
 
@@ -27,6 +28,7 @@ ROI direkt in `config/slitranet.env` setzen:
 - `KEYFRAME_SETTLE_FRAMES`
 - `KEYFRAME_STABLE_END_GUARD_FRAMES`
 - `KEYFRAME_STABLE_LOOKAHEAD_FRAMES`
+- `WHISPER_MODEL` (z. B. `medium`)
 
 Overlay zur Kontrolle erzeugen:
 
@@ -45,10 +47,14 @@ source .venv/bin/activate
 bash scripts/run_slitranet.sh
 ```
 
+Hinweis: Beim ersten Transkriptionslauf wird das Whisper-Modell ggf. aus dem Hub geladen und lokal gecacht.
+
 Der Run erzeugt einen neuen Ordner:
 - `output/runs/<timestamp>/dataset/...` (temporäres SliTraNet-Layout)
 - `output/runs/<timestamp>/slitranet/slide_changes.csv`
 - `output/runs/<timestamp>/slitranet/keyframes/{slide,full}`
+- `output/runs/<timestamp>/slitranet/transcript_segments.{json,csv}`
+- `output/runs/<timestamp>/slitranet/slide_text_map.{json,csv}`
 
 Zusätzlich:
 - `output/latest` zeigt auf den neuesten Run.

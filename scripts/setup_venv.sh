@@ -16,3 +16,4 @@ fi
 source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
 python -m pip install -r "$ROOT_DIR/slitranet/requirements.txt"
+python -m pip install faster-whisper

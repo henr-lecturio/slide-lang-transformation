@@ -89,6 +89,35 @@ python "$ROOT_DIR/scripts/postprocess_slitranet.py" \
   --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
   --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
 
+TRANSCRIPT_JSON="$OUT_BASE/transcript_segments.json"
+TRANSCRIPT_CSV="$OUT_BASE/transcript_segments.csv"
+TRANSCRIPT_ARGS=(
+  --video "$PHASE_DIR/$VIDEO_NAME"
+  --out-json "$TRANSCRIPT_JSON"
+  --out-csv "$TRANSCRIPT_CSV"
+  --model "${WHISPER_MODEL:-medium}"
+  --device "${WHISPER_DEVICE:-cuda}"
+  --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
+)
+if [ -n "${WHISPER_LANGUAGE:-}" ]; then
+  TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
+fi
+
+echo "[ASR] Preparing transcription step ..."
+python "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+echo "[ASR] Transcription step finished."
+
+SLIDE_TEXT_MAP_JSON="$OUT_BASE/slide_text_map.json"
+SLIDE_TEXT_MAP_CSV="$OUT_BASE/slide_text_map.csv"
+echo "[ASR] Mapping transcript to slide windows ..."
+python "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
+  --video "$PHASE_DIR/$VIDEO_NAME" \
+  --slide-csv "$OUT_BASE/slide_changes.csv" \
+  --transcript-json "$TRANSCRIPT_JSON" \
+  --out-json "$SLIDE_TEXT_MAP_JSON" \
+  --out-csv "$SLIDE_TEXT_MAP_CSV"
+echo "[ASR] Slide text mapping finished."
+
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
   ln -sfn "$RUN_DIR" "$LATEST_LINK"
@@ -97,3 +126,5 @@ fi
 echo "Done."
 echo "Run dir: $RUN_DIR"
 echo "Main output: $OUT_BASE/slide_changes.csv"
+echo "Transcript: $TRANSCRIPT_JSON"
+echo "Slide text map: $SLIDE_TEXT_MAP_JSON"

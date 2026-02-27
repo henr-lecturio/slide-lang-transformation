@@ -32,6 +32,11 @@ const el = {
   runSummary: document.getElementById("run-summary"),
   csvPreview: document.getElementById("csv-preview"),
   thumbs: document.getElementById("thumbs"),
+  imageModal: document.getElementById("image-modal"),
+  imageModalBackdrop: document.getElementById("image-modal-backdrop"),
+  imageModalClose: document.getElementById("image-modal-close"),
+  imageModalImg: document.getElementById("image-modal-img"),
+  imageModalCaption: document.getElementById("image-modal-caption"),
 };
 
 const state = {
@@ -76,7 +81,12 @@ function setStatus(current) {
   el.startRun.disabled = status === "running";
 
   const logs = (current.log_tail || []).slice(-120);
-  el.runLog.textContent = logs.join("\n");
+  const nextLog = logs.join("\n");
+  if (el.runLog.textContent !== nextLog) {
+    el.runLog.textContent = nextLog;
+    // Always keep newest lines visible while the run is progressing.
+    el.runLog.scrollTop = el.runLog.scrollHeight;
+  }
 }
 
 function setConfig(cfg) {
@@ -226,6 +236,7 @@ async function renderImages(runId, type, target) {
     img.loading = "lazy";
     img.src = `${item.url}?v=${Date.now()}`;
     img.alt = item.name;
+    img.addEventListener("click", () => openImageModal(item.url, item.name));
 
     const name = document.createElement("div");
     name.className = "name";
@@ -235,6 +246,21 @@ async function renderImages(runId, type, target) {
     card.appendChild(name);
     target.appendChild(card);
   }
+}
+
+function openImageModal(url, name) {
+  const sep = url.includes("?") ? "&" : "?";
+  el.imageModalImg.src = `${url}${sep}v=${Date.now()}`;
+  el.imageModalCaption.textContent = name || "";
+  el.imageModal.classList.add("open");
+  el.imageModal.setAttribute("aria-hidden", "false");
+}
+
+function closeImageModal() {
+  el.imageModal.classList.remove("open");
+  el.imageModal.setAttribute("aria-hidden", "true");
+  el.imageModalImg.removeAttribute("src");
+  el.imageModalCaption.textContent = "";
 }
 
 async function loadImages() {
@@ -283,6 +309,13 @@ function bindEvents() {
   el.loadLatestImages.addEventListener("click", () => runTask(loadLatestImages));
   el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
   el.loadImages.addEventListener("click", () => runTask(loadImages));
+  el.imageModalClose.addEventListener("click", closeImageModal);
+  el.imageModalBackdrop.addEventListener("click", closeImageModal);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && el.imageModal.classList.contains("open")) {
+      closeImageModal();
+    }
+  });
 }
 
 let busy = false;
