@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import mimetypes
 import os
@@ -59,7 +60,13 @@ def parse_env(path: Path) -> dict[str, str]:
     return values
 
 
-def write_config_values(path: Path, values: dict[str, int]) -> None:
+def _format_config_value(value: int | float | str) -> str:
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def write_config_values(path: Path, values: dict[str, int | float | str]) -> None:
     lines = path.read_text(encoding="utf-8").splitlines()
     keys = tuple(values.keys())
     found = set()
@@ -69,7 +76,7 @@ def write_config_values(path: Path, values: dict[str, int]) -> None:
         stripped = line.strip()
         key = stripped.split("=", 1)[0] if "=" in stripped else ""
         if key in keys:
-            out_lines.append(f"{key}={values[key]}")
+            out_lines.append(f"{key}={_format_config_value(values[key])}")
             found.add(key)
         else:
             out_lines.append(line)
@@ -78,7 +85,7 @@ def write_config_values(path: Path, values: dict[str, int]) -> None:
         out_lines.append("")
         for key in keys:
             if key not in found:
-                out_lines.append(f"{key}={values[key]}")
+                out_lines.append(f"{key}={_format_config_value(values[key])}")
 
     path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
@@ -128,7 +135,9 @@ def list_runs() -> list[dict]:
         if not entry.is_dir() or not RUN_ID_PATTERN.match(entry.name):
             continue
         csv_path = entry / "slitranet" / "slide_changes.csv"
+        final_csv_path = entry / "slitranet" / "slide_text_map_final.csv"
         slide_dir = entry / "slitranet" / "keyframes" / "slide"
+        final_slide_dir = entry / "slitranet" / "keyframes" / "final" / "slide"
         full_dir = entry / "slitranet" / "keyframes" / "full"
         runs.append(
             {
@@ -136,7 +145,9 @@ def list_runs() -> list[dict]:
                 "path": str(entry),
                 "has_csv": csv_path.exists(),
                 "event_count": csv_event_count(csv_path),
+                "final_event_count": csv_event_count(final_csv_path),
                 "slide_images": count_files(slide_dir),
+                "final_slide_images": count_files(final_slide_dir),
                 "full_images": count_files(full_dir),
                 "mtime": int(entry.stat().st_mtime),
             }
@@ -153,8 +164,10 @@ def run_detail(run_id: str) -> dict:
         raise FileNotFoundError(run_id)
 
     csv_path = run_dir / "slitranet" / "slide_changes.csv"
+    final_csv_path = run_dir / "slitranet" / "slide_text_map_final.csv"
     transitions_dir = run_dir / "slitranet" / "transitions"
     slide_dir = run_dir / "slitranet" / "keyframes" / "slide"
+    final_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide"
     full_dir = run_dir / "slitranet" / "keyframes" / "full"
 
     transition_files = []
@@ -166,10 +179,14 @@ def run_detail(run_id: str) -> dict:
         "path": str(run_dir),
         "has_csv": csv_path.exists(),
         "event_count": csv_event_count(csv_path),
+        "final_event_count": csv_event_count(final_csv_path),
         "csv_preview": csv_preview(csv_path),
+        "final_csv_preview": csv_preview(final_csv_path),
         "csv_url": f"/api/runs/{run_id}/file/slitranet/slide_changes.csv",
+        "final_csv_url": f"/api/runs/{run_id}/file/slitranet/slide_text_map_final.csv",
         "transition_files": transition_files,
         "slide_images": count_files(slide_dir),
+        "final_slide_images": count_files(final_slide_dir),
         "full_images": count_files(full_dir),
     }
 
@@ -191,6 +208,57 @@ def run_images(run_id: str, image_type: str) -> list[dict]:
             continue
         rel = p.relative_to(base).as_posix()
         items.append({"name": p.name, "url": f"/api/runs/{run_id}/file/{rel}"})
+    return items
+
+
+def _find_slide_image_rel(run_dir: Path, event_id: int) -> str | None:
+    if event_id <= 0:
+        return None
+    candidates = [
+        run_dir / "slitranet" / "keyframes" / "final" / "slide",
+        run_dir / "slitranet" / "keyframes" / "slide",
+    ]
+    for image_dir in candidates:
+        if not image_dir.exists():
+            continue
+        matches = sorted(image_dir.glob(f"*event_{event_id:03d}_*.png"))
+        if not matches:
+            matches = sorted(image_dir.glob(f"event_{event_id:03d}_*.png"))
+        if matches:
+            return matches[0].relative_to(run_dir).as_posix()
+    return None
+
+
+def run_final_slides(run_id: str) -> list[dict]:
+    if not RUN_ID_PATTERN.match(run_id):
+        raise ValueError("Invalid run id")
+    run_dir = ensure_within(RUNS_DIR, RUNS_DIR / run_id)
+    final_csv = run_dir / "slitranet" / "slide_text_map_final.csv"
+    if not final_csv.exists():
+        return []
+
+    items: list[dict] = []
+    with final_csv.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for idx, row in enumerate(reader, start=1):
+            event_id = int(row.get("event_id", "0") or "0")
+            if event_id <= 0:
+                continue
+            rel = _find_slide_image_rel(run_dir, event_id)
+            items.append(
+                {
+                    "index": idx,
+                    "event_id": event_id,
+                    "bucket_id": row.get("bucket_id", ""),
+                    "slide_start": float(row.get("slide_start", "0") or "0"),
+                    "slide_end": float(row.get("slide_end", "0") or "0"),
+                    "text": (row.get("text", "") or "").strip(),
+                    "segments_count": int(row.get("segments_count", "0") or "0"),
+                    "source_segment_ids": row.get("source_segment_ids", "") or "",
+                    "image_url": f"/api/runs/{run_id}/file/{rel}" if rel else "",
+                    "image_name": Path(rel).name if rel else "",
+                }
+            )
     return items
 
 
@@ -328,6 +396,10 @@ class Handler(BaseHTTPRequestHandler):
                     "KEYFRAME_SETTLE_FRAMES": int(env.get("KEYFRAME_SETTLE_FRAMES", "4")),
                     "KEYFRAME_STABLE_END_GUARD_FRAMES": int(env.get("KEYFRAME_STABLE_END_GUARD_FRAMES", "2")),
                     "KEYFRAME_STABLE_LOOKAHEAD_FRAMES": int(env.get("KEYFRAME_STABLE_LOOKAHEAD_FRAMES", "2")),
+                    "SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO": float(env.get("SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO", "0.75")),
+                    "SPEAKER_FILTER_MAX_EDGE_DENSITY": float(env.get("SPEAKER_FILTER_MAX_EDGE_DENSITY", "0.011")),
+                    "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(env.get("SPEAKER_FILTER_MAX_LAPLACIAN_VAR", "80")),
+                    "SPEAKER_FILTER_MAX_DURATION_SEC": float(env.get("SPEAKER_FILTER_MAX_DURATION_SEC", "2.5")),
                 }
                 return self._send_json(200, payload)
 
@@ -361,6 +433,11 @@ class Handler(BaseHTTPRequestHandler):
                     image_type = query.get("type", ["slide"])[0]
                     images = run_images(run_id, image_type)
                     return self._send_json(200, {"images": images})
+
+                if len(parts) >= 2 and parts[1] == "final-slides":
+                    run_id = parts[0]
+                    items = run_final_slides(run_id)
+                    return self._send_json(200, {"items": items})
 
                 if len(parts) >= 3 and parts[1] == "file":
                     run_id = parts[0]
@@ -400,6 +477,10 @@ class Handler(BaseHTTPRequestHandler):
                     "KEYFRAME_SETTLE_FRAMES": int(data["KEYFRAME_SETTLE_FRAMES"]),
                     "KEYFRAME_STABLE_END_GUARD_FRAMES": int(data["KEYFRAME_STABLE_END_GUARD_FRAMES"]),
                     "KEYFRAME_STABLE_LOOKAHEAD_FRAMES": int(data["KEYFRAME_STABLE_LOOKAHEAD_FRAMES"]),
+                    "SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO": float(data["SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO"]),
+                    "SPEAKER_FILTER_MAX_EDGE_DENSITY": float(data["SPEAKER_FILTER_MAX_EDGE_DENSITY"]),
+                    "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(data["SPEAKER_FILTER_MAX_LAPLACIAN_VAR"]),
+                    "SPEAKER_FILTER_MAX_DURATION_SEC": float(data["SPEAKER_FILTER_MAX_DURATION_SEC"]),
                 }
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
@@ -409,6 +490,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("KEYFRAME_STABLE_END_GUARD_FRAMES must be >= 0")
                 if cfg["KEYFRAME_STABLE_LOOKAHEAD_FRAMES"] < 1:
                     raise ValueError("KEYFRAME_STABLE_LOOKAHEAD_FRAMES must be >= 1")
+                if not (0.0 <= cfg["SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO"] <= 1.0):
+                    raise ValueError("SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO must be in [0, 1]")
+                if not (0.0 <= cfg["SPEAKER_FILTER_MAX_EDGE_DENSITY"] <= 1.0):
+                    raise ValueError("SPEAKER_FILTER_MAX_EDGE_DENSITY must be in [0, 1]")
+                if cfg["SPEAKER_FILTER_MAX_LAPLACIAN_VAR"] < 0:
+                    raise ValueError("SPEAKER_FILTER_MAX_LAPLACIAN_VAR must be >= 0")
+                if cfg["SPEAKER_FILTER_MAX_DURATION_SEC"] < 0:
+                    raise ValueError("SPEAKER_FILTER_MAX_DURATION_SEC must be >= 0")
                 write_config_values(CONFIG_PATH, cfg)
                 return self._send_json(200, {"ok": True, **cfg})
 

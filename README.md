@@ -29,6 +29,10 @@ ROI direkt in `config/slitranet.env` setzen:
 - `KEYFRAME_STABLE_END_GUARD_FRAMES`
 - `KEYFRAME_STABLE_LOOKAHEAD_FRAMES`
 - `WHISPER_MODEL` (z. B. `medium`)
+- `SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO`
+- `SPEAKER_FILTER_MAX_EDGE_DENSITY`
+- `SPEAKER_FILTER_MAX_LAPLACIAN_VAR`
+- `SPEAKER_FILTER_MAX_DURATION_SEC`
 
 Overlay zur Kontrolle erzeugen:
 
@@ -55,6 +59,9 @@ Der Run erzeugt einen neuen Ordner:
 - `output/runs/<timestamp>/slitranet/keyframes/{slide,full}`
 - `output/runs/<timestamp>/slitranet/transcript_segments.{json,csv}`
 - `output/runs/<timestamp>/slitranet/slide_text_map.{json,csv}`
+- `output/runs/<timestamp>/slitranet/slide_text_map_final.{json,csv}`
+- `output/runs/<timestamp>/slitranet/slides_final_manifest.csv`
+- `output/runs/<timestamp>/slitranet/keyframes/final/{slide,full}`
 
 Zusätzlich:
 - `output/latest` zeigt auf den neuesten Run.

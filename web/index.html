@@ -39,17 +39,8 @@
         <section class="card home-main">
           <h2>Latest Output</h2>
           <div id="latest-summary" class="muted"></div>
-          <div class="row wrap">
-            <label>Images
-              <select id="latest-image-type">
-                <option value="slide">slide</option>
-                <option value="full">full</option>
-              </select>
-            </label>
-            <button id="load-latest-images">Load Latest Images</button>
-          </div>
           <pre id="latest-csv-preview" class="log"></pre>
-          <div id="latest-thumbs" class="thumbs"></div>
+          <div id="latest-slides-list" class="slides-list"></div>
         </section>
       </section>
 
@@ -60,18 +51,11 @@
             <label>Run
               <select id="run-select"></select>
             </label>
-            <label>Images
-              <select id="image-type">
-                <option value="slide">slide</option>
-                <option value="full">full</option>
-              </select>
-            </label>
-            <button id="load-images">Load Images</button>
           </div>
 
           <div id="run-summary" class="muted"></div>
           <pre id="csv-preview" class="log"></pre>
-          <div id="thumbs" class="thumbs"></div>
+          <div id="run-slides-list" class="slides-list"></div>
         </section>
       </section>
 
@@ -86,6 +70,10 @@
             <label>KEYFRAME_SETTLE_FRAMES <input id="keyframe_settle_frames" type="number" min="0" step="1" /></label>
             <label>KEYFRAME_STABLE_END_GUARD_FRAMES <input id="keyframe_stable_end_guard_frames" type="number" min="0" step="1" /></label>
             <label>KEYFRAME_STABLE_LOOKAHEAD_FRAMES <input id="keyframe_stable_lookahead_frames" type="number" min="1" step="1" /></label>
+            <label>SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO <input id="speaker_filter_min_stage1_video_ratio" type="number" min="0" max="1" step="0.01" /></label>
+            <label>SPEAKER_FILTER_MAX_EDGE_DENSITY <input id="speaker_filter_max_edge_density" type="number" min="0" max="1" step="0.001" /></label>
+            <label>SPEAKER_FILTER_MAX_LAPLACIAN_VAR <input id="speaker_filter_max_laplacian_var" type="number" min="0" step="1" /></label>
+            <label>SPEAKER_FILTER_MAX_DURATION_SEC <input id="speaker_filter_max_duration_sec" type="number" min="0" step="0.1" /></label>
           </div>
           <div class="row">
             <button id="save-roi">Save Config</button>

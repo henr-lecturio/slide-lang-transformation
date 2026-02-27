@@ -118,6 +118,35 @@ python "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
   --out-csv "$SLIDE_TEXT_MAP_CSV"
 echo "[ASR] Slide text mapping finished."
 
+SLIDE_TEXT_MAP_FINAL_JSON="$OUT_BASE/slide_text_map_final.json"
+SLIDE_TEXT_MAP_FINAL_CSV="$OUT_BASE/slide_text_map_final.csv"
+SLIDE_FILTER_MANIFEST_CSV="$OUT_BASE/slides_final_manifest.csv"
+FINAL_SLIDE_DIR="$OUT_BASE/keyframes/final/slide"
+FINAL_FULL_DIR="$OUT_BASE/keyframes/final/full"
+FILTER_ARGS=(
+  --video "$PHASE_DIR/$VIDEO_NAME"
+  --slide-map-json "$SLIDE_TEXT_MAP_JSON"
+  --slide-map-csv "$SLIDE_TEXT_MAP_CSV"
+  --slide-keyframes-dir "$OUT_BASE/keyframes/slide"
+  --full-keyframes-dir "$OUT_BASE/keyframes/full"
+  --out-json "$SLIDE_TEXT_MAP_FINAL_JSON"
+  --out-csv "$SLIDE_TEXT_MAP_FINAL_CSV"
+  --out-manifest-csv "$SLIDE_FILTER_MANIFEST_CSV"
+  --out-final-slide-dir "$FINAL_SLIDE_DIR"
+  --out-final-full-dir "$FINAL_FULL_DIR"
+  --speaker-min-stage1-video-ratio "${SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO:-0.75}"
+  --speaker-max-edge-density "${SPEAKER_FILTER_MAX_EDGE_DENSITY:-0.011}"
+  --speaker-max-laplacian-var "${SPEAKER_FILTER_MAX_LAPLACIAN_VAR:-80}"
+  --speaker-max-duration-sec "${SPEAKER_FILTER_MAX_DURATION_SEC:-2.5}"
+)
+if [ -f "$STAGE1_FILE" ]; then
+  FILTER_ARGS+=(--stage1-file "$STAGE1_FILE")
+fi
+
+echo "[ASR] Filtering speaker-only slides and merging transcript ..."
+python "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
+echo "[ASR] Speaker-only filtering finished."
+
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
   ln -sfn "$RUN_DIR" "$LATEST_LINK"
@@ -128,3 +157,4 @@ echo "Run dir: $RUN_DIR"
 echo "Main output: $OUT_BASE/slide_changes.csv"
 echo "Transcript: $TRANSCRIPT_JSON"
 echo "Slide text map: $SLIDE_TEXT_MAP_JSON"
+echo "Final slide text map: $SLIDE_TEXT_MAP_FINAL_JSON"

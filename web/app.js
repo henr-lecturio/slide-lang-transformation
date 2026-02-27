@@ -13,6 +13,10 @@ const el = {
   keyframeSettleFrames: document.getElementById("keyframe_settle_frames"),
   keyframeStableEndGuardFrames: document.getElementById("keyframe_stable_end_guard_frames"),
   keyframeStableLookaheadFrames: document.getElementById("keyframe_stable_lookahead_frames"),
+  speakerFilterMinStage1VideoRatio: document.getElementById("speaker_filter_min_stage1_video_ratio"),
+  speakerFilterMaxEdgeDensity: document.getElementById("speaker_filter_max_edge_density"),
+  speakerFilterMaxLaplacianVar: document.getElementById("speaker_filter_max_laplacian_var"),
+  speakerFilterMaxDurationSec: document.getElementById("speaker_filter_max_duration_sec"),
   overlayTime: document.getElementById("overlay-time"),
   regenOverlay: document.getElementById("regen-overlay"),
   refreshOverlay: document.getElementById("refresh-overlay"),
@@ -23,15 +27,11 @@ const el = {
   runLog: document.getElementById("run-log"),
   latestSummary: document.getElementById("latest-summary"),
   latestCsvPreview: document.getElementById("latest-csv-preview"),
-  latestThumbs: document.getElementById("latest-thumbs"),
-  latestImageType: document.getElementById("latest-image-type"),
-  loadLatestImages: document.getElementById("load-latest-images"),
+  latestSlidesList: document.getElementById("latest-slides-list"),
   runSelect: document.getElementById("run-select"),
-  imageType: document.getElementById("image-type"),
-  loadImages: document.getElementById("load-images"),
   runSummary: document.getElementById("run-summary"),
   csvPreview: document.getElementById("csv-preview"),
-  thumbs: document.getElementById("thumbs"),
+  runSlidesList: document.getElementById("run-slides-list"),
   imageModal: document.getElementById("image-modal"),
   imageModalBackdrop: document.getElementById("image-modal-backdrop"),
   imageModalClose: document.getElementById("image-modal-close"),
@@ -97,7 +97,11 @@ function setConfig(cfg) {
   el.keyframeSettleFrames.value = cfg.KEYFRAME_SETTLE_FRAMES;
   el.keyframeStableEndGuardFrames.value = cfg.KEYFRAME_STABLE_END_GUARD_FRAMES;
   el.keyframeStableLookaheadFrames.value = cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES;
-  el.configMeta.textContent = `VIDEO_PATH: ${cfg.VIDEO_PATH} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES}`;
+  el.speakerFilterMinStage1VideoRatio.value = cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO;
+  el.speakerFilterMaxEdgeDensity.value = cfg.SPEAKER_FILTER_MAX_EDGE_DENSITY;
+  el.speakerFilterMaxLaplacianVar.value = cfg.SPEAKER_FILTER_MAX_LAPLACIAN_VAR;
+  el.speakerFilterMaxDurationSec.value = cfg.SPEAKER_FILTER_MAX_DURATION_SEC;
+  el.configMeta.textContent = `VIDEO_PATH: ${cfg.VIDEO_PATH} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO}`;
 }
 
 function setActiveTab(tabName) {
@@ -124,6 +128,10 @@ async function saveConfig() {
     KEYFRAME_SETTLE_FRAMES: Number(el.keyframeSettleFrames.value),
     KEYFRAME_STABLE_END_GUARD_FRAMES: Number(el.keyframeStableEndGuardFrames.value),
     KEYFRAME_STABLE_LOOKAHEAD_FRAMES: Number(el.keyframeStableLookaheadFrames.value),
+    SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO: Number(el.speakerFilterMinStage1VideoRatio.value),
+    SPEAKER_FILTER_MAX_EDGE_DENSITY: Number(el.speakerFilterMaxEdgeDensity.value),
+    SPEAKER_FILTER_MAX_LAPLACIAN_VAR: Number(el.speakerFilterMaxLaplacianVar.value),
+    SPEAKER_FILTER_MAX_DURATION_SEC: Number(el.speakerFilterMaxDurationSec.value),
   };
   await apiPost("/api/config", payload);
   await loadConfig();
@@ -149,13 +157,13 @@ async function regenerateOverlay() {
 function clearLatestOutput() {
   el.latestSummary.textContent = "No runs yet";
   el.latestCsvPreview.textContent = "";
-  el.latestThumbs.innerHTML = "";
+  el.latestSlidesList.innerHTML = "";
 }
 
 function clearSelectedRunOutput() {
   el.runSummary.textContent = "No runs yet";
   el.csvPreview.textContent = "";
-  el.thumbs.innerHTML = "";
+  el.runSlidesList.innerHTML = "";
 }
 
 function renderRunSelect(runs) {
@@ -163,7 +171,7 @@ function renderRunSelect(runs) {
   for (const run of runs) {
     const opt = document.createElement("option");
     opt.value = run.id;
-    opt.textContent = `${run.id} | events ${run.event_count} | slide ${run.slide_images}`;
+    opt.textContent = `${run.id} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images}`;
     el.runSelect.appendChild(opt);
   }
 }
@@ -190,7 +198,7 @@ async function loadRuns() {
   el.runSelect.value = state.selectedRunId;
 
   await loadLatestRunDetails();
-  await loadLatestImages();
+  await loadLatestSlides();
   await loadRunDetails();
 }
 
@@ -200,8 +208,9 @@ async function loadRunDetails() {
   state.selectedRunId = runId;
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.runSummary.textContent = `run=${detail.id} | events=${detail.event_count} | slide=${detail.slide_images} | full=${detail.full_images}`;
-  el.csvPreview.textContent = (detail.csv_preview || []).join("\n");
+  el.runSummary.textContent = `run=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images}`;
+  el.csvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
+  await loadRunSlides();
 }
 
 async function loadLatestRunDetails() {
@@ -212,39 +221,60 @@ async function loadLatestRunDetails() {
   }
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.latestSummary.textContent = `latest=${detail.id} | events=${detail.event_count} | slide=${detail.slide_images} | full=${detail.full_images}`;
-  el.latestCsvPreview.textContent = (detail.csv_preview || []).join("\n");
+  el.latestSummary.textContent = `latest=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images}`;
+  el.latestCsvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
 }
 
-async function renderImages(runId, type, target) {
+async function renderFinalSlides(runId, target) {
   if (!runId) {
     target.innerHTML = "";
     return;
   }
-  const data = await apiGet(`/api/runs/${encodeURIComponent(runId)}/images?type=${encodeURIComponent(type)}`);
-  const images = data.images || [];
+  const data = await apiGet(`/api/runs/${encodeURIComponent(runId)}/final-slides`);
+  const items = data.items || [];
 
   target.innerHTML = "";
-  const maxItems = 120;
-  const shown = images.slice(0, maxItems);
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No final slide text map available for this run.";
+    target.appendChild(empty);
+    return;
+  }
 
-  for (const item of shown) {
-    const card = document.createElement("div");
-    card.className = "thumb";
+  for (const item of items) {
+    const row = document.createElement("article");
+    row.className = "slide-row";
 
-    const img = document.createElement("img");
-    img.loading = "lazy";
-    img.src = `${item.url}?v=${Date.now()}`;
-    img.alt = item.name;
-    img.addEventListener("click", () => openImageModal(item.url, item.name));
+    const media = document.createElement("div");
+    media.className = "slide-media";
 
-    const name = document.createElement("div");
-    name.className = "name";
-    name.textContent = item.name;
+    if (item.image_url) {
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.src = `${item.image_url}?v=${Date.now()}`;
+      img.alt = item.image_name || `event_${item.event_id}`;
+      img.addEventListener("click", () => openImageModal(item.image_url, item.image_name || `event_${item.event_id}`));
+      media.appendChild(img);
+    } else {
+      const missing = document.createElement("div");
+      missing.className = "slide-missing muted";
+      missing.textContent = "No image";
+      media.appendChild(missing);
+    }
 
-    card.appendChild(img);
-    card.appendChild(name);
-    target.appendChild(card);
+    const meta = document.createElement("div");
+    meta.className = "slide-meta";
+    meta.textContent = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s`;
+    media.appendChild(meta);
+
+    const textWrap = document.createElement("div");
+    textWrap.className = "slide-text";
+    textWrap.textContent = item.text || "(no text)";
+
+    row.appendChild(media);
+    row.appendChild(textWrap);
+    target.appendChild(row);
   }
 }
 
@@ -263,21 +293,22 @@ function closeImageModal() {
   el.imageModalCaption.textContent = "";
 }
 
-async function loadImages() {
-  const runId = el.runSelect.value;
-  if (!runId) return;
-  const type = el.imageType.value;
-  await renderImages(runId, type, el.thumbs);
-}
-
-async function loadLatestImages() {
+async function loadLatestSlides() {
   const runId = state.latestRunId;
   if (!runId) {
-    el.latestThumbs.innerHTML = "";
+    el.latestSlidesList.innerHTML = "";
     return;
   }
-  const type = el.latestImageType.value;
-  await renderImages(runId, type, el.latestThumbs);
+  await renderFinalSlides(runId, el.latestSlidesList);
+}
+
+async function loadRunSlides() {
+  const runId = el.runSelect.value;
+  if (!runId) {
+    el.runSlidesList.innerHTML = "";
+    return;
+  }
+  await renderFinalSlides(runId, el.runSlidesList);
 }
 
 async function startRun() {
@@ -306,9 +337,7 @@ function bindEvents() {
   el.refreshOverlay.addEventListener("click", () => runTask(loadOverlay));
   el.startRun.addEventListener("click", () => runTask(startRun));
   el.refreshRuns.addEventListener("click", () => runTaskImmediate(loadRuns));
-  el.loadLatestImages.addEventListener("click", () => runTask(loadLatestImages));
   el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
-  el.loadImages.addEventListener("click", () => runTask(loadImages));
   el.imageModalClose.addEventListener("click", closeImageModal);
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
   document.addEventListener("keydown", (e) => {
