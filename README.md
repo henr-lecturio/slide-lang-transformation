@@ -38,7 +38,7 @@ Overlay zur Kontrolle erzeugen:
 
 ```bash
 source .venv/bin/activate
-python scripts/export_roi_overlay.py --time-sec 30
+python scripts/export_roi_overlay.py --video "videos/example.mp4" --time-sec 30
 ```
 
 Output:
@@ -46,10 +46,17 @@ Output:
 
 ## Run starten
 
+Per CLI mit explizitem Video:
+
 ```bash
 source .venv/bin/activate
-bash scripts/run_slitranet.sh
+bash scripts/run_slitranet.sh --video "videos/example.mp4"
 ```
+
+Oder über die Web-UI:
+- Video auswählen
+- ROI/Parameter speichern
+- Run starten
 
 Hinweis: Beim ersten Transkriptionslauf wird das Whisper-Modell ggf. aus dem Hub geladen und lokal gecacht.
 

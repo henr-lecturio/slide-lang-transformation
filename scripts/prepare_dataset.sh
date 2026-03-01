@@ -13,7 +13,16 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
-VIDEO_ABS="$ROOT_DIR/$VIDEO_PATH"
+VIDEO_PATH_RESOLVED="${VIDEO_PATH_OVERRIDE:-${VIDEO_PATH:-}}"
+if [ -z "$VIDEO_PATH_RESOLVED" ]; then
+  echo "ERROR: video path missing. Set VIDEO_PATH in config or pass VIDEO_PATH_OVERRIDE." >&2
+  exit 1
+fi
+
+case "$VIDEO_PATH_RESOLVED" in
+  /*) VIDEO_ABS="$VIDEO_PATH_RESOLVED" ;;
+  *) VIDEO_ABS="$ROOT_DIR/$VIDEO_PATH_RESOLVED" ;;
+esac
 if [ ! -f "$VIDEO_ABS" ]; then
   echo "ERROR: video not found: $VIDEO_ABS" >&2
   exit 1

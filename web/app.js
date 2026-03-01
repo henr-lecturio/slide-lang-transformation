@@ -58,6 +58,7 @@ const state = {
   latestCsvExpanded: false,
   latestSlidesMode: "final",
   lastSettledRefreshKey: "",
+  currentRunStatus: "idle",
 };
 
 async function apiGet(url) {
@@ -92,9 +93,10 @@ async function safeJson(res) {
 
 function setStatus(current) {
   const status = current.status || "idle";
+  state.currentRunStatus = status;
   const runId = current.run_id ? `, run ${current.run_id}` : "";
   el.status.textContent = `status: ${status}${runId}`;
-  el.startRun.disabled = status === "running";
+  syncActionState();
 
   const logs = (current.log_tail || []).slice(-120);
   const nextLog = logs.join("\n");
@@ -118,14 +120,22 @@ function videoThumbUrl(videoPath) {
   return `/api/videos/thumbnail?path=${encodeURIComponent(videoPath)}&v=${Date.now()}`;
 }
 
+function syncActionState() {
+  const hasVideo = Boolean((state.selectedVideoPath || "").trim());
+  el.startRun.disabled = state.currentRunStatus === "running" || !hasVideo;
+  el.regenOverlay.disabled = !hasVideo;
+}
+
 function renderSelectedVideo() {
   const path = state.selectedVideoPath || "";
   el.selectedVideoPath.textContent = path ? `VIDEO_PATH: ${path}` : "VIDEO_PATH: (nicht gesetzt)";
   if (!path) {
     el.selectedVideoThumb.removeAttribute("src");
+    syncActionState();
     return;
   }
   el.selectedVideoThumb.src = videoThumbUrl(path);
+  syncActionState();
 }
 
 function setConfig(cfg) {
@@ -141,7 +151,8 @@ function setConfig(cfg) {
   el.speakerFilterMaxEdgeDensity.value = cfg.SPEAKER_FILTER_MAX_EDGE_DENSITY;
   el.speakerFilterMaxLaplacianVar.value = cfg.SPEAKER_FILTER_MAX_LAPLACIAN_VAR;
   el.speakerFilterMaxDurationSec.value = cfg.SPEAKER_FILTER_MAX_DURATION_SEC;
-  el.configMeta.textContent = `VIDEO_PATH: ${cfg.VIDEO_PATH} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO}`;
+  const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO}`;
   renderSelectedVideo();
 }
 

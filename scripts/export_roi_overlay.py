@@ -93,7 +93,11 @@ def main() -> int:
         )
     )
     parser.add_argument("--config", default="config/slitranet.env", help="Path to .env config.")
-    parser.add_argument("--video", default="", help="Optional video override (otherwise VIDEO_PATH from config).")
+    parser.add_argument(
+        "--video",
+        default="",
+        help="Video path for the preview frame. Falls back to VIDEO_PATH from config if present.",
+    )
     parser.add_argument("--time-sec", type=float, default=30.0, help="Timestamp in seconds for frame export.")
     parser.add_argument(
         "--out",

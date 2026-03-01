@@ -4,6 +4,41 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
 VENV_DIR="$ROOT_DIR/.venv"
+VIDEO_PATH_ARG=""
+
+usage() {
+  cat <<USAGE
+Usage: bash scripts/run_slitranet.sh [--video path/to/video.mp4]
+
+Options:
+  --video PATH   Override VIDEO_PATH from config for this run.
+  -h, --help     Show this help text.
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --video)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --video requires a path argument." >&2
+        usage >&2
+        exit 1
+      fi
+      VIDEO_PATH_ARG="$2"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 if [ ! -d "$VENV_DIR" ]; then
   echo "ERROR: .venv not found. Run: bash scripts/setup_venv.sh" >&2
@@ -19,7 +54,16 @@ if [ -z "${PHASE:-}" ]; then
   PHASE="test"
 fi
 
-VIDEO_ABS="$ROOT_DIR/$VIDEO_PATH"
+VIDEO_PATH_RESOLVED="${VIDEO_PATH_ARG:-${VIDEO_PATH:-}}"
+if [ -z "$VIDEO_PATH_RESOLVED" ]; then
+  echo "ERROR: No video selected. Set VIDEO_PATH in config or pass --video." >&2
+  exit 1
+fi
+
+case "$VIDEO_PATH_RESOLVED" in
+  /*) VIDEO_ABS="$VIDEO_PATH_RESOLVED" ;;
+  *) VIDEO_ABS="$ROOT_DIR/$VIDEO_PATH_RESOLVED" ;;
+esac
 if [ ! -f "$VIDEO_ABS" ]; then
   echo "ERROR: video not found: $VIDEO_ABS" >&2
   exit 1
@@ -39,8 +83,13 @@ ROI_FILE="$DATASET_DIR/videos/${PHASE}_bounding_box_list.txt"
 
 mkdir -p "$RUN_DIR" "$PRED_DIR" "$OUT_DIR" "$OUT_BASE/keyframes/full" "$OUT_BASE/keyframes/slide"
 cp "$CONFIG_FILE" "$RUN_DIR/config_used.env"
+if grep -q '^VIDEO_PATH=' "$RUN_DIR/config_used.env"; then
+  sed -i "s|^VIDEO_PATH=.*$|VIDEO_PATH=\"$VIDEO_PATH_RESOLVED\"|" "$RUN_DIR/config_used.env"
+else
+  printf '\nVIDEO_PATH="%s"\n' "$VIDEO_PATH_RESOLVED" >> "$RUN_DIR/config_used.env"
+fi
 
-DATASET_DIR="$DATASET_DIR" bash "$ROOT_DIR/scripts/prepare_dataset.sh"
+DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/prepare_dataset.sh"
 bash "$ROOT_DIR/scripts/check_weights.sh"
 
 if ! python - <<'PY'

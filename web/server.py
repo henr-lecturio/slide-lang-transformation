@@ -536,6 +536,12 @@ def _run_worker(process: subprocess.Popen) -> None:
 
 
 def start_run() -> tuple[bool, str]:
+    env = parse_env(CONFIG_PATH)
+    video_path = (env.get("VIDEO_PATH", "") or "").strip()
+    if not video_path:
+        return False, "No video selected"
+    resolve_video_config_path(video_path)
+
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
         if proc is not None and proc.poll() is None:
@@ -565,6 +571,11 @@ def start_run() -> tuple[bool, str]:
 
 
 def run_overlay(time_sec: float) -> tuple[int, str]:
+    env = parse_env(CONFIG_PATH)
+    video_path = (env.get("VIDEO_PATH", "") or "").strip()
+    if not video_path:
+        return 1, "ERROR: No video selected."
+
     cmd = [
         PYTHON_BIN,
         "scripts/export_roi_overlay.py",
