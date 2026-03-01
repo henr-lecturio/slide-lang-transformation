@@ -140,6 +140,23 @@ def image_metrics(image_path: Path | None) -> dict:
     }
 
 
+def load_gray_image(image_path: Path | None) -> np.ndarray | None:
+    if image_path is None or not image_path.exists():
+        return None
+    img = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+    if img is None or img.size == 0:
+        return None
+    return img.astype(np.int16)
+
+
+def image_mad(a: np.ndarray | None, b: np.ndarray | None) -> float:
+    if a is None or b is None:
+        return float("inf")
+    if a.shape != b.shape:
+        return float("inf")
+    return float(np.mean(np.abs(a - b)))
+
+
 def decide_speaker_only(
     duration_sec: float,
     edge_density: float | None,
@@ -204,6 +221,49 @@ def copy_kept_images(
                 shutil.copy2(src_full, dst_full_dir / dst_name)
 
 
+def merge_duplicate_kept_rows(
+    kept_rows: list[dict],
+    slide_keyframes_dir: Path,
+    *,
+    mad_threshold: float,
+) -> tuple[list[dict], dict[int, int]]:
+    if not kept_rows:
+        return [], {}
+
+    merged_rows: list[dict] = []
+    duplicate_targets: dict[int, int] = {}
+    previous_image: np.ndarray | None = None
+
+    for row in kept_rows:
+        event_id = int(row["event_id"])
+        current_image = load_gray_image(find_event_image(slide_keyframes_dir, event_id))
+        if merged_rows and image_mad(current_image, previous_image) <= mad_threshold:
+            target = merged_rows[-1]
+            target["slide_end"] = max(float(target["slide_end"]), float(row["slide_end"]))
+            text = str(row.get("text", "")).strip()
+            if text:
+                if target["text"]:
+                    target["text"] = f"{target['text']} {text}".strip()
+                else:
+                    target["text"] = text
+            target["source_segment_ids"] = sorted(
+                set(parse_source_segment_ids(target.get("source_segment_ids", []))).union(
+                    parse_source_segment_ids(row.get("source_segment_ids", []))
+                )
+            )
+            target["segments_count"] = len(target["source_segment_ids"])
+            duplicate_targets[event_id] = int(target["event_id"])
+            continue
+
+        keep_row = dict(row)
+        keep_row["source_segment_ids"] = sorted(parse_source_segment_ids(keep_row.get("source_segment_ids", [])))
+        keep_row["segments_count"] = len(keep_row["source_segment_ids"])
+        merged_rows.append(keep_row)
+        previous_image = current_image
+
+    return merged_rows, duplicate_targets
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Filter speaker-only events and merge their transcript text into the previous kept slide."
@@ -242,6 +302,12 @@ def main() -> int:
         type=float,
         default=2.5,
         help="Fallback max duration for speaker-only when no stage1 is available (default: 2.5).",
+    )
+    parser.add_argument(
+        "--duplicate-slide-mad-threshold",
+        type=float,
+        default=0.7,
+        help="Merge consecutive kept slides when ROI image MAD stays below threshold (default: 0.7).",
     )
     args = parser.parse_args()
 
@@ -368,6 +434,19 @@ def main() -> int:
                 "text_len": len(text),
             }
         )
+
+    kept_rows, duplicate_targets = merge_duplicate_kept_rows(
+        kept_rows,
+        slide_keyframes_dir,
+        mad_threshold=max(0.0, float(args.duplicate_slide_mad_threshold)),
+    )
+    if duplicate_targets:
+        for manifest in manifest_rows:
+            event_id = int(manifest["event_id"])
+            if event_id in duplicate_targets:
+                manifest["decision_reason"] = "duplicate_slide"
+                manifest["action"] = "merged_duplicate_slide"
+                manifest["merge_target_event_id"] = duplicate_targets[event_id]
 
     final_rows: list[dict] = []
     if leading_no_slide_parts or leading_no_slide_ids:

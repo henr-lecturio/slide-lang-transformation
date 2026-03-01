@@ -197,6 +197,36 @@ def clear_old_event_images(path: Path) -> None:
             img.unlink()
 
 
+def clamp_frame_idx(frame_idx: int, frame_count: int) -> int:
+    if frame_count > 0:
+        return max(1, min(frame_count, frame_idx))
+    return max(1, frame_idx)
+
+
+def default_segment_frame(seg_f0: int, seg_f1: int, settle_frames: int, frame_count: int) -> int:
+    frame_idx = max(seg_f0, min(seg_f1, seg_f0 + settle_frames))
+    return clamp_frame_idx(frame_idx, frame_count)
+
+
+def extract_roi_patch(
+    frame: np.ndarray,
+    roi: tuple[int, int, int, int],
+) -> np.ndarray | None:
+    x0, y0, x1, y1 = roi
+    patch = frame[y0:y1, x0:x1]
+    if patch.size == 0:
+        return None
+    return patch.astype(np.int16)
+
+
+def roi_mad(a: np.ndarray | None, b: np.ndarray | None) -> float:
+    if a is None or b is None:
+        return float("inf")
+    if a.shape != b.shape:
+        return float("inf")
+    return float(np.mean(np.abs(a - b)))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert SliTraNet transition output to CSV + keyframes.")
     parser.add_argument("--video", required=True)
@@ -229,6 +259,18 @@ def main() -> int:
         type=int,
         default=2,
         help="How many future frame-diffs are considered when scoring a stable frame (default: 2).",
+    )
+    parser.add_argument(
+        "--dedupe-mad-threshold",
+        type=float,
+        default=2.0,
+        help="Skip repeated slide states when ROI MAD stays below threshold (default: 2.0).",
+    )
+    parser.add_argument(
+        "--stage1-backfill-min-frames",
+        type=int,
+        default=12,
+        help="Minimum uncovered stage-1 slide segment length used for additive backfill (default: 12).",
     )
     args = parser.parse_args()
 
@@ -276,12 +318,16 @@ def main() -> int:
     blend_max_frames = max(0, int(args.blend_max_frames))
     stable_end_guard_frames = max(0, int(args.stable_end_guard_frames))
     stable_lookahead_frames = max(1, int(args.stable_lookahead_frames))
-    event_id = 1
+    dedupe_mad_threshold = max(0.0, float(args.dedupe_mad_threshold))
+    stage1_backfill_min_frames = max(1, int(args.stage1_backfill_min_frames))
     stage1_segments: list[tuple[int, int, int]] = []
     boundary_to_next_seg_idx: dict[tuple[int, int], int] = {}
-    last_target_seg_idx: int | None = None
     short_video_keep_cache: dict[int, bool] = {}
     stable_roi = stability_roi(x0, y0, x1, y1)
+    primary_candidates: list[dict] = []
+    backfill_candidates: list[dict] = []
+    covered_slide_seg_idxs: set[int] = set()
+    last_target_seg_idx: int | None = None
 
     if stage1_file is not None:
         stage1_segments = read_stage1_segments(stage1_file)
@@ -290,42 +336,31 @@ def main() -> int:
             _, next_f0, _ = stage1_segments[idx + 1]
             boundary_to_next_seg_idx[(prev_f1 + 1, next_f0 + 1)] = idx + 1
 
-        for seg_idx, (slide_id, f0, f1) in enumerate(stage1_segments):
+        for seg_idx, (slide_id, seg_f0, seg_f1) in enumerate(stage1_segments):
             if slide_id < 0:
                 continue
-            frame_idx = f0 + settle_frames
-            frame_idx = max(f0, min(f1, frame_idx))
-            if frame_count > 0:
-                frame_idx = max(1, min(frame_count, frame_idx))
-            else:
-                frame_idx = max(1, frame_idx)
-
-            sec = (frame_idx - 1) / fps
-            frame = read_frame(cap, frame_idx)
-            if frame is not None:
-                full_path = out_full / f"event_{event_id:03d}_f{frame_idx:06d}.png"
-                slide_path = out_slide / f"event_{event_id:03d}_f{frame_idx:06d}.png"
-                cv2.imwrite(str(full_path), frame)
-                cv2.imwrite(str(slide_path), frame[y0:y1, x0:x1])
-
-            rows.append(
+            primary_candidates.append(
                 {
-                    "event_id": event_id,
+                    "source": "primary_initial",
+                    "sort_priority": 0,
+                    "seg_idx": seg_idx,
                     "transition_no": 0,
-                    "frame_id_0": f0,
-                    "frame_id_1": f1,
-                    "event_frame": frame_idx,
-                    "time_sec": round(sec, 3),
-                    "timecode": to_timecode(sec),
+                    "frame_id_0": seg_f0,
+                    "frame_id_1": seg_f1,
+                    "event_frame": default_segment_frame(seg_f0, seg_f1, settle_frames, frame_count),
+                    "updates_slide_state": True,
+                    "covered_slide_seg_idx": seg_idx,
                 }
             )
-            event_id += 1
+            covered_slide_seg_idxs.add(seg_idx)
             last_target_seg_idx = seg_idx
             break
 
     for transition_no, f0, f1 in transitions:
-        frame_idx = f1 + settle_frames
+        frame_idx = clamp_frame_idx(f1 + settle_frames, frame_count)
         target_seg_idx: int | None = None
+        updates_slide_state = True
+        covered_slide_seg_idx: int | None = None
 
         if boundary_to_next_seg_idx:
             mapped_idx = boundary_to_next_seg_idx.get((f0, f1))
@@ -343,8 +378,9 @@ def main() -> int:
                         if next_slide_id >= 0:
                             target_seg_idx += 1
                             slide_id, seg_f0, seg_f1 = stage1_segments[target_seg_idx]
+                            seg_len = seg_f1 - seg_f0 + 1
 
-                default_idx = max(seg_f0, min(seg_f1, seg_f0 + settle_frames))
+                default_idx = default_segment_frame(seg_f0, seg_f1, settle_frames, frame_count)
                 if slide_id < 0 and seg_len <= blend_max_frames:
                     keep_short_video = short_video_keep_cache.get(target_seg_idx, True)
                     if keep_short_video:
@@ -357,38 +393,102 @@ def main() -> int:
                             end_guard_frames=stable_end_guard_frames,
                             lookahead_frames=stable_lookahead_frames,
                         )
+                        frame_idx = clamp_frame_idx(frame_idx, frame_count)
                     else:
                         frame_idx = default_idx
                 else:
                     frame_idx = default_idx
 
+                if slide_id < 0:
+                    updates_slide_state = False
+                else:
+                    covered_slide_seg_idx = target_seg_idx
+
         if target_seg_idx is not None and target_seg_idx == last_target_seg_idx:
             continue
 
-        if frame_count > 0:
-            frame_idx = max(1, min(frame_count, frame_idx))
-        else:
-            frame_idx = max(1, frame_idx)
+        primary_candidates.append(
+            {
+                "source": "primary_transition",
+                "sort_priority": 0,
+                "seg_idx": target_seg_idx,
+                "transition_no": transition_no,
+                "frame_id_0": f0,
+                "frame_id_1": f1,
+                "event_frame": frame_idx,
+                "updates_slide_state": updates_slide_state,
+                "covered_slide_seg_idx": covered_slide_seg_idx,
+            }
+        )
+        if covered_slide_seg_idx is not None:
+            covered_slide_seg_idxs.add(covered_slide_seg_idx)
+        last_target_seg_idx = target_seg_idx
+
+    if stage1_segments:
+        for seg_idx, (slide_id, seg_f0, seg_f1) in enumerate(stage1_segments):
+            seg_len = seg_f1 - seg_f0 + 1
+            if slide_id < 0 or seg_idx in covered_slide_seg_idxs or seg_len < stage1_backfill_min_frames:
+                continue
+            backfill_candidates.append(
+                {
+                    "source": "stage1_backfill",
+                    "sort_priority": 1,
+                    "seg_idx": seg_idx,
+                    "transition_no": 0,
+                    "frame_id_0": seg_f0,
+                    "frame_id_1": seg_f1,
+                    "event_frame": default_segment_frame(seg_f0, seg_f1, settle_frames, frame_count),
+                    "updates_slide_state": True,
+                    "covered_slide_seg_idx": seg_idx,
+                }
+            )
+
+    candidates = primary_candidates + backfill_candidates
+    candidates.sort(key=lambda x: (x["event_frame"], x["sort_priority"], x["frame_id_0"], x["frame_id_1"]))
+
+    event_id = 1
+    last_kept_patch: np.ndarray | None = None
+    last_slide_patch: np.ndarray | None = None
+    fallback_stage1_added = 0
+
+    for candidate in candidates:
+        frame_idx = int(candidate["event_frame"])
         sec = (frame_idx - 1) / fps
         frame = read_frame(cap, frame_idx)
-        if frame is not None:
-            full_path = out_full / f"event_{event_id:03d}_f{frame_idx:06d}.png"
-            slide_path = out_slide / f"event_{event_id:03d}_f{frame_idx:06d}.png"
-            cv2.imwrite(str(full_path), frame)
-            cv2.imwrite(str(slide_path), frame[y0:y1, x0:x1])
+        if frame is None:
+            continue
+        patch = extract_roi_patch(frame, (x0, y0, x1, y1))
+        if patch is None:
+            continue
+
+        if candidate["source"] == "stage1_backfill":
+            if roi_mad(patch, last_kept_patch) <= dedupe_mad_threshold:
+                continue
+            if candidate["updates_slide_state"] and roi_mad(patch, last_slide_patch) <= dedupe_mad_threshold:
+                continue
+
+        full_path = out_full / f"event_{event_id:03d}_f{frame_idx:06d}.png"
+        slide_path = out_slide / f"event_{event_id:03d}_f{frame_idx:06d}.png"
+        cv2.imwrite(str(full_path), frame)
+        cv2.imwrite(str(slide_path), frame[y0:y1, x0:x1])
 
         rows.append(
             {
                 "event_id": event_id,
-                "transition_no": transition_no,
-                "frame_id_0": f0,
-                "frame_id_1": f1,
+                "transition_no": int(candidate["transition_no"]),
+                "frame_id_0": int(candidate["frame_id_0"]),
+                "frame_id_1": int(candidate["frame_id_1"]),
                 "event_frame": frame_idx,
                 "time_sec": round(sec, 3),
                 "timecode": to_timecode(sec),
             }
         )
-        last_target_seg_idx = target_seg_idx
+
+        if candidate["updates_slide_state"]:
+            last_slide_patch = patch
+        last_kept_patch = patch
+        if candidate["source"] == "stage1_backfill":
+            fallback_stage1_added += 1
         event_id += 1
 
     cap.release()
@@ -410,6 +510,7 @@ def main() -> int:
         writer.writerows(rows)
 
     print(f"Wrote {len(rows)} events to {out_csv}")
+    print(f"Stage1 fallback events added: {fallback_stage1_added}")
     print(f"Full keyframes: {out_full}")
     print(f"Slide keyframes: {out_slide}")
     return 0
