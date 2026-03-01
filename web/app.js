@@ -427,6 +427,58 @@ function toggleLatestCsvTable() {
   el.toggleLatestCsvTable.textContent = "CSV-Tabelle ausblenden";
 }
 
+async function setFinalSlideImageMode(runId, eventId, mode) {
+  await apiPost(`/api/runs/${encodeURIComponent(runId)}/final-slide-image-mode`, {
+    event_id: eventId,
+    mode,
+  });
+  const refreshes = [];
+  if (runId === state.latestRunId && state.latestSlidesMode === "final") {
+    refreshes.push(loadLatestSlides());
+  }
+  if (runId === state.selectedRunId) {
+    refreshes.push(loadRunSlides());
+  }
+  await Promise.all(refreshes);
+}
+
+function createImageModeToggle(runId, item) {
+  const available = Array.isArray(item.available_image_modes) ? item.available_image_modes : [];
+  if (available.length <= 1) {
+    return null;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "slide-controls";
+
+  const label = document.createElement("span");
+  label.className = "slide-controls-label";
+  label.textContent = "Bild:";
+  wrap.appendChild(label);
+
+  const toggle = document.createElement("div");
+  toggle.className = "mode-toggle";
+
+  const modes = [
+    { key: "slide", label: "ROI" },
+    { key: "full", label: "Vollbild" },
+  ];
+
+  for (const mode of modes) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "mode-toggle-btn";
+    btn.textContent = mode.label;
+    btn.disabled = !available.includes(mode.key);
+    btn.classList.toggle("active", item.image_mode === mode.key);
+    btn.addEventListener("click", () => runTaskImmediate(() => setFinalSlideImageMode(runId, item.event_id, mode.key)));
+    toggle.appendChild(btn);
+  }
+
+  wrap.appendChild(toggle);
+  return wrap;
+}
+
 async function renderFinalSlides(runId, target) {
   if (!runId) {
     target.innerHTML = "";
@@ -465,9 +517,14 @@ async function renderFinalSlides(runId, target) {
       media.appendChild(missing);
     }
 
+    const controls = createImageModeToggle(runId, item);
+    if (controls) {
+      media.appendChild(controls);
+    }
+
     const meta = document.createElement("div");
     meta.className = "slide-meta";
-    meta.textContent = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s`;
+    meta.textContent = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"}`;
     media.appendChild(meta);
 
     const textWrap = document.createElement("div");

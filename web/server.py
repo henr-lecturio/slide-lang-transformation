@@ -307,6 +307,39 @@ def run_images(run_id: str, image_type: str) -> list[dict]:
     return items
 
 
+def final_image_mode_overrides_path(run_dir: Path) -> Path:
+    return run_dir / "slitranet" / "final_image_mode_overrides.json"
+
+
+def load_final_image_mode_overrides(run_dir: Path) -> dict[int, str]:
+    path = final_image_mode_overrides_path(run_dir)
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[int, str] = {}
+    for key, value in raw.items():
+        if value not in {"slide", "full"}:
+            continue
+        try:
+            out[int(key)] = value
+        except Exception:
+            continue
+    return out
+
+
+def save_final_image_mode_overrides(run_dir: Path, overrides: dict[int, str]) -> None:
+    path = final_image_mode_overrides_path(run_dir)
+    payload = {str(k): v for k, v in sorted(overrides.items()) if v in {"slide", "full"}}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
 def _find_event_image_rel(
     run_dir: Path,
     event_id: int,
@@ -331,6 +364,46 @@ def _find_event_image_rel(
     return None
 
 
+def resolve_final_image_assets(run_dir: Path, run_id: str, event_id: int, override_mode: str | None = None) -> dict:
+    slide_rel = _find_event_image_rel(run_dir, event_id, ["slide"], include_final=True)
+    full_rel = _find_event_image_rel(run_dir, event_id, ["full"], include_final=True)
+    available_modes = [mode for mode, rel in (("slide", slide_rel), ("full", full_rel)) if rel]
+
+    default_mode = "full" if event_id == 1 else "slide"
+    if default_mode not in available_modes and available_modes:
+        default_mode = available_modes[0]
+
+    requested_mode = override_mode if override_mode in {"slide", "full"} else default_mode
+    if requested_mode not in available_modes and available_modes:
+        requested_mode = default_mode if default_mode in available_modes else available_modes[0]
+
+    selected_rel = ""
+    if requested_mode == "full" and full_rel:
+        selected_rel = full_rel
+    elif requested_mode == "slide" and slide_rel:
+        selected_rel = slide_rel
+    elif slide_rel:
+        selected_rel = slide_rel
+        requested_mode = "slide"
+    elif full_rel:
+        selected_rel = full_rel
+        requested_mode = "full"
+    else:
+        requested_mode = ""
+
+    return {
+        "default_image_mode": default_mode if available_modes else "",
+        "image_mode": requested_mode,
+        "available_image_modes": available_modes,
+        "slide_image_url": f"/api/runs/{run_id}/file/{slide_rel}" if slide_rel else "",
+        "slide_image_name": Path(slide_rel).name if slide_rel else "",
+        "full_image_url": f"/api/runs/{run_id}/file/{full_rel}" if full_rel else "",
+        "full_image_name": Path(full_rel).name if full_rel else "",
+        "image_url": f"/api/runs/{run_id}/file/{selected_rel}" if selected_rel else "",
+        "image_name": Path(selected_rel).name if selected_rel else "",
+    }
+
+
 def run_final_slides(run_id: str) -> list[dict]:
     if not RUN_ID_PATTERN.match(run_id):
         raise ValueError("Invalid run id")
@@ -338,6 +411,7 @@ def run_final_slides(run_id: str) -> list[dict]:
     final_csv = run_dir / "slitranet" / "slide_text_map_final.csv"
     if not final_csv.exists():
         return []
+    overrides = load_final_image_mode_overrides(run_dir)
 
     items: list[dict] = []
     with final_csv.open("r", encoding="utf-8") as f:
@@ -346,11 +420,7 @@ def run_final_slides(run_id: str) -> list[dict]:
             event_id = int(row.get("event_id", "0") or "0")
             if event_id <= 0:
                 continue
-            if event_id == 1:
-                # Intro/thumbnail should be shown as full frame, not ROI crop.
-                rel = _find_event_image_rel(run_dir, event_id, ["full", "slide"], include_final=True)
-            else:
-                rel = _find_event_image_rel(run_dir, event_id, ["slide", "full"], include_final=True)
+            assets = resolve_final_image_assets(run_dir, run_id, event_id, overrides.get(event_id))
             items.append(
                 {
                     "index": idx,
@@ -361,8 +431,7 @@ def run_final_slides(run_id: str) -> list[dict]:
                     "text": (row.get("text", "") or "").strip(),
                     "segments_count": int(row.get("segments_count", "0") or "0"),
                     "source_segment_ids": row.get("source_segment_ids", "") or "",
-                    "image_url": f"/api/runs/{run_id}/file/{rel}" if rel else "",
-                    "image_name": Path(rel).name if rel else "",
+                    **assets,
                 }
             )
     return items
@@ -631,6 +700,43 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+            if path.startswith("/api/runs/") and path.endswith("/final-slide-image-mode"):
+                rest = path[len("/api/runs/") :]
+                parts = rest.split("/")
+                if len(parts) != 2 or parts[1] != "final-slide-image-mode":
+                    raise ValueError("Invalid final slide image mode path")
+
+                run_id = parts[0]
+                if not RUN_ID_PATTERN.match(run_id):
+                    raise ValueError("Invalid run id")
+
+                run_dir = ensure_within(RUNS_DIR, RUNS_DIR / run_id)
+                final_csv = run_dir / "slitranet" / "slide_text_map_final.csv"
+                if not run_dir.exists() or not final_csv.exists():
+                    raise FileNotFoundError(run_id)
+
+                data = self._read_json_body()
+                event_id = int(data["event_id"])
+                mode = str(data["mode"]).strip()
+                if event_id <= 0:
+                    raise ValueError("event_id must be > 0")
+                if mode not in {"slide", "full"}:
+                    raise ValueError("mode must be slide or full")
+
+                assets = resolve_final_image_assets(run_dir, run_id, event_id, None)
+                if mode not in assets["available_image_modes"]:
+                    raise ValueError(f"Requested image mode is not available for event {event_id}")
+
+                overrides = load_final_image_mode_overrides(run_dir)
+                if mode == assets["default_image_mode"]:
+                    overrides.pop(event_id, None)
+                else:
+                    overrides[event_id] = mode
+                save_final_image_mode_overrides(run_dir, overrides)
+
+                updated_assets = resolve_final_image_assets(run_dir, run_id, event_id, overrides.get(event_id))
+                return self._send_json(200, {"ok": True, "event_id": event_id, **updated_assets})
+
             if path == "/api/config":
                 data = self._read_json_body()
                 video_path = str(data["VIDEO_PATH"]).strip()
