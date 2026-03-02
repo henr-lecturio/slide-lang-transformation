@@ -253,6 +253,7 @@ def main() -> int:
     for slide_path in slide_paths:
         dst_path = output_dir / slide_path.name
         slide_idx = slide_index_from_name(slide_path)
+        print(f"@@STEP DETAIL edit {slide_path.name}")
 
         if slide_idx is not None and slide_idx <= max(0, int(args.skip_first_slide)):
             shutil.copy2(slide_path, dst_path)

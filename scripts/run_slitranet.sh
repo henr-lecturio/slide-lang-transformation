@@ -99,6 +99,33 @@ RUN_STEP_EDIT="$(toggle_to_flag "$RUN_STEP_EDIT")"
 RUN_STEP_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TRANSLATE")"
 RUN_STEP_UPSCALE="$(toggle_to_flag "$RUN_STEP_UPSCALE")"
 
+emit_step() {
+  local action="$1"
+  local step="$2"
+  shift 2
+  if [ $# -gt 0 ]; then
+    printf '@@STEP %s %s %s\n' "$action" "$step" "$*"
+  else
+    printf '@@STEP %s %s\n' "$action" "$step"
+  fi
+}
+
+step_start() {
+  emit_step START "$@"
+}
+
+step_done() {
+  emit_step DONE "$@"
+}
+
+step_skip() {
+  emit_step SKIP "$@"
+}
+
+step_detail() {
+  emit_step DETAIL "$@"
+}
+
 VIDEO_PATH_RESOLVED="${VIDEO_PATH_ARG:-${VIDEO_PATH:-}}"
 if [ -z "$VIDEO_PATH_RESOLVED" ]; then
   echo "ERROR: No video selected. Set VIDEO_PATH in config or pass --video." >&2
@@ -134,9 +161,13 @@ else
   printf '\nVIDEO_PATH="%s"\n' "$VIDEO_PATH_RESOLVED" >> "$RUN_DIR/config_used.env"
 fi
 
+step_start scene-detection
+step_detail scene-detection "prepare-dataset"
 DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/prepare_dataset.sh"
+step_detail scene-detection "check-weights"
 bash "$ROOT_DIR/scripts/check_weights.sh"
 
+step_detail scene-detection "cuda-check"
 if ! "$PYTHON_BIN" - <<'PY'
 import torch
 raise SystemExit(0 if torch.cuda.is_available() else 1)
@@ -147,6 +178,7 @@ then
   exit 1
 fi
 
+step_detail scene-detection "slitranet-inference"
 pushd "$ROOT_DIR/slitranet" >/dev/null
 "$PYTHON_BIN" test_SliTraNet.py \
   --dataset_dir "$DATASET_DIR" \
@@ -171,6 +203,7 @@ else
   echo "WARN: Stage-1 result file not found, initial event will be skipped: $STAGE1_FILE" >&2
 fi
 
+step_detail scene-detection "postprocess"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/postprocess_slitranet.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --roi-file "$ROI_FILE" \
@@ -182,6 +215,7 @@ fi
   --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}" \
   --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
   --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
+step_done scene-detection
 
 TRANSCRIPT_JSON="$OUT_BASE/transcript_segments.json"
 TRANSCRIPT_CSV="$OUT_BASE/transcript_segments.csv"
@@ -199,19 +233,25 @@ fi
 
 echo "[ASR] Preparing transcription step ..."
 echo "[Step] transcription: run"
+step_start transcription
+step_detail transcription "faster-whisper"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+step_done transcription
 echo "[ASR] Transcription step finished."
 
 SLIDE_TEXT_MAP_JSON="$OUT_BASE/slide_text_map.json"
 SLIDE_TEXT_MAP_CSV="$OUT_BASE/slide_text_map.csv"
 echo "[ASR] Mapping transcript to slide windows ..."
 echo "[Step] transcript-mapping: run"
+step_start transcript-mapping
+step_detail transcript-mapping "map-transcript-to-slides"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --slide-csv "$OUT_BASE/slide_changes.csv" \
   --transcript-json "$TRANSCRIPT_JSON" \
   --out-json "$SLIDE_TEXT_MAP_JSON" \
   --out-csv "$SLIDE_TEXT_MAP_CSV"
+step_done transcript-mapping
 echo "[ASR] Slide text mapping finished."
 
 SLIDE_TEXT_MAP_FINAL_JSON="$OUT_BASE/slide_text_map_final.json"
@@ -279,7 +319,13 @@ if [ -f "$STAGE1_FILE" ]; then
 fi
 
 echo "[ASR] Filtering speaker-only slides and merging transcript ..."
+step_start finalize-slides
+step_detail finalize-slides "speaker-filter-and-final-export"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
+step_done finalize-slides
+if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "local" ]; then
+  step_done edit "local cleanup applied within finalize-slides"
+fi
 echo "[ASR] Speaker-only filtering finished."
 
 if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
@@ -289,6 +335,8 @@ if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ];
   fi
 
   echo "[Gemini] Editing raw final slides with model $GEMINI_EDIT_MODEL ..."
+  step_start edit
+  step_detail edit "gemini-image-edit"
   "$PYTHON_BIN" "$ROOT_DIR/scripts/edit_final_slides_gemini.py" \
     --input-dir "$FINAL_SLIDE_RAW_DIR" \
     --output-dir "$FINAL_SLIDE_DIR" \
@@ -297,14 +345,19 @@ if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ];
     --source-manifest-csv "$FINAL_SOURCE_MANIFEST_CSV" \
     --mask-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_mask" \
     --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay"
+  step_done edit
   echo "[Gemini] Editing finished."
 elif [ "$RUN_STEP_EDIT" = "0" ]; then
   echo "[Step] edit: skipped"
+  step_skip edit "disabled"
+elif [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "none" ]; then
+  step_skip edit "mode=none"
 fi
 
 if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
   case "$FINAL_SLIDE_TRANSLATION_MODE" in
     none)
+      step_skip translate "mode=none"
       ;;
     gemini)
       if [ -z "${GEMINI_API_KEY:-}" ]; then
@@ -316,12 +369,15 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         exit 1
       fi
       echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
+      step_start translate
+      step_detail translate "$FINAL_SLIDE_TARGET_LANGUAGE"
       "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_final_slides_gemini.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
         --model "$GEMINI_TRANSLATE_MODEL" \
         --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
         --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+      step_done translate
       echo "[Translate] Translation finished."
       ;;
     *)
@@ -331,14 +387,18 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
   esac
 else
   echo "[Step] translate: skipped"
+  step_skip translate "disabled"
 fi
 
 if [ "$RUN_STEP_UPSCALE" = "1" ]; then
   case "$FINAL_SLIDE_UPSCALE_MODE" in
     none)
+      step_skip upscale "mode=none"
       ;;
     swin2sr)
       echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
+      step_start upscale
+      step_detail upscale "processed-final-slides"
       "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
@@ -348,6 +408,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
         --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
         echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
+        step_detail upscale "translated-final-slides"
         "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
           --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
           --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
@@ -356,6 +417,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
           --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
           --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
       fi
+      step_done upscale
       echo "[Upscale] Upscaling finished."
       ;;
     *)
@@ -365,6 +427,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
   esac
 else
   echo "[Step] upscale: skipped"
+  step_skip upscale "disabled"
 fi
 
 LATEST_LINK="$ROOT_DIR/output/latest"

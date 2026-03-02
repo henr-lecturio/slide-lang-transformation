@@ -151,6 +151,7 @@ def upscale_directory(
 
     for slide_path in slide_paths:
         dst_path = output_dir / slide_path.name
+        print(f"@@STEP DETAIL upscale {slide_path.name}")
         image_bgr = cv2.imread(str(slide_path), cv2.IMREAD_COLOR)
         if image_bgr is None or image_bgr.size == 0:
             shutil.copy2(slide_path, dst_path)

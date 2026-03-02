@@ -181,6 +181,7 @@ def main() -> int:
 
     for slide_path in slide_paths:
         dst_path = output_dir / slide_path.name
+        print(f"@@STEP DETAIL translate {slide_path.name}")
         original = cv2.imread(str(slide_path), cv2.IMREAD_COLOR)
         if original is None or original.size == 0:
             shutil.copy2(slide_path, dst_path)

@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -34,6 +35,17 @@ VENV_PY = ROOT_DIR / ".venv" / "bin" / "python"
 PYTHON_BIN = str(VENV_PY if VENV_PY.exists() else Path(sys.executable))
 
 RUN_ID_PATTERN = re.compile(r"^(?:\d{8}_\d{6}|\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})$")
+STEP_MARKER_RE = re.compile(r"^@@STEP\s+(START|DONE|SKIP|DETAIL)\s+([a-z0-9-]+)(?:\s+(.*))?$")
+STEP_DEFS = [
+    ("scene-detection", "Scene Detection"),
+    ("transcription", "Transcription"),
+    ("transcript-mapping", "Transcript Mapping"),
+    ("finalize-slides", "Finalize Slides"),
+    ("edit", "Edit"),
+    ("translate", "Translate"),
+    ("upscale", "Upscale"),
+]
+STEP_LABELS = {step_id: label for step_id, label in STEP_DEFS}
 
 RUN_LOCK = threading.Lock()
 RUN_STATE = {
@@ -44,7 +56,23 @@ RUN_STATE = {
     "exit_code": None,
     "log_tail": deque(maxlen=600),
     "process": None,
+    "current_step": None,
+    "current_detail": "",
+    "step_statuses": {},
+    "stop_requested": False,
+    "stopping": False,
+    "error_step": None,
 }
+
+
+def make_step_statuses() -> dict[str, dict[str, str]]:
+    return {
+        step_id: {"status": "pending", "detail": ""}
+        for step_id, _label in STEP_DEFS
+    }
+
+
+RUN_STATE["step_statuses"] = make_step_statuses()
 
 
 def latest_run_id() -> str | None:
@@ -545,6 +573,120 @@ def _now() -> int:
     return int(time.time())
 
 
+def snapshot_steps() -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for step_id, label in STEP_DEFS:
+        info = RUN_STATE["step_statuses"].get(step_id, {})
+        items.append(
+            {
+                "id": step_id,
+                "label": label,
+                "status": str(info.get("status", "pending") or "pending"),
+                "detail": str(info.get("detail", "") or ""),
+            }
+        )
+    return items
+
+
+def set_step_state(
+    step_id: str,
+    status: str,
+    detail: str = "",
+    *,
+    keep_current: bool = False,
+) -> None:
+    if step_id not in STEP_LABELS:
+        return
+    RUN_STATE["step_statuses"].setdefault(step_id, {"status": "pending", "detail": ""})
+    RUN_STATE["step_statuses"][step_id]["status"] = status
+    if detail or status in {"done", "skipped", "error", "stopped"}:
+        RUN_STATE["step_statuses"][step_id]["detail"] = detail
+    if status == "running":
+        RUN_STATE["current_step"] = step_id
+        RUN_STATE["current_detail"] = detail
+    elif not keep_current and RUN_STATE.get("current_step") == step_id:
+        RUN_STATE["current_step"] = None
+        RUN_STATE["current_detail"] = ""
+    elif RUN_STATE.get("current_step") == step_id and detail:
+        RUN_STATE["current_detail"] = detail
+    if status == "error":
+        RUN_STATE["error_step"] = step_id
+
+
+def parse_step_marker(line: str) -> tuple[str, str, str] | None:
+    match = STEP_MARKER_RE.match(line.strip())
+    if not match:
+        return None
+    action = match.group(1).upper()
+    step_id = match.group(2)
+    detail = (match.group(3) or "").strip()
+    return action, step_id, detail
+
+
+def apply_step_marker(line: str) -> bool:
+    parsed = parse_step_marker(line)
+    if not parsed:
+        return False
+    action, step_id, detail = parsed
+    with RUN_LOCK:
+        if action == "START":
+            set_step_state(step_id, "running", detail)
+        elif action == "DONE":
+            set_step_state(step_id, "done", detail, keep_current=True)
+        elif action == "SKIP":
+            set_step_state(step_id, "skipped", detail, keep_current=True)
+        elif action == "DETAIL":
+            if step_id in STEP_LABELS:
+                RUN_STATE["step_statuses"].setdefault(step_id, {"status": "pending", "detail": ""})
+                RUN_STATE["step_statuses"][step_id]["detail"] = detail
+                if RUN_STATE["step_statuses"][step_id]["status"] == "pending":
+                    RUN_STATE["step_statuses"][step_id]["status"] = "running"
+                RUN_STATE["current_step"] = step_id
+                RUN_STATE["current_detail"] = detail
+        current_step = RUN_STATE.get("current_step")
+        if current_step and RUN_STATE["step_statuses"].get(current_step, {}).get("status") != "running":
+            RUN_STATE["current_step"] = next(
+                (
+                    step_id
+                    for step_id, _label in STEP_DEFS
+                    if RUN_STATE["step_statuses"].get(step_id, {}).get("status") == "running"
+                ),
+                None,
+            )
+            RUN_STATE["current_detail"] = (
+                RUN_STATE["step_statuses"].get(RUN_STATE["current_step"], {}).get("detail", "")
+                if RUN_STATE["current_step"]
+                else ""
+            )
+    return True
+
+
+def finalize_run_state(code: int, run_id: str | None = None) -> None:
+    with RUN_LOCK:
+        RUN_STATE["exit_code"] = code
+        if RUN_STATE["finished_at"] is None:
+            RUN_STATE["finished_at"] = _now()
+        stopped = bool(RUN_STATE.get("stop_requested"))
+        current_step = RUN_STATE.get("current_step")
+        if current_step and RUN_STATE["step_statuses"].get(current_step, {}).get("status") == "running":
+            terminal = "stopped" if stopped else ("done" if code == 0 else "error")
+            set_step_state(
+                current_step,
+                terminal,
+                RUN_STATE["step_statuses"].get(current_step, {}).get("detail", ""),
+            )
+        RUN_STATE["status"] = "stopped" if stopped else ("done" if code == 0 else "error")
+        RUN_STATE["process"] = None
+        RUN_STATE["stopping"] = False
+        RUN_STATE["stop_requested"] = False
+        if code != 0 and not stopped and not RUN_STATE.get("error_step"):
+            RUN_STATE["error_step"] = current_step
+        if run_id and not RUN_STATE.get("run_id"):
+            RUN_STATE["run_id"] = run_id
+        elif not RUN_STATE.get("run_id"):
+            RUN_STATE["run_id"] = latest_run_id()
+
+
 def snapshot_run_state() -> dict:
     reconcile_run_state()
     with RUN_LOCK:
@@ -555,6 +697,12 @@ def snapshot_run_state() -> dict:
             "run_id": RUN_STATE["run_id"],
             "exit_code": RUN_STATE["exit_code"],
             "log_tail": list(RUN_STATE["log_tail"]),
+            "current_step": RUN_STATE["current_step"],
+            "current_detail": RUN_STATE["current_detail"],
+            "steps": snapshot_steps(),
+            "stop_requested": bool(RUN_STATE["stop_requested"]),
+            "stopping": bool(RUN_STATE["stopping"]),
+            "error_step": RUN_STATE["error_step"],
         }
 
 
@@ -566,13 +714,7 @@ def reconcile_run_state() -> None:
         code = proc.poll()
         if code is None:
             return
-        RUN_STATE["exit_code"] = code
-        if RUN_STATE["finished_at"] is None:
-            RUN_STATE["finished_at"] = _now()
-        RUN_STATE["status"] = "done" if code == 0 else "error"
-        RUN_STATE["process"] = None
-        if not RUN_STATE.get("run_id"):
-            RUN_STATE["run_id"] = latest_run_id()
+    finalize_run_state(code)
 
 
 def _run_worker(process: subprocess.Popen) -> None:
@@ -581,6 +723,8 @@ def _run_worker(process: subprocess.Popen) -> None:
         assert process.stdout is not None
         for raw in process.stdout:
             line = raw.rstrip("\n")
+            if apply_step_marker(line):
+                continue
             with RUN_LOCK:
                 RUN_STATE["log_tail"].append(line)
             if line.startswith("Run dir:"):
@@ -592,13 +736,44 @@ def _run_worker(process: subprocess.Popen) -> None:
                         RUN_STATE["run_id"] = run_id
     finally:
         code = process.wait()
+        finalize_run_state(code, run_id)
+
+
+def _terminate_process_group(pid: int, grace_sec: float = 5.0) -> None:
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    deadline = time.time() + grace_sec
+    while time.time() < deadline:
         with RUN_LOCK:
-            RUN_STATE["exit_code"] = code
-            RUN_STATE["finished_at"] = _now()
-            RUN_STATE["status"] = "done" if code == 0 else "error"
-            RUN_STATE["process"] = None
-            if run_id and not RUN_STATE.get("run_id"):
-                RUN_STATE["run_id"] = run_id
+            proc = RUN_STATE.get("process")
+            if proc is None or proc.poll() is not None:
+                return
+        time.sleep(0.2)
+
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def stop_run() -> tuple[bool, str]:
+    with RUN_LOCK:
+        proc = RUN_STATE.get("process")
+        if proc is None or proc.poll() is not None:
+            return False, "No running run"
+        if RUN_STATE.get("stopping"):
+            return True, "stopping"
+        RUN_STATE["stop_requested"] = True
+        RUN_STATE["stopping"] = True
+        RUN_STATE["status"] = "stopping"
+        pid = int(proc.pid)
+
+    thread = threading.Thread(target=_terminate_process_group, args=(pid,), daemon=True)
+    thread.start()
+    return True, "stopping"
 
 
 def start_run() -> tuple[bool, str]:
@@ -625,6 +800,12 @@ def start_run() -> tuple[bool, str]:
         RUN_STATE["run_id"] = None
         RUN_STATE["exit_code"] = None
         RUN_STATE["log_tail"].clear()
+        RUN_STATE["current_step"] = None
+        RUN_STATE["current_detail"] = ""
+        RUN_STATE["step_statuses"] = make_step_statuses()
+        RUN_STATE["stop_requested"] = False
+        RUN_STATE["stopping"] = False
+        RUN_STATE["error_step"] = None
 
         process = subprocess.Popen(
             ["bash", "scripts/run_slitranet.sh"],
@@ -634,6 +815,7 @@ def start_run() -> tuple[bool, str]:
             text=True,
             bufsize=1,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=True,
         )
         RUN_STATE["process"] = process
 
@@ -849,7 +1031,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/config":
                 data = self._read_json_body()
                 video_path = str(data["VIDEO_PATH"]).strip()
-                resolve_video_config_path(video_path)
+                if video_path:
+                    resolve_video_config_path(video_path)
                 cfg = {
                     "VIDEO_PATH": video_path,
                     "ROI_X0": int(data["ROI_X0"]),
@@ -984,6 +1167,12 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/runs":
                 ok, msg = start_run()
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_run_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_run_state()})
+
+            if path == "/api/runs/stop":
+                ok, msg = stop_run()
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_run_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_run_state()})

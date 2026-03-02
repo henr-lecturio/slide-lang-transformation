@@ -8,6 +8,8 @@ const el = {
   configMeta: document.getElementById("config-meta"),
   saveRoi: document.getElementById("save-roi"),
   saveSettings: document.getElementById("save-settings"),
+  stopRun: document.getElementById("stop-run"),
+  runSteps: document.getElementById("run-steps"),
   roiX0: document.getElementById("roi_x0"),
   roiY0: document.getElementById("roi_y0"),
   roiX1: document.getElementById("roi_x1"),
@@ -97,6 +99,8 @@ const state = {
   currentRunStatus: "idle",
 };
 
+const buttonFeedbackTimers = new WeakMap();
+
 async function apiGet(url) {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
@@ -131,7 +135,9 @@ function setStatus(current) {
   const status = current.status || "idle";
   state.currentRunStatus = status;
   const runId = current.run_id ? `, run ${current.run_id}` : "";
-  el.status.textContent = `status: ${status}${runId}`;
+  const stepText = current.current_step ? ` | ${current.current_step}${current.current_detail ? `: ${current.current_detail}` : ""}` : "";
+  el.status.textContent = `status: ${status}${runId}${stepText}`;
+  renderRunSteps(current);
   syncActionState();
 
   const logs = (current.log_tail || []).slice(-120);
@@ -145,7 +151,7 @@ function setStatus(current) {
 
 function settledRefreshKey(current) {
   const status = current?.status || "";
-  if (status !== "done" && status !== "error") return "";
+  if (!["done", "error", "stopped"].includes(status)) return "";
   const runId = current?.run_id || "";
   const finishedAt = current?.finished_at || "";
   const exitCode = current?.exit_code ?? "";
@@ -158,8 +164,54 @@ function videoThumbUrl(videoPath) {
 
 function syncActionState() {
   const hasVideo = Boolean((state.selectedVideoPath || "").trim());
-  el.startRun.disabled = state.currentRunStatus === "running" || !hasVideo;
+  const isBusyRun = state.currentRunStatus === "running" || state.currentRunStatus === "stopping";
+  el.startRun.disabled = isBusyRun || !hasVideo;
   el.regenOverlay.disabled = !hasVideo;
+  if (el.stopRun) {
+    el.stopRun.disabled = state.currentRunStatus !== "running";
+    el.stopRun.textContent = state.currentRunStatus === "stopping" ? "Stopping..." : "Stop Run";
+  }
+}
+
+function renderRunSteps(current) {
+  const steps = Array.isArray(current?.steps) ? current.steps : [];
+  el.runSteps.innerHTML = "";
+  if (steps.length === 0) return;
+
+  for (const step of steps) {
+    const row = document.createElement("div");
+    row.className = `step-item is-${step.status || "pending"}`;
+
+    const icon = document.createElement("span");
+    icon.className = `step-icon is-${step.status || "pending"}`;
+    icon.setAttribute("aria-hidden", "true");
+    row.appendChild(icon);
+
+    const body = document.createElement("div");
+    body.className = "step-body";
+
+    const head = document.createElement("div");
+    head.className = "step-head";
+
+    const label = document.createElement("span");
+    label.className = "step-label";
+    label.textContent = step.label || step.id || "Step";
+    head.appendChild(label);
+
+    const stateText = document.createElement("span");
+    stateText.className = "step-state";
+    stateText.textContent = step.status || "pending";
+    head.appendChild(stateText);
+    body.appendChild(head);
+
+    const detail = document.createElement("div");
+    detail.className = "step-detail";
+    detail.textContent = step.detail || " ";
+    body.appendChild(detail);
+
+    row.appendChild(body);
+    el.runSteps.appendChild(row);
+  }
 }
 
 function renderSelectedVideo() {
@@ -234,9 +286,6 @@ async function loadConfig() {
 
 async function saveConfig() {
   const videoPath = (state.selectedVideoPath || "").trim();
-  if (!videoPath) {
-    throw new Error("Bitte zuerst ein Video auswählen.");
-  }
   const payload = {
     VIDEO_PATH: videoPath,
     ROI_X0: Number(el.roiX0.value),
@@ -275,6 +324,29 @@ async function saveConfig() {
   };
   await apiPost("/api/config", payload);
   await loadConfig();
+}
+
+function showButtonSuccess(button, successLabel, message = "") {
+  if (!button) return;
+  const existingTimer = buttonFeedbackTimers.get(button);
+  if (existingTimer) {
+    window.clearTimeout(existingTimer);
+  }
+
+  const originalText = button.dataset.originalText || button.textContent;
+  button.dataset.originalText = originalText;
+  button.textContent = successLabel;
+  button.classList.add("is-success");
+  if (message) {
+    el.configMeta.textContent = message;
+  }
+
+  const timer = window.setTimeout(() => {
+    button.textContent = button.dataset.originalText || originalText;
+    button.classList.remove("is-success");
+    buttonFeedbackTimers.delete(button);
+  }, 1600);
+  buttonFeedbackTimers.set(button, timer);
 }
 
 function syncSettingsFieldState() {
@@ -336,6 +408,7 @@ function renderVideoPickerList() {
       state.selectedVideoPath = item.path;
       await saveConfig();
       closeVideoPicker();
+      showButtonSuccess(el.pickVideo, "Selected");
     }));
     el.videoPickerList.appendChild(btn);
   }
@@ -547,6 +620,28 @@ function syncFinalViewControls() {
   el.runFinalResolutionMode.disabled = state.runFinalDisplayMode === "compare";
 }
 
+function canUseX4ForSource(items, slideSourceMode) {
+  if (!Array.isArray(items) || items.length === 0) return false;
+  if (slideSourceMode === "raw") return false;
+  if (slideSourceMode === "translated") {
+    return items.every((item) => Boolean(item.translated_upscaled_slide_image_url));
+  }
+  return items.every((item) => Boolean(item.processed_upscaled_slide_image_url));
+}
+
+function applyResolutionAvailability(selectEl, items, slideSourceMode, stateKey, forceDisable = false) {
+  if (!selectEl) return;
+  const x4Option = selectEl.querySelector('option[value="x4"]');
+  if (!x4Option) return;
+
+  const allowX4 = !forceDisable && canUseX4ForSource(items, slideSourceMode);
+  x4Option.disabled = !allowX4;
+  if (!allowX4 && stateKey && state[stateKey] === "x4") {
+    state[stateKey] = "native";
+    selectEl.value = "native";
+  }
+}
+
 async function setFinalSlideImageMode(runId, eventId, mode) {
   await apiPost(`/api/runs/${encodeURIComponent(runId)}/final-slide-image-mode`, {
     event_id: eventId,
@@ -566,15 +661,6 @@ function resolveRenderedFinalImage(item, slideSourceMode, resolutionMode) {
   const wantsRaw = slideSourceMode === "raw";
   const wantsTranslated = slideSourceMode === "translated";
   const wantsX4 = resolutionMode === "x4";
-
-  if (item.image_mode === "full") {
-    return {
-      url: item.full_image_url || item.image_url || "",
-      name: item.full_image_name || item.image_name || "",
-      slideSourceLabel: "full",
-      resolutionLabel: "native",
-    };
-  }
 
   if (wantsRaw && item.raw_slide_image_url) {
     return {
@@ -612,6 +698,15 @@ function resolveRenderedFinalImage(item, slideSourceMode, resolutionMode) {
     };
   }
 
+  if (item.image_mode === "full") {
+    return {
+      url: item.full_image_url || item.image_url || "",
+      name: item.full_image_name || item.image_name || "",
+      slideSourceLabel: wantsTranslated ? "translated" : "processed",
+      resolutionLabel: "native",
+    };
+  }
+
   if (item.processed_slide_image_url) {
     return {
       url: item.processed_slide_image_url,
@@ -639,14 +734,6 @@ function resolveRenderedFinalImage(item, slideSourceMode, resolutionMode) {
 }
 
 function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
-  if (sourceLabel === "full") {
-    return {
-      url: "",
-      name: "",
-      slideSourceLabel: "full",
-      resolutionLabel,
-    };
-  }
   if (sourceLabel === "raw") {
     if (resolutionMode === "native" && item.raw_slide_image_url) {
       return {
@@ -668,6 +755,14 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
       return {
         url: item.translated_slide_image_url,
         name: item.translated_slide_image_name || item.image_name || "",
+        slideSourceLabel: "translated",
+        resolutionLabel: "native",
+      };
+    }
+    if (resolutionMode === "native" && item.image_mode === "full" && item.full_image_url) {
+      return {
+        url: item.full_image_url,
+        name: item.full_image_name || item.image_name || "",
         slideSourceLabel: "translated",
         resolutionLabel: "native",
       };
@@ -695,6 +790,14 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
       resolutionLabel: "native",
     };
   }
+  if (resolutionMode === "native" && item.image_mode === "full" && item.full_image_url) {
+    return {
+      url: item.full_image_url,
+      name: item.full_image_name || item.image_name || "",
+      slideSourceLabel: "processed",
+      resolutionLabel: "native",
+    };
+  }
   if (resolutionMode === "x4" && item.processed_upscaled_slide_image_url) {
     return {
       url: item.processed_upscaled_slide_image_url,
@@ -713,18 +816,6 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
 
 function resolveCompareRenderedImages(item, slideSourceMode) {
   const left = resolveRenderedFinalImage(item, slideSourceMode, "native");
-  if (left.slideSourceLabel === "full") {
-    return {
-      left,
-      right: {
-        url: "",
-        name: "",
-        slideSourceLabel: "full",
-        resolutionLabel: "x4",
-        missingReason: "x4 nicht verfügbar für Vollbild",
-      },
-    };
-  }
   if (left.slideSourceLabel === "raw") {
     return {
       left,
@@ -813,13 +904,15 @@ function createImageModeToggle(runId, item) {
   return wrap;
 }
 
-async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode, displayMode) {
+async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode, displayMode, resolutionSelect = null, resolutionStateKey = "") {
   if (!runId) {
     target.innerHTML = "";
+    applyResolutionAvailability(resolutionSelect, [], slideSourceMode, resolutionStateKey, true);
     return;
   }
   const data = await apiGet(`/api/runs/${encodeURIComponent(runId)}/final-slides`);
   const items = data.items || [];
+  applyResolutionAvailability(resolutionSelect, items, slideSourceMode, resolutionStateKey, false);
 
   target.innerHTML = "";
   if (items.length === 0) {
@@ -957,9 +1050,11 @@ async function loadLatestSlides() {
   const runId = state.latestRunId;
   if (!runId) {
     el.latestSlidesList.innerHTML = "";
+    applyResolutionAvailability(el.latestFinalResolutionMode, [], state.latestFinalSourceMode, "latestFinalResolutionMode", true);
     return;
   }
   if (state.latestSlidesMode === "base") {
+    applyResolutionAvailability(el.latestFinalResolutionMode, [], state.latestFinalSourceMode, "latestFinalResolutionMode", true);
     await renderBaseEvents(runId, el.latestSlidesList);
     return;
   }
@@ -969,6 +1064,8 @@ async function loadLatestSlides() {
     state.latestFinalSourceMode,
     state.latestFinalResolutionMode,
     state.latestFinalDisplayMode,
+    el.latestFinalResolutionMode,
+    "latestFinalResolutionMode",
   );
 }
 
@@ -976,6 +1073,7 @@ async function loadRunSlides() {
   const runId = el.runSelect.value;
   if (!runId) {
     el.runSlidesList.innerHTML = "";
+    applyResolutionAvailability(el.runFinalResolutionMode, [], state.runFinalSourceMode, "runFinalResolutionMode", true);
     return;
   }
   await renderFinalSlides(
@@ -984,12 +1082,20 @@ async function loadRunSlides() {
     state.runFinalSourceMode,
     state.runFinalResolutionMode,
     state.runFinalDisplayMode,
+    el.runFinalResolutionMode,
+    "runFinalResolutionMode",
   );
 }
 
 async function startRun() {
   await apiPost("/api/runs", {});
   await loadRuns();
+}
+
+async function stopRun() {
+  await apiPost("/api/runs/stop", {});
+  const current = await apiGet("/api/runs/current");
+  setStatus(current);
 }
 
 async function pollCurrent() {
@@ -1010,12 +1116,33 @@ function bindEvents() {
   for (const btn of el.tabButtons) {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   }
-  el.saveRoi.addEventListener("click", () => runTask(saveConfig));
-  el.saveSettings.addEventListener("click", () => runTask(saveConfig));
-  el.regenOverlay.addEventListener("click", () => runTask(regenerateOverlay));
-  el.refreshOverlay.addEventListener("click", () => runTask(loadOverlay));
-  el.startRun.addEventListener("click", () => runTask(startRun));
-  el.refreshRuns.addEventListener("click", () => runTaskImmediate(loadRuns));
+  el.saveRoi.addEventListener("click", () => runTask(async () => {
+    await saveConfig();
+    showButtonSuccess(el.saveRoi, "Saved", "ROI settings saved.");
+  }));
+  el.saveSettings.addEventListener("click", () => runTask(async () => {
+    await saveConfig();
+    showButtonSuccess(el.saveSettings, "Saved", "Settings saved.");
+  }));
+  el.regenOverlay.addEventListener("click", () => runTask(async () => {
+    await regenerateOverlay();
+    showButtonSuccess(el.regenOverlay, "Generated");
+  }));
+  el.refreshOverlay.addEventListener("click", () => runTask(async () => {
+    await loadOverlay();
+    showButtonSuccess(el.refreshOverlay, "Refreshed");
+  }));
+  el.startRun.addEventListener("click", () => runTask(async () => {
+    await startRun();
+    showButtonSuccess(el.startRun, "Started");
+  }));
+  el.stopRun.addEventListener("click", () => runTask(async () => {
+    await stopRun();
+  }));
+  el.refreshRuns.addEventListener("click", () => runTaskImmediate(async () => {
+    await loadRuns();
+    showButtonSuccess(el.refreshRuns, "Refreshed");
+  }));
   el.pickVideo.addEventListener("click", () => runTask(openVideoPicker));
   el.runStepEdit.addEventListener("change", syncSettingsFieldState);
   el.runStepTranslate.addEventListener("change", syncSettingsFieldState);

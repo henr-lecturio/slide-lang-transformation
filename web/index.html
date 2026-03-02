@@ -24,7 +24,11 @@
       <section id="panel-home" class="panel active">
         <div class="home-top">
           <section class="card">
-            <h2>Status</h2>
+            <div class="status-card-head">
+              <h2>Status</h2>
+              <button id="stop-run" type="button" disabled>Stop Run</button>
+            </div>
+            <div id="run-steps" class="step-list" aria-live="polite"></div>
             <pre id="run-log" class="log log-status"></pre>
           </section>
 
@@ -125,7 +129,7 @@
           </div>
           <div class="row">
             <button id="save-roi">Save ROI</button>
-            <span id="config-meta" class="muted"></span>
+            <span id="config-meta" class="muted" aria-live="polite"></span>
           </div>
         </section>
 
