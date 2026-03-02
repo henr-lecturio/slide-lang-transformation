@@ -9,6 +9,7 @@ import mimetypes
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -26,6 +27,7 @@ GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.tx
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
+LAB_DIR = OUTPUT_DIR / "ui_lab"
 OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
 VIDEOS_DIR = ROOT_DIR / "videos"
 VIDEO_THUMB_DIR = OUTPUT_DIR / "ui" / "video_thumbs"
@@ -73,6 +75,24 @@ def make_step_statuses() -> dict[str, dict[str, str]]:
 
 
 RUN_STATE["step_statuses"] = make_step_statuses()
+
+LAB_LOCK = threading.Lock()
+LAB_STATE = {
+    "status": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "job_id": None,
+    "action": "",
+    "run_id": None,
+    "event_id": None,
+    "input_name": "",
+    "original_url": "",
+    "result_url": "",
+    "result_name": "",
+    "message": "",
+    "log_tail": deque(maxlen=400),
+    "process": None,
+}
 
 
 def latest_run_id() -> str | None:
@@ -158,6 +178,11 @@ def ensure_within(base: Path, target: Path) -> Path:
     if base_resolved not in target_resolved.parents:
         raise ValueError("Path traversal blocked")
     return target_resolved
+
+
+def api_file_url_for(path: Path) -> str:
+    rel = ensure_within(ROOT_DIR, path).relative_to(ROOT_DIR).as_posix()
+    return f"/api/file/{rel}"
 
 
 def count_files(path: Path) -> int:
@@ -569,6 +594,183 @@ def run_base_events(run_id: str) -> list[dict]:
     return items
 
 
+def list_lab_images() -> dict:
+    run_id = latest_run_id()
+    if not run_id:
+        return {"latest_run_id": None, "items": []}
+
+    items = run_final_slides(run_id)
+    out: list[dict] = []
+    for item in items:
+        image_url = item.get("processed_slide_image_url") or item.get("image_url") or ""
+        image_name = item.get("processed_slide_image_name") or item.get("image_name") or f"event_{item['event_id']}"
+        if not image_url:
+            continue
+        out.append(
+            {
+                "run_id": run_id,
+                "event_id": int(item["event_id"]),
+                "name": image_name,
+                "image_url": image_url,
+                "slide_start": float(item.get("slide_start", 0.0) or 0.0),
+                "slide_end": float(item.get("slide_end", 0.0) or 0.0),
+                "text": str(item.get("text", "") or "").strip(),
+                "source_mode_final": str(item.get("source_mode_final", "") or ""),
+            }
+        )
+    return {"latest_run_id": run_id, "items": out}
+
+
+def _lab_job_id(action: str) -> str:
+    return f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_{action}_{int(time.time() * 1000) % 1000:03d}"
+
+
+def start_lab_job(action: str, run_id: str, event_id: int) -> tuple[bool, str]:
+    if action not in {"edit", "translate", "upscale"}:
+        return False, "Invalid lab action"
+    if not RUN_ID_PATTERN.match(run_id):
+        return False, "Invalid run id"
+    if event_id <= 0:
+        return False, "event_id must be > 0"
+
+    with RUN_LOCK:
+        proc = RUN_STATE.get("process")
+        if proc is not None and proc.poll() is None:
+            return False, "A main run is currently in progress"
+
+    run_dir = ensure_within(RUNS_DIR, RUNS_DIR / run_id)
+    if not run_dir.exists():
+        return False, "Run not found"
+    source_rel = _find_event_image_rel(run_dir, event_id, ["slide"], include_final=True)
+    if not source_rel:
+        return False, f"No processed final slide found for event {event_id}"
+
+    source_path = ensure_within(run_dir, run_dir / source_rel)
+    env = parse_env(CONFIG_PATH)
+
+    if action == "edit":
+        mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
+        if mode != "gemini":
+            return False, "Image Lab edit currently requires FINAL_SLIDE_POSTPROCESS_MODE=gemini"
+        if not (os.environ.get("GEMINI_API_KEY") or "").strip():
+            return False, "GEMINI_API_KEY is not set in the server environment"
+    elif action == "translate":
+        mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
+        if mode != "gemini":
+            return False, "Image Lab translate currently requires FINAL_SLIDE_TRANSLATION_MODE=gemini"
+        if not (os.environ.get("GEMINI_API_KEY") or "").strip():
+            return False, "GEMINI_API_KEY is not set in the server environment"
+        if not (env.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip():
+            return False, "FINAL_SLIDE_TARGET_LANGUAGE must not be empty"
+    else:
+        mode = (env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").strip().lower()
+        if mode != "swin2sr":
+            return False, "Image Lab upscale currently requires FINAL_SLIDE_UPSCALE_MODE=swin2sr"
+
+    job_id = _lab_job_id(action)
+    job_dir = LAB_DIR / job_id
+    input_dir = job_dir / "input"
+    output_dir = job_dir / "output"
+    original_dir = job_dir / "original"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    original_dir.mkdir(parents=True, exist_ok=True)
+
+    original_copy = original_dir / source_path.name
+    input_copy = input_dir / source_path.name
+    shutil.copy2(source_path, original_copy)
+    shutil.copy2(source_path, input_copy)
+    result_path = output_dir / source_path.name
+
+    if action == "edit":
+        cmd = [
+            PYTHON_BIN,
+            "scripts/edit_final_slides_gemini.py",
+            "--input-dir",
+            str(input_dir),
+            "--output-dir",
+            str(output_dir),
+            "--model",
+            (env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview").strip(),
+            "--prompt-file",
+            str(GEMINI_PROMPT_PATH),
+            "--skip-first-slide",
+            "0",
+        ]
+        message = "Running Gemini edit on selected final slide."
+    elif action == "translate":
+        cmd = [
+            PYTHON_BIN,
+            "scripts/translate_final_slides_gemini.py",
+            "--input-dir",
+            str(input_dir),
+            "--output-dir",
+            str(output_dir),
+            "--model",
+            (env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview").strip(),
+            "--prompt-file",
+            str(GEMINI_TRANSLATE_PROMPT_PATH),
+            "--target-language",
+            (env.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip(),
+        ]
+        message = "Running Gemini translate on selected final slide."
+    else:
+        cmd = [
+            PYTHON_BIN,
+            "scripts/upscale_final_slides_swin2sr.py",
+            "--input-dir",
+            str(input_dir),
+            "--output-dir",
+            str(output_dir),
+            "--model-id",
+            (env.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "caidas/swin2SR-classical-sr-x4-64").strip(),
+            "--device",
+            (env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto") or "auto").strip(),
+            "--tile-size",
+            str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256") or "256")),
+            "--tile-overlap",
+            str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24") or "24")),
+        ]
+        message = "Running Swin2SR upscale on selected final slide."
+
+    with LAB_LOCK:
+        proc = LAB_STATE.get("process")
+        if proc is not None and proc.poll() is None:
+            return False, "Another Image Lab job is already in progress"
+
+        LAB_STATE["status"] = "running"
+        LAB_STATE["started_at"] = _now()
+        LAB_STATE["finished_at"] = None
+        LAB_STATE["job_id"] = job_id
+        LAB_STATE["action"] = action
+        LAB_STATE["run_id"] = run_id
+        LAB_STATE["event_id"] = event_id
+        LAB_STATE["input_name"] = source_path.name
+        LAB_STATE["original_url"] = api_file_url_for(original_copy)
+        LAB_STATE["result_url"] = api_file_url_for(result_path)
+        LAB_STATE["result_name"] = result_path.name
+        LAB_STATE["message"] = message
+        LAB_STATE["log_tail"].clear()
+        LAB_STATE["log_tail"].append(f"[Lab] action={action}")
+        LAB_STATE["log_tail"].append(f"[Lab] input={source_path.name}")
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=True,
+        )
+        LAB_STATE["process"] = process
+
+    thread = threading.Thread(target=_lab_worker, args=(process,), daemon=True)
+    thread.start()
+    return True, "started"
+
+
 def _now() -> int:
     return int(time.time())
 
@@ -685,6 +887,60 @@ def finalize_run_state(code: int, run_id: str | None = None) -> None:
             RUN_STATE["run_id"] = run_id
         elif not RUN_STATE.get("run_id"):
             RUN_STATE["run_id"] = latest_run_id()
+
+
+def snapshot_lab_state() -> dict:
+    reconcile_lab_state()
+    with LAB_LOCK:
+        return {
+            "status": LAB_STATE["status"],
+            "started_at": LAB_STATE["started_at"],
+            "finished_at": LAB_STATE["finished_at"],
+            "job_id": LAB_STATE["job_id"],
+            "action": LAB_STATE["action"],
+            "run_id": LAB_STATE["run_id"],
+            "event_id": LAB_STATE["event_id"],
+            "input_name": LAB_STATE["input_name"],
+            "original_url": LAB_STATE["original_url"],
+            "result_url": LAB_STATE["result_url"],
+            "result_name": LAB_STATE["result_name"],
+            "message": LAB_STATE["message"],
+            "log_tail": list(LAB_STATE["log_tail"]),
+        }
+
+
+def finalize_lab_state(code: int) -> None:
+    with LAB_LOCK:
+        LAB_STATE["finished_at"] = _now()
+        LAB_STATE["status"] = "done" if code == 0 else "error"
+        LAB_STATE["process"] = None
+        if code != 0 and not LAB_STATE["message"]:
+            LAB_STATE["message"] = "Lab job failed."
+
+
+def reconcile_lab_state() -> None:
+    with LAB_LOCK:
+        proc = LAB_STATE.get("process")
+        if proc is None:
+            return
+        code = proc.poll()
+        if code is None:
+            return
+    finalize_lab_state(code)
+
+
+def _lab_worker(process: subprocess.Popen) -> None:
+    try:
+        assert process.stdout is not None
+        for raw in process.stdout:
+            line = raw.rstrip("\n")
+            if line.startswith("@@STEP "):
+                continue
+            with LAB_LOCK:
+                LAB_STATE["log_tail"].append(line)
+    finally:
+        code = process.wait()
+        finalize_lab_state(code)
 
 
 def snapshot_run_state() -> dict:
@@ -944,6 +1200,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/runs/current":
                 return self._send_json(200, snapshot_run_state())
 
+            if path == "/api/lab/images":
+                payload = list_lab_images()
+                payload["current"] = snapshot_lab_state()
+                return self._send_json(200, payload)
+
+            if path == "/api/lab/status":
+                return self._send_json(200, snapshot_lab_state())
+
             if path.startswith("/api/runs/"):
                 rest = path[len("/api/runs/") :]
                 parts = rest.split("/")
@@ -1176,6 +1440,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_run_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_run_state()})
+
+            if path in {"/api/lab/edit", "/api/lab/translate", "/api/lab/upscale"}:
+                data = self._read_json_body()
+                action = path.rsplit("/", 1)[-1]
+                ok, msg = start_lab_job(action, str(data["run_id"]).strip(), int(data["event_id"]))
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_lab_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_lab_state()})
 
             return self._send_json(404, {"error": "Not found"})
         except (KeyError, ValueError) as exc:

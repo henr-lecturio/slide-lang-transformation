@@ -15,6 +15,7 @@
       <nav class="topnav" aria-label="Primary">
         <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
         <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
+        <button id="tab-image-lab" class="tab-btn" data-tab="image-lab" type="button">Image Lab</button>
         <button id="tab-roi" class="tab-btn" data-tab="roi" type="button">ROI</button>
         <button id="tab-settings" class="tab-btn" data-tab="settings" type="button">Settings</button>
       </nav>
@@ -23,15 +24,6 @@
     <main>
       <section id="panel-home" class="panel active">
         <div class="home-top">
-          <section class="card">
-            <div class="status-card-head">
-              <h2>Status</h2>
-              <button id="stop-run" type="button" disabled>Stop Run</button>
-            </div>
-            <div id="run-steps" class="step-list" aria-live="polite"></div>
-            <pre id="run-log" class="log log-status"></pre>
-          </section>
-
           <section class="card">
             <h2>Run Control</h2>
             <div class="row wrap">
@@ -43,6 +35,18 @@
             <div class="video-preview-wrap">
               <img id="selected-video-thumb" alt="Selected video thumbnail" />
             </div>
+          </section>
+
+          <section class="card">
+            <div class="status-card-head">
+              <h2>Status</h2>
+              <div class="status-actions">
+                <button id="open-status" type="button">Open Terminal</button>
+                <button id="stop-run" type="button" disabled>Stop Run</button>
+              </div>
+            </div>
+            <div id="status-summary" class="muted">status: idle</div>
+            <div id="run-steps" class="step-list" aria-live="polite"></div>
           </section>
         </div>
 
@@ -115,6 +119,37 @@
           <div id="run-summary" class="muted"></div>
           <pre id="csv-preview" class="log"></pre>
           <div id="run-slides-list" class="slides-list"></div>
+        </section>
+      </section>
+
+      <section id="panel-image-lab" class="panel">
+        <section class="card">
+          <h2>Image Lab</h2>
+          <div class="settings-note muted">Einzelbild-Test auf Basis des neuesten `final_slide_images`-Satzes. Die Aktionen verwenden die aktuellen Werte aus `Settings`.</div>
+          <div class="row wrap">
+            <button id="lab-pick-image" type="button">Bild wählen</button>
+            <button id="lab-run-edit" type="button">Test Edit</button>
+            <button id="lab-run-translate" type="button">Test Translate</button>
+            <button id="lab-run-upscale" type="button">Test Upscale</button>
+          </div>
+          <div id="lab-selected-image" class="muted">Kein Bild gewählt.</div>
+          <div id="lab-job-status" class="muted">status: idle</div>
+          <div id="lab-job-meta" class="muted">Uses current Settings.</div>
+          <pre id="lab-log" class="log"></pre>
+          <div class="lab-preview-grid">
+            <section class="lab-preview-panel">
+              <div class="slide-compare-label">Original</div>
+              <div class="image-wrap lab-preview-wrap">
+                <img id="lab-original-image" alt="Selected lab input image" />
+              </div>
+            </section>
+            <section class="lab-preview-panel">
+              <div class="slide-compare-label">Result</div>
+              <div class="image-wrap lab-preview-wrap">
+                <img id="lab-result-image" alt="Latest lab result image" />
+              </div>
+            </section>
+          </div>
         </section>
       </section>
 
@@ -266,6 +301,30 @@
           <button id="video-picker-close" class="video-picker-close" type="button" aria-label="Close video picker">×</button>
         </div>
         <div id="video-picker-list" class="video-picker-list"></div>
+      </div>
+    </div>
+
+    <div id="lab-image-picker-modal" class="video-picker-modal" aria-hidden="true">
+      <div id="lab-image-picker-backdrop" class="video-picker-backdrop"></div>
+      <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Image picker">
+        <div class="video-picker-head">
+          <strong>Final Slide wählen</strong>
+          <button id="lab-image-picker-close" class="video-picker-close" type="button" aria-label="Close image picker">×</button>
+        </div>
+        <div id="lab-image-picker-list" class="video-picker-list"></div>
+      </div>
+    </div>
+
+    <div id="status-modal" class="status-modal" aria-hidden="true">
+      <div id="status-modal-backdrop" class="status-modal-backdrop"></div>
+      <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="Run terminal log">
+        <div class="video-picker-head">
+          <h2>Run Terminal</h2>
+          <button id="status-modal-close" class="video-picker-close" type="button" aria-label="Close status">×</button>
+        </div>
+        <div class="status-modal-body">
+          <pre id="run-log" class="log log-status status-modal-log"></pre>
+        </div>
       </div>
     </div>
 

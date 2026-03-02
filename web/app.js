@@ -3,12 +3,15 @@ const el = {
   tabButtons: document.querySelectorAll(".tab-btn"),
   panelHome: document.getElementById("panel-home"),
   panelAllRuns: document.getElementById("panel-all-runs"),
+  panelImageLab: document.getElementById("panel-image-lab"),
   panelRoi: document.getElementById("panel-roi"),
   panelSettings: document.getElementById("panel-settings"),
   configMeta: document.getElementById("config-meta"),
   saveRoi: document.getElementById("save-roi"),
   saveSettings: document.getElementById("save-settings"),
+  openStatus: document.getElementById("open-status"),
   stopRun: document.getElementById("stop-run"),
+  statusSummary: document.getElementById("status-summary"),
   runSteps: document.getElementById("run-steps"),
   roiX0: document.getElementById("roi_x0"),
   roiY0: document.getElementById("roi_y0"),
@@ -54,6 +57,16 @@ const el = {
   selectedVideoPath: document.getElementById("selected-video-path"),
   selectedVideoThumb: document.getElementById("selected-video-thumb"),
   runLog: document.getElementById("run-log"),
+  labPickImage: document.getElementById("lab-pick-image"),
+  labRunEdit: document.getElementById("lab-run-edit"),
+  labRunTranslate: document.getElementById("lab-run-translate"),
+  labRunUpscale: document.getElementById("lab-run-upscale"),
+  labSelectedImage: document.getElementById("lab-selected-image"),
+  labJobStatus: document.getElementById("lab-job-status"),
+  labJobMeta: document.getElementById("lab-job-meta"),
+  labLog: document.getElementById("lab-log"),
+  labOriginalImage: document.getElementById("lab-original-image"),
+  labResultImage: document.getElementById("lab-result-image"),
   latestSummary: document.getElementById("latest-summary"),
   latestViewMode: document.getElementById("latest-view-mode"),
   latestFinalSourceMode: document.getElementById("latest-final-source-mode"),
@@ -75,10 +88,17 @@ const el = {
   imageModalClose: document.getElementById("image-modal-close"),
   imageModalImg: document.getElementById("image-modal-img"),
   imageModalCaption: document.getElementById("image-modal-caption"),
+  statusModal: document.getElementById("status-modal"),
+  statusModalBackdrop: document.getElementById("status-modal-backdrop"),
+  statusModalClose: document.getElementById("status-modal-close"),
   videoPickerModal: document.getElementById("video-picker-modal"),
   videoPickerBackdrop: document.getElementById("video-picker-backdrop"),
   videoPickerClose: document.getElementById("video-picker-close"),
   videoPickerList: document.getElementById("video-picker-list"),
+  labImagePickerModal: document.getElementById("lab-image-picker-modal"),
+  labImagePickerBackdrop: document.getElementById("lab-image-picker-backdrop"),
+  labImagePickerClose: document.getElementById("lab-image-picker-close"),
+  labImagePickerList: document.getElementById("lab-image-picker-list"),
 };
 
 const state = {
@@ -86,6 +106,8 @@ const state = {
   latestRunId: null,
   selectedVideoPath: "",
   videoItems: [],
+  labImages: [],
+  labSelectedImage: null,
   latestCsvLines: [],
   latestCsvExpanded: false,
   latestSlidesMode: "final",
@@ -97,6 +119,7 @@ const state = {
   runFinalResolutionMode: "native",
   lastSettledRefreshKey: "",
   currentRunStatus: "idle",
+  labStatus: "idle",
 };
 
 const buttonFeedbackTimers = new WeakMap();
@@ -137,6 +160,9 @@ function setStatus(current) {
   const runId = current.run_id ? `, run ${current.run_id}` : "";
   const stepText = current.current_step ? ` | ${current.current_step}${current.current_detail ? `: ${current.current_detail}` : ""}` : "";
   el.status.textContent = `status: ${status}${runId}${stepText}`;
+  if (el.statusSummary) {
+    el.statusSummary.textContent = `status: ${status}${runId}`;
+  }
   renderRunSteps(current);
   syncActionState();
 
@@ -171,6 +197,7 @@ function syncActionState() {
     el.stopRun.disabled = state.currentRunStatus !== "running";
     el.stopRun.textContent = state.currentRunStatus === "stopping" ? "Stopping..." : "Stop Run";
   }
+  syncLabActionState();
 }
 
 function renderRunSteps(current) {
@@ -212,6 +239,16 @@ function renderRunSteps(current) {
     row.appendChild(body);
     el.runSteps.appendChild(row);
   }
+}
+
+function openStatusModal() {
+  el.statusModal.classList.add("open");
+  el.statusModal.setAttribute("aria-hidden", "false");
+}
+
+function closeStatusModal() {
+  el.statusModal.classList.remove("open");
+  el.statusModal.setAttribute("aria-hidden", "true");
 }
 
 function renderSelectedVideo() {
@@ -275,6 +312,7 @@ function setActiveTab(tabName) {
   }
   el.panelHome.classList.toggle("active", tabName === "home");
   el.panelAllRuns.classList.toggle("active", tabName === "all-runs");
+  el.panelImageLab.classList.toggle("active", tabName === "image-lab");
   el.panelRoi.classList.toggle("active", tabName === "roi");
   el.panelSettings.classList.toggle("active", tabName === "settings");
 }
@@ -375,6 +413,11 @@ function closeVideoPicker() {
   el.videoPickerModal.setAttribute("aria-hidden", "true");
 }
 
+function closeLabImagePicker() {
+  el.labImagePickerModal.classList.remove("open");
+  el.labImagePickerModal.setAttribute("aria-hidden", "true");
+}
+
 function renderVideoPickerList() {
   const items = state.videoItems || [];
   el.videoPickerList.innerHTML = "";
@@ -423,6 +466,123 @@ async function openVideoPicker() {
   renderVideoPickerList();
   el.videoPickerModal.classList.add("open");
   el.videoPickerModal.setAttribute("aria-hidden", "false");
+}
+
+function syncLabActionState() {
+  const hasImage = Boolean(state.labSelectedImage && state.labSelectedImage.image_url);
+  const isBusy = state.labStatus === "running";
+  el.labPickImage.disabled = isBusy;
+  el.labRunEdit.disabled = isBusy || !hasImage;
+  el.labRunTranslate.disabled = isBusy || !hasImage;
+  el.labRunUpscale.disabled = isBusy || !hasImage;
+}
+
+function renderLabSelection() {
+  const item = state.labSelectedImage;
+  if (!item) {
+    el.labSelectedImage.textContent = "Kein Bild gewählt.";
+    el.labOriginalImage.removeAttribute("src");
+    el.labOriginalImage.onclick = null;
+    syncLabActionState();
+    return;
+  }
+  const metaText = `run=${item.run_id} | event=${item.event_id} | ${Number(item.slide_start || 0).toFixed(2)}s - ${Number(item.slide_end || 0).toFixed(2)}s | ${item.name}`;
+  el.labSelectedImage.textContent = metaText;
+  el.labOriginalImage.src = `${item.image_url}?v=${Date.now()}`;
+  el.labOriginalImage.onclick = () => openImageModal(item.image_url, item.name || `event_${item.event_id}`);
+  syncLabActionState();
+}
+
+function renderLabImagePickerList() {
+  const items = state.labImages || [];
+  el.labImagePickerList.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Keine final_slide_images im neuesten Run gefunden.";
+    el.labImagePickerList.appendChild(empty);
+    return;
+  }
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "video-item video-file";
+    btn.textContent = `event ${item.event_id} | ${Number(item.slide_start || 0).toFixed(2)}s - ${Number(item.slide_end || 0).toFixed(2)}s | ${item.name}`;
+    if (state.labSelectedImage && state.labSelectedImage.run_id === item.run_id && state.labSelectedImage.event_id === item.event_id) {
+      btn.classList.add("selected");
+    }
+    btn.addEventListener("click", () => runTask(async () => {
+      state.labSelectedImage = item;
+      renderLabSelection();
+      closeLabImagePicker();
+      showButtonSuccess(el.labPickImage, "Selected");
+    }));
+    el.labImagePickerList.appendChild(btn);
+  }
+}
+
+async function openLabImagePicker() {
+  const data = await apiGet("/api/lab/images");
+  state.labImages = data.items || [];
+  if (!state.labSelectedImage && state.labImages.length > 0) {
+    state.labSelectedImage = state.labImages[0];
+    renderLabSelection();
+  }
+  renderLabImagePickerList();
+  el.labImagePickerModal.classList.add("open");
+  el.labImagePickerModal.setAttribute("aria-hidden", "false");
+}
+
+function setLabStatus(current) {
+  const status = current?.status || "idle";
+  state.labStatus = status;
+  const action = current?.action ? ` | action=${current.action}` : "";
+  const jobId = current?.job_id ? ` | job=${current.job_id}` : "";
+  el.labJobStatus.textContent = `status: ${status}${action}${jobId}`;
+  const resultMeta = [];
+  if (current?.message) resultMeta.push(current.message);
+  if (current?.input_name) resultMeta.push(`input=${current.input_name}`);
+  if (current?.result_name) resultMeta.push(`result=${current.result_name}`);
+  el.labJobMeta.textContent = resultMeta.length > 0 ? resultMeta.join(" | ") : "Uses current Settings.";
+  const logs = (current?.log_tail || []).slice(-120);
+  const nextLog = logs.join("\n");
+  if (el.labLog.textContent !== nextLog) {
+    el.labLog.textContent = nextLog;
+    el.labLog.scrollTop = el.labLog.scrollHeight;
+  }
+  if (current?.result_url) {
+    el.labResultImage.src = `${current.result_url}?v=${Date.now()}`;
+    el.labResultImage.onclick = () => openImageModal(current.result_url, current.result_name || "lab-result");
+  } else {
+    el.labResultImage.removeAttribute("src");
+    el.labResultImage.onclick = null;
+  }
+  if (!state.labSelectedImage && current?.original_url) {
+    el.labSelectedImage.textContent = current.input_name
+      ? `Letzter Testinput: ${current.input_name}`
+      : "Letzter Testinput";
+    el.labOriginalImage.src = `${current.original_url}?v=${Date.now()}`;
+    el.labOriginalImage.onclick = () => openImageModal(current.original_url, current.input_name || "lab-input");
+  }
+  syncLabActionState();
+}
+
+async function loadLabStatus() {
+  const current = await apiGet("/api/lab/status");
+  setLabStatus(current);
+}
+
+async function runLabAction(action) {
+  if (!state.labSelectedImage) {
+    throw new Error("Bitte zuerst ein Bild im Image Lab wählen.");
+  }
+  el.labResultImage.removeAttribute("src");
+  el.labResultImage.onclick = null;
+  const res = await apiPost(`/api/lab/${action}`, {
+    run_id: state.labSelectedImage.run_id,
+    event_id: state.labSelectedImage.event_id,
+  });
+  setLabStatus(res.current || {});
 }
 
 async function loadOverlay() {
@@ -1136,6 +1296,7 @@ function bindEvents() {
     await startRun();
     showButtonSuccess(el.startRun, "Started");
   }));
+  el.openStatus.addEventListener("click", openStatusModal);
   el.stopRun.addEventListener("click", () => runTask(async () => {
     await stopRun();
   }));
@@ -1144,6 +1305,19 @@ function bindEvents() {
     showButtonSuccess(el.refreshRuns, "Refreshed");
   }));
   el.pickVideo.addEventListener("click", () => runTask(openVideoPicker));
+  el.labPickImage.addEventListener("click", () => runTask(openLabImagePicker));
+  el.labRunEdit.addEventListener("click", () => runTask(async () => {
+    await runLabAction("edit");
+    showButtonSuccess(el.labRunEdit, "Started");
+  }));
+  el.labRunTranslate.addEventListener("click", () => runTask(async () => {
+    await runLabAction("translate");
+    showButtonSuccess(el.labRunTranslate, "Started");
+  }));
+  el.labRunUpscale.addEventListener("click", () => runTask(async () => {
+    await runLabAction("upscale");
+    showButtonSuccess(el.labRunUpscale, "Started");
+  }));
   el.runStepEdit.addEventListener("change", syncSettingsFieldState);
   el.runStepTranslate.addEventListener("change", syncSettingsFieldState);
   el.runStepUpscale.addEventListener("change", syncSettingsFieldState);
@@ -1185,11 +1359,21 @@ function bindEvents() {
   });
   el.imageModalClose.addEventListener("click", closeImageModal);
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
+  el.statusModalClose.addEventListener("click", closeStatusModal);
+  el.statusModalBackdrop.addEventListener("click", closeStatusModal);
+  el.labImagePickerClose.addEventListener("click", closeLabImagePicker);
+  el.labImagePickerBackdrop.addEventListener("click", closeLabImagePicker);
   el.videoPickerClose.addEventListener("click", closeVideoPicker);
   el.videoPickerBackdrop.addEventListener("click", closeVideoPicker);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && el.imageModal.classList.contains("open")) {
       closeImageModal();
+    }
+    if (e.key === "Escape" && el.statusModal.classList.contains("open")) {
+      closeStatusModal();
+    }
+    if (e.key === "Escape" && el.labImagePickerModal.classList.contains("open")) {
+      closeLabImagePicker();
     }
     if (e.key === "Escape" && el.videoPickerModal.classList.contains("open")) {
       closeVideoPicker();
@@ -1233,11 +1417,14 @@ async function init() {
   state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
   syncFinalViewControls();
   syncSettingsFieldState();
+  syncLabActionState();
   setActiveTab("home");
   await runTask(loadConfig);
   await runTask(loadOverlay);
   await runTask(loadRuns);
+  await runTask(loadLabStatus);
   setInterval(pollCurrent, 2000);
+  setInterval(() => { runTaskImmediate(loadLabStatus); }, 2000);
 }
 
 init();

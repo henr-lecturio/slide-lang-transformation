@@ -96,6 +96,10 @@ def slide_index_from_name(path: Path) -> int | None:
     match = SLIDE_INDEX_RE.match(path.name)
     if not match:
         return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 def load_source_manifest(path: Path | None) -> dict[int, str]:
@@ -114,10 +118,6 @@ def load_source_manifest(path: Path | None) -> dict[int, str]:
             if mode in {"slide", "full"}:
                 out[slide_index] = mode
     return out
-    try:
-        return int(match.group(1))
-    except ValueError:
-        return None
 
 
 def make_overlay(image: np.ndarray, mask: np.ndarray) -> np.ndarray:

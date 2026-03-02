@@ -163,6 +163,10 @@ main {
   gap: 18px;
 }
 
+.home-top > :only-child {
+  grid-column: 1 / -1;
+}
+
 .card {
   position: relative;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(250, 252, 255, 0.98) 100%);
@@ -191,6 +195,17 @@ main {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.status-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#status-summary {
+  margin-bottom: 12px;
 }
 
 .grid {
@@ -627,10 +642,29 @@ button.is-success::before {
 }
 
 #selected-video-thumb,
-#overlay-image {
+#overlay-image,
+#lab-original-image,
+#lab-result-image {
   width: 100%;
   height: auto;
   display: block;
+}
+
+.lab-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.lab-preview-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.lab-preview-wrap {
+  min-height: 220px;
+  overflow: hidden;
 }
 
 .log {
@@ -819,6 +853,7 @@ button.is-success::before {
 }
 
 .image-modal,
+.status-modal,
 .video-picker-modal {
   position: fixed;
   inset: 0;
@@ -829,16 +864,22 @@ button.is-success::before {
   z-index: 90;
 }
 
+.status-modal {
+  z-index: 92;
+}
+
 .video-picker-modal {
   z-index: 95;
 }
 
 .image-modal.open,
+.status-modal.open,
 .video-picker-modal.open {
   display: block;
 }
 
 .image-modal-backdrop,
+.status-modal-backdrop,
 .video-picker-backdrop {
   position: absolute;
   inset: 0;
@@ -847,6 +888,7 @@ button.is-success::before {
 }
 
 .image-modal-dialog,
+.status-modal-dialog,
 .video-picker-dialog {
   position: relative;
   border: 1px solid var(--border);
@@ -905,6 +947,23 @@ button.is-success::before {
   max-height: 90vh;
   margin: 5vh auto;
   background: var(--surface);
+}
+
+.status-modal-dialog {
+  width: min(1080px, 94vw);
+  max-height: 90vh;
+  margin: 5vh auto;
+  background: var(--surface);
+}
+
+.status-modal-body {
+  padding: 16px;
+}
+
+.status-modal-log {
+  min-height: 360px;
+  height: 52vh;
+  margin-top: 0;
 }
 
 .video-picker-head {
@@ -995,6 +1054,10 @@ button.is-success::before {
   }
 
   .slide-compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-preview-grid {
     grid-template-columns: 1fr;
   }
 }
