@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
 VENV_DIR="$ROOT_DIR/.venv"
+PYTHON_BIN="$VENV_DIR/bin/python"
 VIDEO_PATH_ARG=""
 
 usage() {
@@ -44,8 +45,6 @@ if [ ! -d "$VENV_DIR" ]; then
   echo "ERROR: .venv not found. Run: bash scripts/setup_venv.sh" >&2
   exit 1
 fi
-
-source "$VENV_DIR/bin/activate"
 
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
@@ -92,7 +91,7 @@ fi
 DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/prepare_dataset.sh"
 bash "$ROOT_DIR/scripts/check_weights.sh"
 
-if ! python - <<'PY'
+if ! "$PYTHON_BIN" - <<'PY'
 import torch
 raise SystemExit(0 if torch.cuda.is_available() else 1)
 PY
@@ -103,7 +102,7 @@ then
 fi
 
 pushd "$ROOT_DIR/slitranet" >/dev/null
-python test_SliTraNet.py \
+"$PYTHON_BIN" test_SliTraNet.py \
   --dataset_dir "$DATASET_DIR" \
   --phase "$PHASE" \
   --pred_dir "$PRED_DIR" \
@@ -126,7 +125,7 @@ else
   echo "WARN: Stage-1 result file not found, initial event will be skipped: $STAGE1_FILE" >&2
 fi
 
-python "$ROOT_DIR/scripts/postprocess_slitranet.py" \
+"$PYTHON_BIN" "$ROOT_DIR/scripts/postprocess_slitranet.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --roi-file "$ROI_FILE" \
   --transitions-file "$TRANSITIONS_FILE" \
@@ -153,13 +152,13 @@ if [ -n "${WHISPER_LANGUAGE:-}" ]; then
 fi
 
 echo "[ASR] Preparing transcription step ..."
-python "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+"$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
 echo "[ASR] Transcription step finished."
 
 SLIDE_TEXT_MAP_JSON="$OUT_BASE/slide_text_map.json"
 SLIDE_TEXT_MAP_CSV="$OUT_BASE/slide_text_map.csv"
 echo "[ASR] Mapping transcript to slide windows ..."
-python "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
+"$PYTHON_BIN" "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --slide-csv "$OUT_BASE/slide_changes.csv" \
   --transcript-json "$TRANSCRIPT_JSON" \
@@ -193,7 +192,7 @@ if [ -f "$STAGE1_FILE" ]; then
 fi
 
 echo "[ASR] Filtering speaker-only slides and merging transcript ..."
-python "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
+"$PYTHON_BIN" "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
 echo "[ASR] Speaker-only filtering finished."
 
 LATEST_LINK="$ROOT_DIR/output/latest"

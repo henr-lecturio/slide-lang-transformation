@@ -89,6 +89,178 @@ def find_event_image(image_dir: Path, event_id: int) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def build_final_corner_cleanup_mask(
+    patch: np.ndarray,
+    *,
+    corner_right_ratio: float = 0.12,
+    corner_bottom_ratio: float = 0.40,
+    grabcut_iters: int = 3,
+    min_component_area: int = 350,
+    max_mask_area_ratio: float = 0.08,
+    border_tolerance_px: int = 2,
+) -> np.ndarray | None:
+    if patch.ndim != 3 or patch.shape[2] != 3:
+        return None
+
+    h, w = patch.shape[:2]
+    if h <= 0 or w <= 0:
+        return None
+
+    right_ratio = min(0.50, max(0.04, float(corner_right_ratio)))
+    bottom_ratio = min(0.60, max(0.12, float(corner_bottom_ratio)))
+    zone_x0 = max(0, int(round(w * (1.0 - right_ratio))))
+    zone_y0 = max(0, int(round(h * (1.0 - bottom_ratio))))
+    zone = patch[zone_y0:, zone_x0:]
+    if zone.size == 0:
+        return None
+
+    zh, zw = zone.shape[:2]
+    if zh < 16 or zw < 16:
+        return None
+
+    gc_mask = np.full((zh, zw), cv2.GC_PR_BGD, dtype=np.uint8)
+    bg_left = max(6, int(round(zw * 0.32)))
+    bg_top = max(6, int(round(zh * 0.22)))
+    top_strip = max(4, int(round(zh * 0.08)))
+    left_strip = max(4, int(round(zw * 0.10)))
+    gc_mask[:bg_top, :bg_left] = cv2.GC_BGD
+    gc_mask[:top_strip, :] = cv2.GC_BGD
+    gc_mask[:, :left_strip] = cv2.GC_BGD
+
+    fg_strip_w = max(4, int(round(zw * 0.08)))
+    fg_y0 = max(0, int(round(zh * 0.06)))
+    gc_mask[fg_y0:, zw - fg_strip_w :] = cv2.GC_FGD
+
+    bgd_model = np.zeros((1, 65), dtype=np.float64)
+    fgd_model = np.zeros((1, 65), dtype=np.float64)
+    try:
+        cv2.grabCut(
+            zone,
+            gc_mask,
+            None,
+            bgd_model,
+            fgd_model,
+            max(1, int(grabcut_iters)),
+            cv2.GC_INIT_WITH_MASK,
+        )
+    except cv2.error:
+        return None
+
+    fg_mask = np.where(
+        (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD),
+        255,
+        0,
+    ).astype(np.uint8)
+    if not np.any(fg_mask):
+        return None
+
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, open_kernel)
+    fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, close_kernel)
+    if not np.any(fg_mask):
+        return None
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(fg_mask, connectivity=8)
+    if num_labels <= 1:
+        return None
+
+    max_mask_pixels = max(1, int(round(float(max_mask_area_ratio) * h * w)))
+    border_tol = max(0, int(border_tolerance_px))
+    zone_mask = np.zeros((zh, zw), dtype=np.uint8)
+
+    for label_idx in range(1, num_labels):
+        x, y, comp_w, comp_h, area = stats[label_idx]
+        if area < max(1, int(min_component_area)) or area > max_mask_pixels:
+            continue
+        touches_right = (x + comp_w) >= (zw - border_tol)
+        if not touches_right:
+            continue
+        zone_mask[labels == label_idx] = 255
+
+    if not np.any(zone_mask):
+        return None
+
+    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    zone_mask = cv2.dilate(zone_mask, dilate_kernel, iterations=1)
+    zone_mask = cv2.morphologyEx(zone_mask, cv2.MORPH_CLOSE, close_kernel)
+
+    if int(np.count_nonzero(zone_mask)) > max_mask_pixels:
+        return None
+
+    full_mask = np.zeros((h, w), dtype=np.uint8)
+    full_mask[zone_y0:, zone_x0:] = zone_mask
+    return full_mask
+
+
+def local_row_fill(
+    patch: np.ndarray,
+    mask: np.ndarray,
+    *,
+    sample_width: int = 18,
+    vertical_radius: int = 2,
+) -> np.ndarray | None:
+    if patch.ndim != 3 or mask.ndim != 2 or patch.shape[:2] != mask.shape[:2]:
+        return None
+    if not np.any(mask):
+        return patch.copy()
+
+    h, w = mask.shape
+    cleaned = patch.copy()
+    fallback_y0 = max(0, h - max(48, h // 6))
+    fallback_x1 = max(1, w - max(64, w // 10))
+    fallback_x0 = max(0, fallback_x1 - max(24, sample_width))
+    fallback_strip = patch[fallback_y0:, fallback_x0:fallback_x1]
+    if fallback_strip.size == 0:
+        fallback_strip = patch[max(0, h - max(48, h // 6)) :, : max(24, sample_width)]
+    fallback_color = np.median(fallback_strip.reshape(-1, 3), axis=0).astype(np.uint8)
+    last_color = fallback_color.astype(np.float32)
+
+    for y in range(h):
+        xs = np.flatnonzero(mask[y] > 0)
+        if xs.size == 0:
+            continue
+
+        x_start = int(xs.min())
+        x_end = int(xs.max())
+        samples: list[np.ndarray] = []
+        for dy in range(-vertical_radius, vertical_radius + 1):
+            yy = y + dy
+            if yy < 0 or yy >= h:
+                continue
+            left_end = x_start
+            left_start = max(0, left_end - sample_width)
+            if left_end <= left_start:
+                continue
+            row_mask = mask[yy, left_start:left_end] == 0
+            row_pixels = patch[yy, left_start:left_end][row_mask]
+            if row_pixels.size:
+                samples.append(row_pixels.reshape(-1, 3))
+
+        if samples:
+            color = np.median(np.vstack(samples), axis=0).astype(np.float32)
+            last_color = color
+        else:
+            color = last_color
+
+        cleaned[y, x_start : x_end + 1] = np.clip(color, 0, 255).astype(np.uint8)
+
+    blur = cv2.GaussianBlur(cleaned, (1, 5), 0)
+    cleaned[mask > 0] = blur[mask > 0]
+    return cleaned
+
+
+def clean_final_slide_image(src_slide: Path) -> np.ndarray | None:
+    patch = cv2.imread(str(src_slide), cv2.IMREAD_COLOR)
+    if patch is None or patch.size == 0:
+        return None
+    mask = build_final_corner_cleanup_mask(patch)
+    if mask is None:
+        return patch
+    cleaned = local_row_fill(patch, mask)
+    return cleaned if cleaned is not None else patch
+
+
 def frame_interval_for_event(start_sec: float, end_sec: float, fps: float) -> tuple[int, int]:
     start_frame = max(1, int(math.floor(max(0.0, start_sec) * fps)) + 1)
     end_frame = max(start_frame, int(math.ceil(max(start_sec, end_sec) * fps)))
@@ -212,7 +384,15 @@ def copy_kept_images(
         src_slide = find_event_image(src_slide_dir, event_id)
         if src_slide is not None and dst_slide_dir is not None:
             dst_name = f"slide_{idx:03d}_{src_slide.name}"
-            shutil.copy2(src_slide, dst_slide_dir / dst_name)
+            dst_path = dst_slide_dir / dst_name
+            if idx == 1:
+                shutil.copy2(src_slide, dst_path)
+            else:
+                cleaned = clean_final_slide_image(src_slide)
+                if cleaned is None:
+                    shutil.copy2(src_slide, dst_path)
+                else:
+                    cv2.imwrite(str(dst_path), cleaned)
 
         if src_full_dir is not None and dst_full_dir is not None:
             src_full = find_event_image(src_full_dir, event_id)
