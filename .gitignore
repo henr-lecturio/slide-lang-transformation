@@ -19,6 +19,7 @@ videos/
 weights/*.pth
 data/
 dataset/
+.env.local
 
 # OS / Editor
 .DS_Store

@@ -89,6 +89,70 @@ def find_event_image(image_dir: Path, event_id: int) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def estimate_slide_background_color(
+    patch: np.ndarray,
+    *,
+    sat_threshold: int = 42,
+    grad_threshold: float = 20.0,
+) -> np.ndarray:
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    grad = cv2.magnitude(grad_x, grad_y)
+
+    bg_seed = (hsv[:, :, 1] <= sat_threshold) & (grad <= grad_threshold)
+    if int(np.count_nonzero(bg_seed)) < 128:
+        bg_seed = hsv[:, :, 1] <= max(55, sat_threshold + 10)
+    if int(np.count_nonzero(bg_seed)) < 128:
+        bg_seed = np.ones(patch.shape[:2], dtype=bool)
+
+    pixels = patch[bg_seed]
+    if pixels.size == 0:
+        pixels = patch.reshape(-1, 3)
+    return np.median(pixels.reshape(-1, 3), axis=0).astype(np.uint8)
+
+
+def find_dynamic_corner_top(
+    patch: np.ndarray,
+    background_color: np.ndarray,
+    default_zone_y0: int,
+    *,
+    edge_strip_ratio: float = 0.035,
+    scan_top_ratio: float = 0.28,
+    diff_threshold: float = 18.0,
+    sat_threshold: int = 58,
+    grad_threshold: float = 18.0,
+    min_run_rows: int = 6,
+    top_margin_rows: int = 22,
+) -> int:
+    h, w = patch.shape[:2]
+    edge_w = max(6, int(round(w * edge_strip_ratio)))
+    strip = patch[:, w - edge_w :]
+    hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    grad = cv2.magnitude(grad_x, grad_y)
+    diff = np.max(
+        np.abs(strip.astype(np.int16) - background_color.reshape(1, 1, 3).astype(np.int16)),
+        axis=2,
+    )
+    active = (
+        (diff >= diff_threshold)
+        | (hsv[:, :, 1] >= sat_threshold)
+        | (grad >= grad_threshold)
+    )
+    row_counts = np.count_nonzero(active, axis=1)
+    row_active = row_counts >= max(3, int(round(edge_w * 0.18)))
+    scan_start = max(0, min(int(round(h * scan_top_ratio)), int(default_zone_y0)))
+    run_needed = max(2, int(min_run_rows))
+    for y in range(scan_start, max(scan_start, h - run_needed + 1)):
+        if int(np.count_nonzero(row_active[y : y + run_needed])) >= (run_needed - 1):
+            return max(0, y - max(0, int(top_margin_rows)))
+    return max(0, int(default_zone_y0))
+
+
 def build_final_corner_cleanup_mask(
     patch: np.ndarray,
     *,
@@ -109,7 +173,13 @@ def build_final_corner_cleanup_mask(
     right_ratio = min(0.50, max(0.04, float(corner_right_ratio)))
     bottom_ratio = min(0.60, max(0.12, float(corner_bottom_ratio)))
     zone_x0 = max(0, int(round(w * (1.0 - right_ratio))))
-    zone_y0 = max(0, int(round(h * (1.0 - bottom_ratio))))
+    default_zone_y0 = max(0, int(round(h * (1.0 - bottom_ratio))))
+    bg_color = estimate_slide_background_color(patch)
+    zone_y0 = find_dynamic_corner_top(
+        patch,
+        bg_color,
+        default_zone_y0,
+    )
     zone = patch[zone_y0:, zone_x0:]
     if zone.size == 0:
         return None
@@ -286,6 +356,7 @@ def local_row_fill(
     sample_width: int = 18,
     vertical_radius: int = 2,
     bg_match_threshold: float = 24.0,
+    interior_blend_width: int = 10,
 ) -> np.ndarray | None:
     if (
         patch.ndim != 3
@@ -300,6 +371,7 @@ def local_row_fill(
 
     h, w = mask.shape
     cleaned = patch.copy()
+    interior_band_mask = np.zeros((h, w), dtype=bool)
     bg_ref = background_color.astype(np.float32)
     last_border_color = bg_ref.copy()
 
@@ -312,6 +384,7 @@ def local_row_fill(
         x_end = int(xs.max())
         bg_samples: list[np.ndarray] = []
         border_samples: list[np.ndarray] = []
+        interior_samples: list[np.ndarray] = []
         nearest_border = False
         nearest_label = 0
         if x_start > 0:
@@ -350,19 +423,39 @@ def local_row_fill(
                     bg_samples.append(matched.reshape(-1, 3))
                 elif plain_pixels.size:
                     bg_samples.append(plain_pixels)
+            if nearest_label > 0:
+                same_component = valid_labels == nearest_label
+                if np.any(same_component):
+                    interior_samples.append(valid_pixels[same_component].reshape(-1, 3))
 
         if nearest_border and border_samples:
-            color = np.median(np.vstack(border_samples), axis=0).astype(np.float32)
-            last_border_color = color
+            base_color = np.median(np.vstack(border_samples), axis=0).astype(np.float32)
+            last_border_color = base_color
         elif bg_samples:
-            color = np.median(np.vstack(bg_samples), axis=0).astype(np.float32)
+            base_color = np.median(np.vstack(bg_samples), axis=0).astype(np.float32)
         elif border_samples and nearest_border:
-            color = last_border_color
+            base_color = last_border_color
         else:
-            color = bg_ref
+            base_color = bg_ref
 
-        cleaned[y, x_start : x_end + 1] = np.clip(color, 0, 255).astype(np.uint8)
+        cleaned[y, x_start : x_end + 1] = np.clip(base_color, 0, 255).astype(np.uint8)
 
+        if nearest_label > 0 and (not nearest_border) and interior_samples:
+            blend_color = np.median(np.vstack(interior_samples), axis=0).astype(np.float32)
+            band = min(max(0, int(interior_blend_width)), x_end - x_start + 1)
+            if band > 0:
+                for step in range(band):
+                    x = x_start + step
+                    if x > x_end or mask[y, x] == 0:
+                        break
+                    alpha = 1.0 - (float(step + 1) / float(band + 1))
+                    color = (blend_color * alpha) + (base_color * (1.0 - alpha))
+                    cleaned[y, x] = np.clip(color, 0, 255).astype(np.uint8)
+                    interior_band_mask[y, x] = True
+
+    if np.any(interior_band_mask):
+        horiz_blur = cv2.GaussianBlur(cleaned, (11, 3), 0)
+        cleaned[interior_band_mask] = horiz_blur[interior_band_mask]
     blur = cv2.GaussianBlur(cleaned, (1, 5), 0)
     cleaned[mask > 0] = blur[mask > 0]
     return cleaned
@@ -493,7 +586,15 @@ def copy_kept_images(
     src_full_dir: Path | None,
     dst_slide_dir: Path | None,
     dst_full_dir: Path | None,
+    dst_slide_raw_dir: Path | None,
+    *,
+    final_slide_clean_mode: str,
 ) -> None:
+    if dst_slide_raw_dir is not None:
+        dst_slide_raw_dir.mkdir(parents=True, exist_ok=True)
+        for p in dst_slide_raw_dir.glob("*.png"):
+            p.unlink()
+
     if dst_slide_dir is not None:
         dst_slide_dir.mkdir(parents=True, exist_ok=True)
         for p in dst_slide_dir.glob("*.png"):
@@ -507,17 +608,21 @@ def copy_kept_images(
     for idx, row in enumerate(kept_rows, start=1):
         event_id = int(row["event_id"])
         src_slide = find_event_image(src_slide_dir, event_id)
+        if src_slide is not None and dst_slide_raw_dir is not None:
+            raw_name = f"slide_{idx:03d}_{src_slide.name}"
+            shutil.copy2(src_slide, dst_slide_raw_dir / raw_name)
+
         if src_slide is not None and dst_slide_dir is not None:
             dst_name = f"slide_{idx:03d}_{src_slide.name}"
             dst_path = dst_slide_dir / dst_name
-            if idx == 1:
-                shutil.copy2(src_slide, dst_path)
-            else:
+            if final_slide_clean_mode == "local" and idx != 1:
                 cleaned = clean_final_slide_image(src_slide)
                 if cleaned is None:
                     shutil.copy2(src_slide, dst_path)
                 else:
                     cv2.imwrite(str(dst_path), cleaned)
+            else:
+                shutil.copy2(src_slide, dst_path)
 
         if src_full_dir is not None and dst_full_dir is not None:
             src_full = find_event_image(src_full_dir, event_id)
@@ -583,7 +688,18 @@ def main() -> int:
     parser.add_argument("--out-csv", required=True, help="Filtered map CSV output.")
     parser.add_argument("--out-manifest-csv", required=True, help="Per-event decision manifest output.")
     parser.add_argument("--out-final-slide-dir", default="", help="Optional folder with copied kept slide images.")
+    parser.add_argument(
+        "--out-final-slide-raw-dir",
+        default="",
+        help="Optional folder with raw copied kept slide images before any final slide cleanup.",
+    )
     parser.add_argument("--out-final-full-dir", default="", help="Optional folder with copied kept full images.")
+    parser.add_argument(
+        "--final-slide-clean-mode",
+        choices=("none", "local"),
+        default="local",
+        help="Final slide cleanup mode for copied kept ROI images (default: local).",
+    )
     parser.add_argument(
         "--speaker-min-stage1-video-ratio",
         type=float,
@@ -626,6 +742,9 @@ def main() -> int:
     out_csv = Path(args.out_csv).resolve()
     out_manifest_csv = Path(args.out_manifest_csv).resolve()
     out_final_slide_dir = Path(args.out_final_slide_dir).resolve() if args.out_final_slide_dir else None
+    out_final_slide_raw_dir = (
+        Path(args.out_final_slide_raw_dir).resolve() if args.out_final_slide_raw_dir else None
+    )
     out_final_full_dir = Path(args.out_final_full_dir).resolve() if args.out_final_full_dir else None
 
     if not video_path.exists():
@@ -864,6 +983,8 @@ def main() -> int:
         full_keyframes_dir,
         out_final_slide_dir,
         out_final_full_dir,
+        out_final_slide_raw_dir,
+        final_slide_clean_mode=str(args.final_slide_clean_mode),
     )
 
     print(f"[ASR] Original mapped events: {len(rows)}")
@@ -874,6 +995,8 @@ def main() -> int:
     print(f"[ASR] Wrote filter manifest CSV: {out_manifest_csv}")
     if out_final_slide_dir is not None:
         print(f"[ASR] Wrote kept slide images: {out_final_slide_dir}")
+    if out_final_slide_raw_dir is not None:
+        print(f"[ASR] Wrote raw kept slide images: {out_final_slide_raw_dir}")
     if out_final_full_dir is not None:
         print(f"[ASR] Wrote kept full images: {out_final_full_dir}")
     return 0

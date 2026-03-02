@@ -113,6 +113,13 @@ main {
   flex-wrap: wrap;
 }
 
+.wide-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
 .hidden {
   display: none;
 }
@@ -142,16 +149,25 @@ label {
 
 input,
 select,
+textarea,
 button {
   font: inherit;
 }
 
 input,
-select {
+select,
+textarea {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fff;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 180px;
+  line-height: 1.45;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 button {

@@ -33,6 +33,27 @@ ROI direkt in `config/slitranet.env` setzen:
 - `SPEAKER_FILTER_MAX_EDGE_DENSITY`
 - `SPEAKER_FILTER_MAX_LAPLACIAN_VAR`
 - `SPEAKER_FILTER_MAX_DURATION_SEC`
+- `FINAL_SLIDE_POSTPROCESS_MODE` (`none`, `local`, `gemini`)
+- `GEMINI_EDIT_MODEL` (wenn `FINAL_SLIDE_POSTPROCESS_MODE=gemini`)
+- `config/gemini_edit_prompt.txt` (Gemini-Edit-Prompt; auch über die Web-UI bearbeitbar)
+- `FINAL_SLIDE_TRANSLATION_MODE` (`none`, `gemini`)
+- `FINAL_SLIDE_TARGET_LANGUAGE`
+- `GEMINI_TRANSLATE_MODEL` (wenn `FINAL_SLIDE_TRANSLATION_MODE=gemini`)
+- `config/gemini_translate_prompt.txt` (Gemini-Übersetzungsprompt; auch über die Web-UI bearbeitbar)
+- `FINAL_SLIDE_UPSCALE_MODE` (`none`, `swin2sr`)
+- `FINAL_SLIDE_UPSCALE_MODEL` (standardmäßig `caidas/swin2SR-classical-sr-x4-64`)
+- `FINAL_SLIDE_UPSCALE_DEVICE` (`auto`, `cuda`, `cpu`)
+- `FINAL_SLIDE_UPSCALE_TILE_SIZE`
+- `FINAL_SLIDE_UPSCALE_TILE_OVERLAP`
+
+Für Gemini liegt der API-Key lokal in `.env.local` im Projektroot:
+
+```bash
+GEMINI_API_KEY="..."
+```
+
+`.env.local` ist gitignoriert und wird von `scripts/run_slitranet.sh`,
+`scripts/edit_final_slides_gemini.py` und `web/server.py` automatisch geladen.
 
 Overlay zur Kontrolle erzeugen:
 
@@ -69,6 +90,12 @@ Der Run erzeugt einen neuen Ordner:
 - `output/runs/<timestamp>/slitranet/slide_text_map_final.{json,csv}`
 - `output/runs/<timestamp>/slitranet/slides_final_manifest.csv`
 - `output/runs/<timestamp>/slitranet/keyframes/final/{slide,full}`
+- `output/runs/<timestamp>/slitranet/keyframes/final/slide_raw`
+- `output/runs/<timestamp>/slitranet/keyframes/final/slide_translated` (wenn Übersetzung aktiv ist)
+- `output/runs/<timestamp>/slitranet/keyframes/final/slide_upscaled` (wenn Upscaling aktiv ist)
+- `output/runs/<timestamp>/slitranet/keyframes/final/slide_translated_upscaled` (wenn Übersetzung + Upscaling aktiv sind)
+
+Hinweis: Beim ersten Upscale-Run lädt `transformers` das Swin2SR-Modell von Hugging Face und cached es lokal.
 
 Zusätzlich:
 - `output/latest` zeigt auf den neuesten Run.

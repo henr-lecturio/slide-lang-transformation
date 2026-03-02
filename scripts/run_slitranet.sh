@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
+GEMINI_PROMPT_FILE="$ROOT_DIR/config/gemini_edit_prompt.txt"
+GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_translate_prompt.txt"
+LOCAL_ENV_FILE="$ROOT_DIR/.env.local"
 VENV_DIR="$ROOT_DIR/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python"
 VIDEO_PATH_ARG=""
@@ -46,12 +49,30 @@ if [ ! -d "$VENV_DIR" ]; then
   exit 1
 fi
 
+if [ -f "$LOCAL_ENV_FILE" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+  # shellcheck disable=SC1090
+  set -a
+  source "$LOCAL_ENV_FILE"
+  set +a
+fi
+
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
 if [ -z "${PHASE:-}" ]; then
   PHASE="test"
 fi
+
+FINAL_SLIDE_POSTPROCESS_MODE="${FINAL_SLIDE_POSTPROCESS_MODE:-local}"
+GEMINI_EDIT_MODEL="${GEMINI_EDIT_MODEL:-gemini-3-pro-image-preview}"
+FINAL_SLIDE_TRANSLATION_MODE="${FINAL_SLIDE_TRANSLATION_MODE:-none}"
+FINAL_SLIDE_TARGET_LANGUAGE="${FINAL_SLIDE_TARGET_LANGUAGE:-German}"
+GEMINI_TRANSLATE_MODEL="${GEMINI_TRANSLATE_MODEL:-gemini-3-pro-image-preview}"
+FINAL_SLIDE_UPSCALE_MODE="${FINAL_SLIDE_UPSCALE_MODE:-none}"
+FINAL_SLIDE_UPSCALE_MODEL="${FINAL_SLIDE_UPSCALE_MODEL:-caidas/swin2SR-classical-sr-x4-64}"
+FINAL_SLIDE_UPSCALE_DEVICE="${FINAL_SLIDE_UPSCALE_DEVICE:-auto}"
+FINAL_SLIDE_UPSCALE_TILE_SIZE="${FINAL_SLIDE_UPSCALE_TILE_SIZE:-256}"
+FINAL_SLIDE_UPSCALE_TILE_OVERLAP="${FINAL_SLIDE_UPSCALE_TILE_OVERLAP:-24}"
 
 VIDEO_PATH_RESOLVED="${VIDEO_PATH_ARG:-${VIDEO_PATH:-}}"
 if [ -z "$VIDEO_PATH_RESOLVED" ]; then
@@ -170,7 +191,27 @@ SLIDE_TEXT_MAP_FINAL_JSON="$OUT_BASE/slide_text_map_final.json"
 SLIDE_TEXT_MAP_FINAL_CSV="$OUT_BASE/slide_text_map_final.csv"
 SLIDE_FILTER_MANIFEST_CSV="$OUT_BASE/slides_final_manifest.csv"
 FINAL_SLIDE_DIR="$OUT_BASE/keyframes/final/slide"
+FINAL_SLIDE_RAW_DIR="$OUT_BASE/keyframes/final/slide_raw"
+FINAL_SLIDE_TRANSLATED_DIR="$OUT_BASE/keyframes/final/slide_translated"
+FINAL_SLIDE_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_upscaled"
+FINAL_SLIDE_TRANSLATED_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_translated_upscaled"
 FINAL_FULL_DIR="$OUT_BASE/keyframes/final/full"
+FINAL_SLIDE_CLEAN_MODE="none"
+case "$FINAL_SLIDE_POSTPROCESS_MODE" in
+  none)
+    FINAL_SLIDE_CLEAN_MODE="none"
+    ;;
+  local)
+    FINAL_SLIDE_CLEAN_MODE="local"
+    ;;
+  gemini)
+    FINAL_SLIDE_CLEAN_MODE="none"
+    ;;
+  *)
+    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE must be one of: none, local, gemini" >&2
+    exit 1
+    ;;
+esac
 FILTER_ARGS=(
   --video "$PHASE_DIR/$VIDEO_NAME"
   --slide-map-json "$SLIDE_TEXT_MAP_JSON"
@@ -181,7 +222,9 @@ FILTER_ARGS=(
   --out-csv "$SLIDE_TEXT_MAP_FINAL_CSV"
   --out-manifest-csv "$SLIDE_FILTER_MANIFEST_CSV"
   --out-final-slide-dir "$FINAL_SLIDE_DIR"
+  --out-final-slide-raw-dir "$FINAL_SLIDE_RAW_DIR"
   --out-final-full-dir "$FINAL_FULL_DIR"
+  --final-slide-clean-mode "$FINAL_SLIDE_CLEAN_MODE"
   --speaker-min-stage1-video-ratio "${SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO:-0.75}"
   --speaker-max-edge-density "${SPEAKER_FILTER_MAX_EDGE_DENSITY:-0.011}"
   --speaker-max-laplacian-var "${SPEAKER_FILTER_MAX_LAPLACIAN_VAR:-80}"
@@ -195,6 +238,80 @@ echo "[ASR] Filtering speaker-only slides and merging transcript ..."
 "$PYTHON_BIN" "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
 echo "[ASR] Speaker-only filtering finished."
 
+if [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
+  if [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
+    exit 1
+  fi
+
+  echo "[Gemini] Editing raw final slides with model $GEMINI_EDIT_MODEL ..."
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/edit_final_slides_gemini.py" \
+    --input-dir "$FINAL_SLIDE_RAW_DIR" \
+    --output-dir "$FINAL_SLIDE_DIR" \
+    --model "$GEMINI_EDIT_MODEL" \
+    --prompt-file "$GEMINI_PROMPT_FILE" \
+    --mask-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_mask" \
+    --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay"
+  echo "[Gemini] Editing finished."
+fi
+
+case "$FINAL_SLIDE_TRANSLATION_MODE" in
+  none)
+    ;;
+  gemini)
+    if [ -z "${GEMINI_API_KEY:-}" ]; then
+      echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
+      exit 1
+    fi
+    if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
+      echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled." >&2
+      exit 1
+    fi
+    echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_final_slides_gemini.py" \
+      --input-dir "$FINAL_SLIDE_DIR" \
+      --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+      --model "$GEMINI_TRANSLATE_MODEL" \
+      --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
+      --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+    echo "[Translate] Translation finished."
+    ;;
+  *)
+    echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE must be one of: none, gemini" >&2
+    exit 1
+    ;;
+esac
+
+case "$FINAL_SLIDE_UPSCALE_MODE" in
+  none)
+    ;;
+  swin2sr)
+    echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
+      --input-dir "$FINAL_SLIDE_DIR" \
+      --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
+      --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
+      --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
+      --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
+      --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+    if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
+      echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
+        --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+        --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
+        --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
+        --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
+        --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
+        --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+    fi
+    echo "[Upscale] Upscaling finished."
+    ;;
+  *)
+    echo "ERROR: FINAL_SLIDE_UPSCALE_MODE must be one of: none, swin2sr" >&2
+    exit 1
+    ;;
+esac
+
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
   ln -sfn "$RUN_DIR" "$LATEST_LINK"
@@ -206,3 +323,10 @@ echo "Main output: $OUT_BASE/slide_changes.csv"
 echo "Transcript: $TRANSCRIPT_JSON"
 echo "Slide text map: $SLIDE_TEXT_MAP_JSON"
 echo "Final slide text map: $SLIDE_TEXT_MAP_FINAL_JSON"
+echo "Final slide raw images: $FINAL_SLIDE_RAW_DIR"
+echo "Final slide mode: $FINAL_SLIDE_POSTPROCESS_MODE"
+echo "Final slide translated images: $FINAL_SLIDE_TRANSLATED_DIR"
+echo "Final slide translation mode: $FINAL_SLIDE_TRANSLATION_MODE"
+echo "Final slide upscaled images: $FINAL_SLIDE_UPSCALED_DIR"
+echo "Final slide translated upscaled images: $FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
+echo "Final slide upscale mode: $FINAL_SLIDE_UPSCALE_MODE"

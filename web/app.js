@@ -17,6 +17,18 @@ const el = {
   speakerFilterMaxEdgeDensity: document.getElementById("speaker_filter_max_edge_density"),
   speakerFilterMaxLaplacianVar: document.getElementById("speaker_filter_max_laplacian_var"),
   speakerFilterMaxDurationSec: document.getElementById("speaker_filter_max_duration_sec"),
+  finalSlidePostprocessMode: document.getElementById("final_slide_postprocess_mode"),
+  geminiEditModel: document.getElementById("gemini_edit_model"),
+  geminiEditPrompt: document.getElementById("gemini_edit_prompt"),
+  finalSlideTranslationMode: document.getElementById("final_slide_translation_mode"),
+  finalSlideTargetLanguage: document.getElementById("final_slide_target_language"),
+  geminiTranslateModel: document.getElementById("gemini_translate_model"),
+  geminiTranslatePrompt: document.getElementById("gemini_translate_prompt"),
+  finalSlideUpscaleMode: document.getElementById("final_slide_upscale_mode"),
+  finalSlideUpscaleModel: document.getElementById("final_slide_upscale_model"),
+  finalSlideUpscaleDevice: document.getElementById("final_slide_upscale_device"),
+  finalSlideUpscaleTileSize: document.getElementById("final_slide_upscale_tile_size"),
+  finalSlideUpscaleTileOverlap: document.getElementById("final_slide_upscale_tile_overlap"),
   overlayTime: document.getElementById("overlay-time"),
   regenOverlay: document.getElementById("regen-overlay"),
   refreshOverlay: document.getElementById("refresh-overlay"),
@@ -30,11 +42,15 @@ const el = {
   runLog: document.getElementById("run-log"),
   latestSummary: document.getElementById("latest-summary"),
   latestViewMode: document.getElementById("latest-view-mode"),
+  latestFinalSourceMode: document.getElementById("latest-final-source-mode"),
+  latestFinalResolutionMode: document.getElementById("latest-final-resolution-mode"),
   toggleLatestCsvTable: document.getElementById("toggle-latest-csv-table"),
   latestCsvTableWrap: document.getElementById("latest-csv-table-wrap"),
   latestCsvTable: document.getElementById("latest-csv-table"),
   latestSlidesList: document.getElementById("latest-slides-list"),
   runSelect: document.getElementById("run-select"),
+  runFinalSourceMode: document.getElementById("run-final-source-mode"),
+  runFinalResolutionMode: document.getElementById("run-final-resolution-mode"),
   runSummary: document.getElementById("run-summary"),
   csvPreview: document.getElementById("csv-preview"),
   runSlidesList: document.getElementById("run-slides-list"),
@@ -57,6 +73,10 @@ const state = {
   latestCsvLines: [],
   latestCsvExpanded: false,
   latestSlidesMode: "final",
+  latestFinalSourceMode: "processed",
+  latestFinalResolutionMode: "native",
+  runFinalSourceMode: "processed",
+  runFinalResolutionMode: "native",
   lastSettledRefreshKey: "",
   currentRunStatus: "idle",
 };
@@ -151,8 +171,21 @@ function setConfig(cfg) {
   el.speakerFilterMaxEdgeDensity.value = cfg.SPEAKER_FILTER_MAX_EDGE_DENSITY;
   el.speakerFilterMaxLaplacianVar.value = cfg.SPEAKER_FILTER_MAX_LAPLACIAN_VAR;
   el.speakerFilterMaxDurationSec.value = cfg.SPEAKER_FILTER_MAX_DURATION_SEC;
+  el.finalSlidePostprocessMode.value = cfg.FINAL_SLIDE_POSTPROCESS_MODE || "local";
+  el.geminiEditModel.value = cfg.GEMINI_EDIT_MODEL || "gemini-3-pro-image-preview";
+  el.geminiEditPrompt.value = cfg.GEMINI_EDIT_PROMPT || "";
+  el.finalSlideTranslationMode.value = cfg.FINAL_SLIDE_TRANSLATION_MODE || "none";
+  el.finalSlideTargetLanguage.value = cfg.FINAL_SLIDE_TARGET_LANGUAGE || "German";
+  el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
+  el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
+  el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
+  el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
+  el.finalSlideUpscaleDevice.value = cfg.FINAL_SLIDE_UPSCALE_DEVICE || "auto";
+  el.finalSlideUpscaleTileSize.value = cfg.FINAL_SLIDE_UPSCALE_TILE_SIZE ?? 256;
+  el.finalSlideUpscaleTileOverlap.value = cfg.FINAL_SLIDE_UPSCALE_TILE_OVERLAP ?? 24;
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
-  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO}`;
+  const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | target_lang: ${cfg.FINAL_SLIDE_TARGET_LANGUAGE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState}`;
   renderSelectedVideo();
 }
 
@@ -189,6 +222,18 @@ async function saveConfig() {
     SPEAKER_FILTER_MAX_EDGE_DENSITY: Number(el.speakerFilterMaxEdgeDensity.value),
     SPEAKER_FILTER_MAX_LAPLACIAN_VAR: Number(el.speakerFilterMaxLaplacianVar.value),
     SPEAKER_FILTER_MAX_DURATION_SEC: Number(el.speakerFilterMaxDurationSec.value),
+    FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
+    GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
+    GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
+    FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
+    FINAL_SLIDE_TARGET_LANGUAGE: el.finalSlideTargetLanguage.value.trim(),
+    GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
+    GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
+    FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
+    FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
+    FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
+    FINAL_SLIDE_UPSCALE_TILE_SIZE: Number(el.finalSlideUpscaleTileSize.value),
+    FINAL_SLIDE_UPSCALE_TILE_OVERLAP: Number(el.finalSlideUpscaleTileOverlap.value),
   };
   await apiPost("/api/config", payload);
   await loadConfig();
@@ -287,7 +332,7 @@ function renderRunSelect(runs) {
   for (const run of runs) {
     const opt = document.createElement("option");
     opt.value = run.id;
-    opt.textContent = `${run.id} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images}`;
+    opt.textContent = `${run.id} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images} | translated ${run.translated_slide_images || 0} | x4 ${run.upscaled_slide_images || 0} | translated_x4 ${run.translated_upscaled_slide_images || 0}`;
     el.runSelect.appendChild(opt);
   }
 }
@@ -329,7 +374,7 @@ async function loadRunDetails() {
   state.selectedRunId = runId;
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.runSummary.textContent = `run=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images}`;
+  el.runSummary.textContent = `run=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
   el.csvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
   await loadRunSlides();
 }
@@ -342,7 +387,7 @@ async function loadLatestRunDetails() {
   }
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.latestSummary.textContent = `latest=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images}`;
+  el.latestSummary.textContent = `latest=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
   state.latestCsvLines = detail.final_csv_preview || detail.csv_preview || [];
   const hasCsv = state.latestCsvLines.length > 0;
   el.toggleLatestCsvTable.disabled = !hasCsv;
@@ -453,6 +498,82 @@ async function setFinalSlideImageMode(runId, eventId, mode) {
   await Promise.all(refreshes);
 }
 
+function resolveRenderedFinalImage(item, slideSourceMode, resolutionMode) {
+  const wantsRaw = slideSourceMode === "raw";
+  const wantsTranslated = slideSourceMode === "translated";
+  const wantsX4 = resolutionMode === "x4";
+
+  if (item.image_mode === "full") {
+    return {
+      url: item.full_image_url || item.image_url || "",
+      name: item.full_image_name || item.image_name || "",
+      slideSourceLabel: "full",
+      resolutionLabel: "native",
+    };
+  }
+
+  if (wantsRaw && item.raw_slide_image_url) {
+    return {
+      url: item.raw_slide_image_url,
+      name: item.raw_slide_image_name || item.image_name || "",
+      slideSourceLabel: "raw",
+      resolutionLabel: "native",
+    };
+  }
+
+  if (wantsTranslated && wantsX4 && item.translated_upscaled_slide_image_url) {
+    return {
+      url: item.translated_upscaled_slide_image_url,
+      name: item.translated_upscaled_slide_image_name || item.image_name || "",
+      slideSourceLabel: "translated",
+      resolutionLabel: "x4",
+    };
+  }
+
+  if (wantsTranslated && item.translated_slide_image_url) {
+    return {
+      url: item.translated_slide_image_url,
+      name: item.translated_slide_image_name || item.image_name || "",
+      slideSourceLabel: "translated",
+      resolutionLabel: "native",
+    };
+  }
+
+  if (wantsX4 && item.processed_upscaled_slide_image_url) {
+    return {
+      url: item.processed_upscaled_slide_image_url,
+      name: item.processed_upscaled_slide_image_name || item.image_name || "",
+      slideSourceLabel: "processed",
+      resolutionLabel: "x4",
+    };
+  }
+
+  if (item.processed_slide_image_url) {
+    return {
+      url: item.processed_slide_image_url,
+      name: item.processed_slide_image_name || item.image_name || "",
+      slideSourceLabel: "processed",
+      resolutionLabel: "native",
+    };
+  }
+
+  if (item.raw_slide_image_url) {
+    return {
+      url: item.raw_slide_image_url,
+      name: item.raw_slide_image_name || item.image_name || "",
+      slideSourceLabel: "raw",
+      resolutionLabel: "native",
+    };
+  }
+
+  return {
+    url: item.image_url || "",
+    name: item.image_name || "",
+    slideSourceLabel: item.image_mode === "slide" ? "processed" : "-",
+    resolutionLabel: "native",
+  };
+}
+
 function createImageModeToggle(runId, item) {
   const available = Array.isArray(item.available_image_modes) ? item.available_image_modes : [];
   if (available.length <= 1) {
@@ -490,7 +611,7 @@ function createImageModeToggle(runId, item) {
   return wrap;
 }
 
-async function renderFinalSlides(runId, target) {
+async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode) {
   if (!runId) {
     target.innerHTML = "";
     return;
@@ -513,13 +634,14 @@ async function renderFinalSlides(runId, target) {
 
     const media = document.createElement("div");
     media.className = "slide-media";
+    const renderedImage = resolveRenderedFinalImage(item, slideSourceMode, resolutionMode);
 
-    if (item.image_url) {
+    if (renderedImage.url) {
       const img = document.createElement("img");
       img.loading = "lazy";
-      img.src = `${item.image_url}?v=${Date.now()}`;
-      img.alt = item.image_name || `event_${item.event_id}`;
-      img.addEventListener("click", () => openImageModal(item.image_url, item.image_name || `event_${item.event_id}`));
+      img.src = `${renderedImage.url}?v=${Date.now()}`;
+      img.alt = renderedImage.name || `event_${item.event_id}`;
+      img.addEventListener("click", () => openImageModal(renderedImage.url, renderedImage.name || `event_${item.event_id}`));
       media.appendChild(img);
     } else {
       const missing = document.createElement("div");
@@ -535,7 +657,7 @@ async function renderFinalSlides(runId, target) {
 
     const meta = document.createElement("div");
     meta.className = "slide-meta";
-    meta.textContent = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"}`;
+    meta.textContent = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | roi_quelle: ${renderedImage.slideSourceLabel} | auflösung: ${renderedImage.resolutionLabel}`;
     media.appendChild(meta);
 
     const textWrap = document.createElement("div");
@@ -626,7 +748,7 @@ async function loadLatestSlides() {
     await renderBaseEvents(runId, el.latestSlidesList);
     return;
   }
-  await renderFinalSlides(runId, el.latestSlidesList);
+  await renderFinalSlides(runId, el.latestSlidesList, state.latestFinalSourceMode, state.latestFinalResolutionMode);
 }
 
 async function loadRunSlides() {
@@ -635,7 +757,7 @@ async function loadRunSlides() {
     el.runSlidesList.innerHTML = "";
     return;
   }
-  await renderFinalSlides(runId, el.runSlidesList);
+  await renderFinalSlides(runId, el.runSlidesList, state.runFinalSourceMode, state.runFinalResolutionMode);
 }
 
 async function startRun() {
@@ -671,8 +793,28 @@ function bindEvents() {
     state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
     runTaskImmediate(loadLatestSlides);
   });
+  el.latestFinalSourceMode.addEventListener("change", () => {
+    state.latestFinalSourceMode = ["raw", "translated"].includes(el.latestFinalSourceMode.value)
+      ? el.latestFinalSourceMode.value
+      : "processed";
+    runTaskImmediate(loadLatestSlides);
+  });
+  el.latestFinalResolutionMode.addEventListener("change", () => {
+    state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
+    runTaskImmediate(loadLatestSlides);
+  });
   el.toggleLatestCsvTable.addEventListener("click", toggleLatestCsvTable);
   el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
+  el.runFinalSourceMode.addEventListener("change", () => {
+    state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
+      ? el.runFinalSourceMode.value
+      : "processed";
+    runTaskImmediate(loadRunSlides);
+  });
+  el.runFinalResolutionMode.addEventListener("change", () => {
+    state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
+    runTaskImmediate(loadRunSlides);
+  });
   el.imageModalClose.addEventListener("click", closeImageModal);
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
   el.videoPickerClose.addEventListener("click", closeVideoPicker);
@@ -711,6 +853,14 @@ async function runTaskImmediate(fn) {
 async function init() {
   bindEvents();
   state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
+  state.latestFinalSourceMode = ["raw", "translated"].includes(el.latestFinalSourceMode.value)
+    ? el.latestFinalSourceMode.value
+    : "processed";
+  state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
+  state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
+    ? el.runFinalSourceMode.value
+    : "processed";
+  state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
   setActiveTab("home");
   await runTask(loadConfig);
   await runTask(loadOverlay);

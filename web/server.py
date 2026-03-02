@@ -20,6 +20,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 ROOT_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
+GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "gemini_edit_prompt.txt"
+GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.txt"
+LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
 OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
@@ -64,6 +67,16 @@ def parse_env(path: Path) -> dict[str, str]:
     return values
 
 
+def load_local_env(path: Path) -> None:
+    if not path.exists():
+        return
+    for key, value in parse_env(path).items():
+        os.environ.setdefault(key, value)
+
+
+load_local_env(LOCAL_ENV_PATH)
+
+
 def _format_config_value(value: int | float | str) -> str:
     if isinstance(value, float):
         return f"{value:g}"
@@ -95,6 +108,18 @@ def write_config_values(path: Path, values: dict[str, int | float | str]) -> Non
                 out_lines.append(f"{key}={_format_config_value(values[key])}")
 
     path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+
+def read_text_file(path: Path, default: str = "") -> str:
+    if not path.exists():
+        return default
+    return path.read_text(encoding="utf-8")
+
+
+def write_text_file(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    path.write_text(normalized.rstrip("\n") + "\n", encoding="utf-8")
 
 
 def ensure_within(base: Path, target: Path) -> Path:
@@ -234,6 +259,11 @@ def list_runs() -> list[dict]:
         final_csv_path = entry / "slitranet" / "slide_text_map_final.csv"
         slide_dir = entry / "slitranet" / "keyframes" / "slide"
         final_slide_dir = entry / "slitranet" / "keyframes" / "final" / "slide"
+        translated_slide_dir = entry / "slitranet" / "keyframes" / "final" / "slide_translated"
+        upscaled_slide_dir = entry / "slitranet" / "keyframes" / "final" / "slide_upscaled"
+        translated_upscaled_slide_dir = (
+            entry / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
+        )
         full_dir = entry / "slitranet" / "keyframes" / "full"
         runs.append(
             {
@@ -244,6 +274,9 @@ def list_runs() -> list[dict]:
                 "final_event_count": csv_event_count(final_csv_path),
                 "slide_images": count_files(slide_dir),
                 "final_slide_images": count_files(final_slide_dir),
+                "translated_slide_images": count_files(translated_slide_dir),
+                "upscaled_slide_images": count_files(upscaled_slide_dir),
+                "translated_upscaled_slide_images": count_files(translated_upscaled_slide_dir),
                 "full_images": count_files(full_dir),
                 "mtime": int(entry.stat().st_mtime),
             }
@@ -264,6 +297,9 @@ def run_detail(run_id: str) -> dict:
     transitions_dir = run_dir / "slitranet" / "transitions"
     slide_dir = run_dir / "slitranet" / "keyframes" / "slide"
     final_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide"
+    translated_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated"
+    upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_upscaled"
+    translated_upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
     full_dir = run_dir / "slitranet" / "keyframes" / "full"
 
     transition_files = []
@@ -283,6 +319,9 @@ def run_detail(run_id: str) -> dict:
         "transition_files": transition_files,
         "slide_images": count_files(slide_dir),
         "final_slide_images": count_files(final_slide_dir),
+        "translated_slide_images": count_files(translated_slide_dir),
+        "upscaled_slide_images": count_files(upscaled_slide_dir),
+        "translated_upscaled_slide_images": count_files(translated_upscaled_slide_dir),
         "full_images": count_files(full_dir),
     }
 
@@ -366,6 +405,15 @@ def _find_event_image_rel(
 
 def resolve_final_image_assets(run_dir: Path, run_id: str, event_id: int, override_mode: str | None = None) -> dict:
     slide_rel = _find_event_image_rel(run_dir, event_id, ["slide"], include_final=True)
+    raw_slide_rel = _find_event_image_rel(run_dir, event_id, ["slide_raw"], include_final=True)
+    translated_slide_rel = _find_event_image_rel(run_dir, event_id, ["slide_translated"], include_final=True)
+    upscaled_slide_rel = _find_event_image_rel(run_dir, event_id, ["slide_upscaled"], include_final=True)
+    translated_upscaled_slide_rel = _find_event_image_rel(
+        run_dir,
+        event_id,
+        ["slide_translated_upscaled"],
+        include_final=True,
+    )
     full_rel = _find_event_image_rel(run_dir, event_id, ["full"], include_final=True)
     available_modes = [mode for mode, rel in (("slide", slide_rel), ("full", full_rel)) if rel]
 
@@ -397,6 +445,20 @@ def resolve_final_image_assets(run_dir: Path, run_id: str, event_id: int, overri
         "available_image_modes": available_modes,
         "slide_image_url": f"/api/runs/{run_id}/file/{slide_rel}" if slide_rel else "",
         "slide_image_name": Path(slide_rel).name if slide_rel else "",
+        "processed_slide_image_url": f"/api/runs/{run_id}/file/{slide_rel}" if slide_rel else "",
+        "processed_slide_image_name": Path(slide_rel).name if slide_rel else "",
+        "raw_slide_image_url": f"/api/runs/{run_id}/file/{raw_slide_rel}" if raw_slide_rel else "",
+        "raw_slide_image_name": Path(raw_slide_rel).name if raw_slide_rel else "",
+        "translated_slide_image_url": f"/api/runs/{run_id}/file/{translated_slide_rel}" if translated_slide_rel else "",
+        "translated_slide_image_name": Path(translated_slide_rel).name if translated_slide_rel else "",
+        "processed_upscaled_slide_image_url": f"/api/runs/{run_id}/file/{upscaled_slide_rel}" if upscaled_slide_rel else "",
+        "processed_upscaled_slide_image_name": Path(upscaled_slide_rel).name if upscaled_slide_rel else "",
+        "translated_upscaled_slide_image_url": (
+            f"/api/runs/{run_id}/file/{translated_upscaled_slide_rel}" if translated_upscaled_slide_rel else ""
+        ),
+        "translated_upscaled_slide_image_name": (
+            Path(translated_upscaled_slide_rel).name if translated_upscaled_slide_rel else ""
+        ),
         "full_image_url": f"/api/runs/{run_id}/file/{full_rel}" if full_rel else "",
         "full_image_name": Path(full_rel).name if full_rel else "",
         "image_url": f"/api/runs/{run_id}/file/{selected_rel}" if selected_rel else "",
@@ -541,6 +603,10 @@ def start_run() -> tuple[bool, str]:
     if not video_path:
         return False, "No video selected"
     resolve_video_config_path(video_path)
+    final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
+    translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
+    if (final_slide_mode == "gemini" or translation_mode == "gemini") and not (os.environ.get("GEMINI_API_KEY") or "").strip():
+        return False, "GEMINI_API_KEY is not set in the server environment"
 
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
@@ -624,6 +690,22 @@ class Handler(BaseHTTPRequestHandler):
                     "SPEAKER_FILTER_MAX_EDGE_DENSITY": float(env.get("SPEAKER_FILTER_MAX_EDGE_DENSITY", "0.011")),
                     "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(env.get("SPEAKER_FILTER_MAX_LAPLACIAN_VAR", "80")),
                     "SPEAKER_FILTER_MAX_DURATION_SEC": float(env.get("SPEAKER_FILTER_MAX_DURATION_SEC", "2.5")),
+                    "FINAL_SLIDE_POSTPROCESS_MODE": env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local"),
+                    "GEMINI_EDIT_MODEL": env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview"),
+                    "GEMINI_EDIT_PROMPT": read_text_file(GEMINI_PROMPT_PATH).rstrip("\n"),
+                    "FINAL_SLIDE_TRANSLATION_MODE": env.get("FINAL_SLIDE_TRANSLATION_MODE", "none"),
+                    "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German"),
+                    "GEMINI_TRANSLATE_MODEL": env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview"),
+                    "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "FINAL_SLIDE_UPSCALE_MODE": env.get("FINAL_SLIDE_UPSCALE_MODE", "none"),
+                    "FINAL_SLIDE_UPSCALE_MODEL": env.get(
+                        "FINAL_SLIDE_UPSCALE_MODEL",
+                        "caidas/swin2SR-classical-sr-x4-64",
+                    ),
+                    "FINAL_SLIDE_UPSCALE_DEVICE": env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto"),
+                    "FINAL_SLIDE_UPSCALE_TILE_SIZE": int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256")),
+                    "FINAL_SLIDE_UPSCALE_TILE_OVERLAP": int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24")),
+                    "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                 }
                 return self._send_json(200, payload)
 
@@ -765,7 +847,19 @@ class Handler(BaseHTTPRequestHandler):
                     "SPEAKER_FILTER_MAX_EDGE_DENSITY": float(data["SPEAKER_FILTER_MAX_EDGE_DENSITY"]),
                     "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(data["SPEAKER_FILTER_MAX_LAPLACIAN_VAR"]),
                     "SPEAKER_FILTER_MAX_DURATION_SEC": float(data["SPEAKER_FILTER_MAX_DURATION_SEC"]),
+                    "FINAL_SLIDE_POSTPROCESS_MODE": str(data["FINAL_SLIDE_POSTPROCESS_MODE"]).strip(),
+                    "GEMINI_EDIT_MODEL": str(data["GEMINI_EDIT_MODEL"]).strip(),
+                    "FINAL_SLIDE_TRANSLATION_MODE": str(data["FINAL_SLIDE_TRANSLATION_MODE"]).strip(),
+                    "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
+                    "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
+                    "FINAL_SLIDE_UPSCALE_MODE": str(data["FINAL_SLIDE_UPSCALE_MODE"]).strip(),
+                    "FINAL_SLIDE_UPSCALE_MODEL": str(data["FINAL_SLIDE_UPSCALE_MODEL"]).strip(),
+                    "FINAL_SLIDE_UPSCALE_DEVICE": str(data["FINAL_SLIDE_UPSCALE_DEVICE"]).strip(),
+                    "FINAL_SLIDE_UPSCALE_TILE_SIZE": int(data["FINAL_SLIDE_UPSCALE_TILE_SIZE"]),
+                    "FINAL_SLIDE_UPSCALE_TILE_OVERLAP": int(data["FINAL_SLIDE_UPSCALE_TILE_OVERLAP"]),
                 }
+                gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
+                gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
                 if cfg["KEYFRAME_SETTLE_FRAMES"] < 0:
@@ -782,8 +876,50 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("SPEAKER_FILTER_MAX_LAPLACIAN_VAR must be >= 0")
                 if cfg["SPEAKER_FILTER_MAX_DURATION_SEC"] < 0:
                     raise ValueError("SPEAKER_FILTER_MAX_DURATION_SEC must be >= 0")
+                if cfg["FINAL_SLIDE_POSTPROCESS_MODE"] not in {"none", "local", "gemini"}:
+                    raise ValueError("FINAL_SLIDE_POSTPROCESS_MODE must be none, local, or gemini")
+                if not cfg["GEMINI_EDIT_MODEL"]:
+                    raise ValueError("GEMINI_EDIT_MODEL must not be empty")
+                if not gemini_edit_prompt.strip():
+                    raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] not in {"none", "gemini"}:
+                    raise ValueError("FINAL_SLIDE_TRANSLATION_MODE must be none or gemini")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini" and not cfg["FINAL_SLIDE_TARGET_LANGUAGE"]:
+                    raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled")
+                if not cfg["GEMINI_TRANSLATE_MODEL"]:
+                    raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
+                if not gemini_translate_prompt.strip():
+                    raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
+                if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {"none", "swin2sr"}:
+                    raise ValueError("FINAL_SLIDE_UPSCALE_MODE must be none or swin2sr")
+                if not cfg["FINAL_SLIDE_UPSCALE_MODEL"]:
+                    raise ValueError("FINAL_SLIDE_UPSCALE_MODEL must not be empty")
+                if cfg["FINAL_SLIDE_UPSCALE_DEVICE"] not in {"auto", "cuda", "cpu"}:
+                    raise ValueError("FINAL_SLIDE_UPSCALE_DEVICE must be auto, cuda, or cpu")
+                if cfg["FINAL_SLIDE_UPSCALE_TILE_SIZE"] < 0:
+                    raise ValueError("FINAL_SLIDE_UPSCALE_TILE_SIZE must be >= 0")
+                if cfg["FINAL_SLIDE_UPSCALE_TILE_OVERLAP"] < 0:
+                    raise ValueError("FINAL_SLIDE_UPSCALE_TILE_OVERLAP must be >= 0")
+                if (
+                    cfg["FINAL_SLIDE_UPSCALE_TILE_SIZE"] > 0
+                    and cfg["FINAL_SLIDE_UPSCALE_TILE_OVERLAP"] >= cfg["FINAL_SLIDE_UPSCALE_TILE_SIZE"]
+                ):
+                    raise ValueError(
+                        "FINAL_SLIDE_UPSCALE_TILE_OVERLAP must be smaller than FINAL_SLIDE_UPSCALE_TILE_SIZE"
+                    )
                 write_config_values(CONFIG_PATH, cfg)
-                return self._send_json(200, {"ok": True, **cfg})
+                write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
+                write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
+                return self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        **cfg,
+                        "GEMINI_EDIT_PROMPT": gemini_edit_prompt.rstrip("\n"),
+                        "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
+                        "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
+                    },
+                )
 
             if path == "/api/overlay":
                 data = self._read_json_body(optional=True)
