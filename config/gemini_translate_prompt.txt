@@ -1,9 +1,1 @@
-You are translating a presentation slide image into {{TARGET_LANGUAGE}}.
-
-Task:
-- Translate all visible slide text into {{TARGET_LANGUAGE}}.
-- Preserve the original layout, spacing, colors, icons, charts, diagrams, and overall composition.
-- Do not change non-text visuals unless required to fit the translated text naturally.
-- Keep the translated text accurate, concise, and presentation-ready.
-- Do not add commentary, subtitles, or extra labels.
-- Return only the edited slide image.
+Translate all text elements to {{TARGET_LANGUAGE}}. Return only the edited slide image.

@@ -285,6 +285,22 @@ button:disabled {
   cursor: zoom-in;
 }
 
+.slide-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.slide-compare-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.slide-compare-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .slide-controls {
   margin-top: 8px;
   display: flex;
@@ -538,6 +554,10 @@ button:disabled {
   }
 
   .slide-row {
+    grid-template-columns: 1fr;
+  }
+
+  .slide-compare-grid {
     grid-template-columns: 1fr;
   }
 }

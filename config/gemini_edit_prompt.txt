@@ -1,15 +1,1 @@
-You are editing a presentation slide screenshot.
-
-Image 1 is the original slide screenshot.
-Image 2 shows the exact region to edit highlighted in red.
-Image 3 is a binary mask of the same edit region.
-
-Task:
-- Remove only the visible speaker arm/person fragment inside the marked region.
-- Reconstruct the hidden slide background in that region.
-- Keep all text, layout, icons, colors, lines, proportions, and unmasked pixels unchanged.
-- Do not add new content.
-- Do not restyle or reframe the slide.
-- Preserve the original slide appearance as closely as possible.
-
-Return only the edited image.
+Remove the arm in the bottom right corner. Return only the edited image.

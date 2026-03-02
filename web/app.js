@@ -43,6 +43,7 @@ const el = {
   latestSummary: document.getElementById("latest-summary"),
   latestViewMode: document.getElementById("latest-view-mode"),
   latestFinalSourceMode: document.getElementById("latest-final-source-mode"),
+  latestFinalDisplayMode: document.getElementById("latest-final-display-mode"),
   latestFinalResolutionMode: document.getElementById("latest-final-resolution-mode"),
   toggleLatestCsvTable: document.getElementById("toggle-latest-csv-table"),
   latestCsvTableWrap: document.getElementById("latest-csv-table-wrap"),
@@ -50,6 +51,7 @@ const el = {
   latestSlidesList: document.getElementById("latest-slides-list"),
   runSelect: document.getElementById("run-select"),
   runFinalSourceMode: document.getElementById("run-final-source-mode"),
+  runFinalDisplayMode: document.getElementById("run-final-display-mode"),
   runFinalResolutionMode: document.getElementById("run-final-resolution-mode"),
   runSummary: document.getElementById("run-summary"),
   csvPreview: document.getElementById("csv-preview"),
@@ -74,8 +76,10 @@ const state = {
   latestCsvExpanded: false,
   latestSlidesMode: "final",
   latestFinalSourceMode: "processed",
+  latestFinalDisplayMode: "single",
   latestFinalResolutionMode: "native",
   runFinalSourceMode: "processed",
+  runFinalDisplayMode: "single",
   runFinalResolutionMode: "native",
   lastSettledRefreshKey: "",
   currentRunStatus: "idle",
@@ -483,6 +487,11 @@ function toggleLatestCsvTable() {
   el.toggleLatestCsvTable.textContent = "CSV-Tabelle ausblenden";
 }
 
+function syncFinalViewControls() {
+  el.latestFinalResolutionMode.disabled = state.latestFinalDisplayMode === "compare";
+  el.runFinalResolutionMode.disabled = state.runFinalDisplayMode === "compare";
+}
+
 async function setFinalSlideImageMode(runId, eventId, mode) {
   await apiPost(`/api/runs/${encodeURIComponent(runId)}/final-slide-image-mode`, {
     event_id: eventId,
@@ -574,6 +583,144 @@ function resolveRenderedFinalImage(item, slideSourceMode, resolutionMode) {
   };
 }
 
+function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
+  if (sourceLabel === "full") {
+    return {
+      url: "",
+      name: "",
+      slideSourceLabel: "full",
+      resolutionLabel,
+    };
+  }
+  if (sourceLabel === "raw") {
+    if (resolutionMode === "native" && item.raw_slide_image_url) {
+      return {
+        url: item.raw_slide_image_url,
+        name: item.raw_slide_image_name || item.image_name || "",
+        slideSourceLabel: "raw",
+        resolutionLabel: "native",
+      };
+    }
+    return {
+      url: "",
+      name: "",
+      slideSourceLabel: "raw",
+      resolutionLabel,
+    };
+  }
+  if (sourceLabel === "translated") {
+    if (resolutionMode === "native" && item.translated_slide_image_url) {
+      return {
+        url: item.translated_slide_image_url,
+        name: item.translated_slide_image_name || item.image_name || "",
+        slideSourceLabel: "translated",
+        resolutionLabel: "native",
+      };
+    }
+    if (resolutionMode === "x4" && item.translated_upscaled_slide_image_url) {
+      return {
+        url: item.translated_upscaled_slide_image_url,
+        name: item.translated_upscaled_slide_image_name || item.image_name || "",
+        slideSourceLabel: "translated",
+        resolutionLabel: "x4",
+      };
+    }
+    return {
+      url: "",
+      name: "",
+      slideSourceLabel: "translated",
+      resolutionLabel,
+    };
+  }
+  if (resolutionMode === "native" && item.processed_slide_image_url) {
+    return {
+      url: item.processed_slide_image_url,
+      name: item.processed_slide_image_name || item.image_name || "",
+      slideSourceLabel: "processed",
+      resolutionLabel: "native",
+    };
+  }
+  if (resolutionMode === "x4" && item.processed_upscaled_slide_image_url) {
+    return {
+      url: item.processed_upscaled_slide_image_url,
+      name: item.processed_upscaled_slide_image_name || item.image_name || "",
+      slideSourceLabel: "processed",
+      resolutionLabel: "x4",
+    };
+  }
+  return {
+    url: "",
+    name: "",
+    slideSourceLabel: "processed",
+    resolutionLabel,
+  };
+}
+
+function resolveCompareRenderedImages(item, slideSourceMode) {
+  const left = resolveRenderedFinalImage(item, slideSourceMode, "native");
+  if (left.slideSourceLabel === "full") {
+    return {
+      left,
+      right: {
+        url: "",
+        name: "",
+        slideSourceLabel: "full",
+        resolutionLabel: "x4",
+        missingReason: "x4 nicht verfügbar für Vollbild",
+      },
+    };
+  }
+  if (left.slideSourceLabel === "raw") {
+    return {
+      left,
+      right: {
+        url: "",
+        name: "",
+        slideSourceLabel: "raw",
+        resolutionLabel: "x4",
+        missingReason: "x4 nicht verfügbar für raw",
+      },
+    };
+  }
+  const right = resolveRenderedFinalImageStrict(item, left.slideSourceLabel, "x4");
+  if (right.url) {
+    return { left, right };
+  }
+  return {
+    left,
+    right: {
+      ...right,
+      missingReason: `Kein x4-Bild für ${left.slideSourceLabel}`,
+    },
+  };
+}
+
+function createRenderedImageElement(renderedImage, fallbackName) {
+  if (renderedImage.url) {
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.src = `${renderedImage.url}?v=${Date.now()}`;
+    img.alt = renderedImage.name || fallbackName;
+    img.addEventListener("click", () => openImageModal(renderedImage.url, renderedImage.name || fallbackName));
+    return img;
+  }
+  const missing = document.createElement("div");
+  missing.className = "slide-missing muted";
+  missing.textContent = renderedImage.missingReason || "No image";
+  return missing;
+}
+
+function createComparePanel(labelText, renderedImage, fallbackName) {
+  const panel = document.createElement("div");
+  panel.className = "slide-compare-panel";
+  const label = document.createElement("div");
+  label.className = "slide-compare-label";
+  label.textContent = labelText;
+  panel.appendChild(label);
+  panel.appendChild(createRenderedImageElement(renderedImage, fallbackName));
+  return panel;
+}
+
 function createImageModeToggle(runId, item) {
   const available = Array.isArray(item.available_image_modes) ? item.available_image_modes : [];
   if (available.length <= 1) {
@@ -611,7 +758,7 @@ function createImageModeToggle(runId, item) {
   return wrap;
 }
 
-async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode) {
+async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode, displayMode) {
   if (!runId) {
     target.innerHTML = "";
     return;
@@ -634,20 +781,33 @@ async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode)
 
     const media = document.createElement("div");
     media.className = "slide-media";
-    const renderedImage = resolveRenderedFinalImage(item, slideSourceMode, resolutionMode);
+    const fallbackName = `event_${item.event_id}`;
+    let metaText = "";
 
-    if (renderedImage.url) {
-      const img = document.createElement("img");
-      img.loading = "lazy";
-      img.src = `${renderedImage.url}?v=${Date.now()}`;
-      img.alt = renderedImage.name || `event_${item.event_id}`;
-      img.addEventListener("click", () => openImageModal(renderedImage.url, renderedImage.name || `event_${item.event_id}`));
-      media.appendChild(img);
+    if (displayMode === "compare") {
+      const compare = resolveCompareRenderedImages(item, slideSourceMode);
+      const compareGrid = document.createElement("div");
+      compareGrid.className = "slide-compare-grid";
+      compareGrid.appendChild(
+        createComparePanel(
+          `${compare.left.slideSourceLabel} | native`,
+          compare.left,
+          fallbackName,
+        ),
+      );
+      compareGrid.appendChild(
+        createComparePanel(
+          `${compare.left.slideSourceLabel} | x4`,
+          compare.right,
+          fallbackName,
+        ),
+      );
+      media.appendChild(compareGrid);
+      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | roi_quelle: ${compare.left.slideSourceLabel} | anzeige: compare`;
     } else {
-      const missing = document.createElement("div");
-      missing.className = "slide-missing muted";
-      missing.textContent = "No image";
-      media.appendChild(missing);
+      const renderedImage = resolveRenderedFinalImage(item, slideSourceMode, resolutionMode);
+      media.appendChild(createRenderedImageElement(renderedImage, fallbackName));
+      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | roi_quelle: ${renderedImage.slideSourceLabel} | auflösung: ${renderedImage.resolutionLabel}`;
     }
 
     const controls = createImageModeToggle(runId, item);
@@ -657,7 +817,7 @@ async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode)
 
     const meta = document.createElement("div");
     meta.className = "slide-meta";
-    meta.textContent = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | roi_quelle: ${renderedImage.slideSourceLabel} | auflösung: ${renderedImage.resolutionLabel}`;
+    meta.textContent = metaText;
     media.appendChild(meta);
 
     const textWrap = document.createElement("div");
@@ -748,7 +908,13 @@ async function loadLatestSlides() {
     await renderBaseEvents(runId, el.latestSlidesList);
     return;
   }
-  await renderFinalSlides(runId, el.latestSlidesList, state.latestFinalSourceMode, state.latestFinalResolutionMode);
+  await renderFinalSlides(
+    runId,
+    el.latestSlidesList,
+    state.latestFinalSourceMode,
+    state.latestFinalResolutionMode,
+    state.latestFinalDisplayMode,
+  );
 }
 
 async function loadRunSlides() {
@@ -757,7 +923,13 @@ async function loadRunSlides() {
     el.runSlidesList.innerHTML = "";
     return;
   }
-  await renderFinalSlides(runId, el.runSlidesList, state.runFinalSourceMode, state.runFinalResolutionMode);
+  await renderFinalSlides(
+    runId,
+    el.runSlidesList,
+    state.runFinalSourceMode,
+    state.runFinalResolutionMode,
+    state.runFinalDisplayMode,
+  );
 }
 
 async function startRun() {
@@ -799,6 +971,11 @@ function bindEvents() {
       : "processed";
     runTaskImmediate(loadLatestSlides);
   });
+  el.latestFinalDisplayMode.addEventListener("change", () => {
+    state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
+    syncFinalViewControls();
+    runTaskImmediate(loadLatestSlides);
+  });
   el.latestFinalResolutionMode.addEventListener("change", () => {
     state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
     runTaskImmediate(loadLatestSlides);
@@ -809,6 +986,11 @@ function bindEvents() {
     state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
       ? el.runFinalSourceMode.value
       : "processed";
+    runTaskImmediate(loadRunSlides);
+  });
+  el.runFinalDisplayMode.addEventListener("change", () => {
+    state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
+    syncFinalViewControls();
     runTaskImmediate(loadRunSlides);
   });
   el.runFinalResolutionMode.addEventListener("change", () => {
@@ -856,11 +1038,14 @@ async function init() {
   state.latestFinalSourceMode = ["raw", "translated"].includes(el.latestFinalSourceMode.value)
     ? el.latestFinalSourceMode.value
     : "processed";
+  state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
   state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
   state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
     ? el.runFinalSourceMode.value
     : "processed";
+  state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
   state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
+  syncFinalViewControls();
   setActiveTab("home");
   await runTask(loadConfig);
   await runTask(loadOverlay);
