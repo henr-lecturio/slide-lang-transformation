@@ -493,6 +493,10 @@ def run_final_slides(run_id: str) -> list[dict]:
                     "text": (row.get("text", "") or "").strip(),
                     "segments_count": int(row.get("segments_count", "0") or "0"),
                     "source_segment_ids": row.get("source_segment_ids", "") or "",
+                    "source_mode_auto": row.get("source_mode_auto", "") or "",
+                    "source_mode_final": row.get("source_mode_final", "") or "",
+                    "source_reason": row.get("source_reason", "") or "",
+                    "source_confidence": float(row.get("source_confidence", "0") or "0"),
                     **assets,
                 }
             )
@@ -683,6 +687,13 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(env.get("ROI_Y0", "0")),
                     "ROI_X1": int(env.get("ROI_X1", "0")),
                     "ROI_Y1": int(env.get("ROI_Y1", "0")),
+                    "FINAL_SOURCE_MODE_AUTO": env.get("FINAL_SOURCE_MODE_AUTO", "auto"),
+                    "FULLSLIDE_SAMPLE_FRAMES": int(env.get("FULLSLIDE_SAMPLE_FRAMES", "3")),
+                    "FULLSLIDE_BORDER_STRIP_PX": int(env.get("FULLSLIDE_BORDER_STRIP_PX", "24")),
+                    "FULLSLIDE_MIN_MATCHED_SIDES": int(env.get("FULLSLIDE_MIN_MATCHED_SIDES", "2")),
+                    "FULLSLIDE_BORDER_DIFF_THRESHOLD": float(env.get("FULLSLIDE_BORDER_DIFF_THRESHOLD", "16.0")),
+                    "FULLSLIDE_PERSON_BOX_AREA_RATIO": float(env.get("FULLSLIDE_PERSON_BOX_AREA_RATIO", "0.02")),
+                    "FULLSLIDE_PERSON_OUTSIDE_RATIO": float(env.get("FULLSLIDE_PERSON_OUTSIDE_RATIO", "0.35")),
                     "KEYFRAME_SETTLE_FRAMES": int(env.get("KEYFRAME_SETTLE_FRAMES", "4")),
                     "KEYFRAME_STABLE_END_GUARD_FRAMES": int(env.get("KEYFRAME_STABLE_END_GUARD_FRAMES", "2")),
                     "KEYFRAME_STABLE_LOOKAHEAD_FRAMES": int(env.get("KEYFRAME_STABLE_LOOKAHEAD_FRAMES", "2")),
@@ -840,6 +851,13 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(data["ROI_Y0"]),
                     "ROI_X1": int(data["ROI_X1"]),
                     "ROI_Y1": int(data["ROI_Y1"]),
+                    "FINAL_SOURCE_MODE_AUTO": str(data["FINAL_SOURCE_MODE_AUTO"]).strip(),
+                    "FULLSLIDE_SAMPLE_FRAMES": int(data["FULLSLIDE_SAMPLE_FRAMES"]),
+                    "FULLSLIDE_BORDER_STRIP_PX": int(data["FULLSLIDE_BORDER_STRIP_PX"]),
+                    "FULLSLIDE_MIN_MATCHED_SIDES": int(data["FULLSLIDE_MIN_MATCHED_SIDES"]),
+                    "FULLSLIDE_BORDER_DIFF_THRESHOLD": float(data["FULLSLIDE_BORDER_DIFF_THRESHOLD"]),
+                    "FULLSLIDE_PERSON_BOX_AREA_RATIO": float(data["FULLSLIDE_PERSON_BOX_AREA_RATIO"]),
+                    "FULLSLIDE_PERSON_OUTSIDE_RATIO": float(data["FULLSLIDE_PERSON_OUTSIDE_RATIO"]),
                     "KEYFRAME_SETTLE_FRAMES": int(data["KEYFRAME_SETTLE_FRAMES"]),
                     "KEYFRAME_STABLE_END_GUARD_FRAMES": int(data["KEYFRAME_STABLE_END_GUARD_FRAMES"]),
                     "KEYFRAME_STABLE_LOOKAHEAD_FRAMES": int(data["KEYFRAME_STABLE_LOOKAHEAD_FRAMES"]),
@@ -862,6 +880,20 @@ class Handler(BaseHTTPRequestHandler):
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
+                if cfg["FINAL_SOURCE_MODE_AUTO"] not in {"off", "auto"}:
+                    raise ValueError("FINAL_SOURCE_MODE_AUTO must be off or auto")
+                if cfg["FULLSLIDE_SAMPLE_FRAMES"] < 1:
+                    raise ValueError("FULLSLIDE_SAMPLE_FRAMES must be >= 1")
+                if cfg["FULLSLIDE_BORDER_STRIP_PX"] < 2:
+                    raise ValueError("FULLSLIDE_BORDER_STRIP_PX must be >= 2")
+                if cfg["FULLSLIDE_MIN_MATCHED_SIDES"] < 1 or cfg["FULLSLIDE_MIN_MATCHED_SIDES"] > 4:
+                    raise ValueError("FULLSLIDE_MIN_MATCHED_SIDES must be in [1, 4]")
+                if cfg["FULLSLIDE_BORDER_DIFF_THRESHOLD"] < 0:
+                    raise ValueError("FULLSLIDE_BORDER_DIFF_THRESHOLD must be >= 0")
+                if not (0.0 <= cfg["FULLSLIDE_PERSON_BOX_AREA_RATIO"] <= 1.0):
+                    raise ValueError("FULLSLIDE_PERSON_BOX_AREA_RATIO must be in [0, 1]")
+                if not (0.0 <= cfg["FULLSLIDE_PERSON_OUTSIDE_RATIO"] <= 1.0):
+                    raise ValueError("FULLSLIDE_PERSON_OUTSIDE_RATIO must be in [0, 1]")
                 if cfg["KEYFRAME_SETTLE_FRAMES"] < 0:
                     raise ValueError("KEYFRAME_SETTLE_FRAMES must be >= 0")
                 if cfg["KEYFRAME_STABLE_END_GUARD_FRAMES"] < 0:

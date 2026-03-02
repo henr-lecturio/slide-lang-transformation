@@ -121,6 +121,18 @@
             <label>ROI_Y0 <input id="roi_y0" type="number" /></label>
             <label>ROI_X1 <input id="roi_x1" type="number" /></label>
             <label>ROI_Y1 <input id="roi_y1" type="number" /></label>
+            <label>FINAL_SOURCE_MODE_AUTO
+              <select id="final_source_mode_auto">
+                <option value="auto">auto</option>
+                <option value="off">off</option>
+              </select>
+            </label>
+            <label>FULLSLIDE_SAMPLE_FRAMES <input id="fullslide_sample_frames" type="number" min="1" step="1" /></label>
+            <label>FULLSLIDE_BORDER_STRIP_PX <input id="fullslide_border_strip_px" type="number" min="2" step="1" /></label>
+            <label>FULLSLIDE_MIN_MATCHED_SIDES <input id="fullslide_min_matched_sides" type="number" min="1" max="4" step="1" /></label>
+            <label>FULLSLIDE_BORDER_DIFF_THRESHOLD <input id="fullslide_border_diff_threshold" type="number" min="0" step="0.1" /></label>
+            <label>FULLSLIDE_PERSON_BOX_AREA_RATIO <input id="fullslide_person_box_area_ratio" type="number" min="0" max="1" step="0.01" /></label>
+            <label>FULLSLIDE_PERSON_OUTSIDE_RATIO <input id="fullslide_person_outside_ratio" type="number" min="0" max="1" step="0.01" /></label>
             <label>KEYFRAME_SETTLE_FRAMES <input id="keyframe_settle_frames" type="number" min="0" step="1" /></label>
             <label>KEYFRAME_STABLE_END_GUARD_FRAMES <input id="keyframe_stable_end_guard_frames" type="number" min="0" step="1" /></label>
             <label>KEYFRAME_STABLE_LOOKAHEAD_FRAMES <input id="keyframe_stable_lookahead_frames" type="number" min="1" step="1" /></label>

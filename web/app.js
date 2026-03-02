@@ -10,6 +10,13 @@ const el = {
   roiY0: document.getElementById("roi_y0"),
   roiX1: document.getElementById("roi_x1"),
   roiY1: document.getElementById("roi_y1"),
+  finalSourceModeAuto: document.getElementById("final_source_mode_auto"),
+  fullslideSampleFrames: document.getElementById("fullslide_sample_frames"),
+  fullslideBorderStripPx: document.getElementById("fullslide_border_strip_px"),
+  fullslideMinMatchedSides: document.getElementById("fullslide_min_matched_sides"),
+  fullslideBorderDiffThreshold: document.getElementById("fullslide_border_diff_threshold"),
+  fullslidePersonBoxAreaRatio: document.getElementById("fullslide_person_box_area_ratio"),
+  fullslidePersonOutsideRatio: document.getElementById("fullslide_person_outside_ratio"),
   keyframeSettleFrames: document.getElementById("keyframe_settle_frames"),
   keyframeStableEndGuardFrames: document.getElementById("keyframe_stable_end_guard_frames"),
   keyframeStableLookaheadFrames: document.getElementById("keyframe_stable_lookahead_frames"),
@@ -168,6 +175,13 @@ function setConfig(cfg) {
   el.roiY0.value = cfg.ROI_Y0;
   el.roiX1.value = cfg.ROI_X1;
   el.roiY1.value = cfg.ROI_Y1;
+  el.finalSourceModeAuto.value = cfg.FINAL_SOURCE_MODE_AUTO || "auto";
+  el.fullslideSampleFrames.value = cfg.FULLSLIDE_SAMPLE_FRAMES ?? 3;
+  el.fullslideBorderStripPx.value = cfg.FULLSLIDE_BORDER_STRIP_PX ?? 24;
+  el.fullslideMinMatchedSides.value = cfg.FULLSLIDE_MIN_MATCHED_SIDES ?? 2;
+  el.fullslideBorderDiffThreshold.value = cfg.FULLSLIDE_BORDER_DIFF_THRESHOLD ?? 16.0;
+  el.fullslidePersonBoxAreaRatio.value = cfg.FULLSLIDE_PERSON_BOX_AREA_RATIO ?? 0.02;
+  el.fullslidePersonOutsideRatio.value = cfg.FULLSLIDE_PERSON_OUTSIDE_RATIO ?? 0.35;
   el.keyframeSettleFrames.value = cfg.KEYFRAME_SETTLE_FRAMES;
   el.keyframeStableEndGuardFrames.value = cfg.KEYFRAME_STABLE_END_GUARD_FRAMES;
   el.keyframeStableLookaheadFrames.value = cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES;
@@ -189,7 +203,7 @@ function setConfig(cfg) {
   el.finalSlideUpscaleTileOverlap.value = cfg.FINAL_SLIDE_UPSCALE_TILE_OVERLAP ?? 24;
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
-  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | target_lang: ${cfg.FINAL_SLIDE_TARGET_LANGUAGE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState}`;
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | target_lang: ${cfg.FINAL_SLIDE_TARGET_LANGUAGE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState}`;
   renderSelectedVideo();
 }
 
@@ -219,6 +233,13 @@ async function saveConfig() {
     ROI_Y0: Number(el.roiY0.value),
     ROI_X1: Number(el.roiX1.value),
     ROI_Y1: Number(el.roiY1.value),
+    FINAL_SOURCE_MODE_AUTO: el.finalSourceModeAuto.value,
+    FULLSLIDE_SAMPLE_FRAMES: Number(el.fullslideSampleFrames.value),
+    FULLSLIDE_BORDER_STRIP_PX: Number(el.fullslideBorderStripPx.value),
+    FULLSLIDE_MIN_MATCHED_SIDES: Number(el.fullslideMinMatchedSides.value),
+    FULLSLIDE_BORDER_DIFF_THRESHOLD: Number(el.fullslideBorderDiffThreshold.value),
+    FULLSLIDE_PERSON_BOX_AREA_RATIO: Number(el.fullslidePersonBoxAreaRatio.value),
+    FULLSLIDE_PERSON_OUTSIDE_RATIO: Number(el.fullslidePersonOutsideRatio.value),
     KEYFRAME_SETTLE_FRAMES: Number(el.keyframeSettleFrames.value),
     KEYFRAME_STABLE_END_GUARD_FRAMES: Number(el.keyframeStableEndGuardFrames.value),
     KEYFRAME_STABLE_LOOKAHEAD_FRAMES: Number(el.keyframeStableLookaheadFrames.value),
@@ -803,11 +824,11 @@ async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode,
         ),
       );
       media.appendChild(compareGrid);
-      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | roi_quelle: ${compare.left.slideSourceLabel} | anzeige: compare`;
+      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | final_quelle: ${item.source_mode_final || "-"} | roi_quelle: ${compare.left.slideSourceLabel} | anzeige: compare`;
     } else {
       const renderedImage = resolveRenderedFinalImage(item, slideSourceMode, resolutionMode);
       media.appendChild(createRenderedImageElement(renderedImage, fallbackName));
-      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | roi_quelle: ${renderedImage.slideSourceLabel} | auflösung: ${renderedImage.resolutionLabel}`;
+      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | final_quelle: ${item.source_mode_final || "-"} | roi_quelle: ${renderedImage.slideSourceLabel} | auflösung: ${renderedImage.resolutionLabel}`;
     }
 
     const controls = createImageModeToggle(runId, item);

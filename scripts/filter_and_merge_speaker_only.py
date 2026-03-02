@@ -89,6 +89,396 @@ def find_event_image(image_dir: Path, event_id: int) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def clamp_roi_to_frame(
+    roi: tuple[int, int, int, int],
+    width: int,
+    height: int,
+) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = roi
+    x0 = max(0, min(int(x0), max(0, width - 1)))
+    y0 = max(0, min(int(y0), max(0, height - 1)))
+    x1 = max(x0 + 1, min(int(x1), width))
+    y1 = max(y0 + 1, min(int(y1), height))
+    return x0, y0, x1, y1
+
+
+def sample_event_frame_ids(start_sec: float, end_sec: float, fps: float, count: int) -> list[int]:
+    start_frame, end_frame = frame_interval_for_event(start_sec, end_sec, fps)
+    if count <= 1 or end_frame <= start_frame:
+        return [max(1, int(round((start_frame + end_frame) / 2.0)))]
+    frame_ids = [
+        max(1, int(round(x)))
+        for x in np.linspace(start_frame, end_frame, num=max(1, int(count)), dtype=np.float64)
+    ]
+    return sorted(set(frame_ids))
+
+
+def read_video_frame(cap: cv2.VideoCapture, frame_id: int) -> np.ndarray | None:
+    if frame_id <= 0:
+        return None
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(frame_id) - 1))
+    ok, frame = cap.read()
+    if not ok or frame is None or frame.size == 0:
+        return None
+    return frame
+
+
+def create_person_detector() -> cv2.HOGDescriptor:
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+    return hog
+
+
+def detect_people_boxes(
+    frame: np.ndarray,
+    hog: cv2.HOGDescriptor,
+    *,
+    max_width: int = 960,
+    hit_threshold: float = 0.0,
+) -> list[tuple[int, int, int, int, float]]:
+    h, w = frame.shape[:2]
+    scale = 1.0
+    resized = frame
+    if w > max_width:
+        scale = float(max_width) / float(w)
+        new_h = max(1, int(round(h * scale)))
+        resized = cv2.resize(frame, (max_width, new_h), interpolation=cv2.INTER_AREA)
+
+    boxes, weights = hog.detectMultiScale(
+        resized,
+        hitThreshold=float(hit_threshold),
+        winStride=(8, 8),
+        padding=(8, 8),
+        scale=1.05,
+    )
+    results: list[tuple[int, int, int, int, float]] = []
+    inv_scale = 1.0 / scale
+    for (x, y, bw, bh), weight in zip(boxes, weights):
+        score = float(weight[0] if isinstance(weight, np.ndarray) else weight)
+        results.append(
+            (
+                int(round(x * inv_scale)),
+                int(round(y * inv_scale)),
+                int(round(bw * inv_scale)),
+                int(round(bh * inv_scale)),
+                score,
+            )
+        )
+    return results
+
+
+def rect_intersection_area(
+    ax: int,
+    ay: int,
+    aw: int,
+    ah: int,
+    bx: int,
+    by: int,
+    bw: int,
+    bh: int,
+) -> int:
+    x0 = max(ax, bx)
+    y0 = max(ay, by)
+    x1 = min(ax + aw, bx + bw)
+    y1 = min(ay + ah, by + bh)
+    if x1 <= x0 or y1 <= y0:
+        return 0
+    return max(0, x1 - x0) * max(0, y1 - y0)
+
+
+def detect_person_outside_roi(
+    frames: list[np.ndarray],
+    roi: tuple[int, int, int, int],
+    hog: cv2.HOGDescriptor,
+    *,
+    hit_threshold: float = 0.0,
+    min_box_area_ratio: float = 0.02,
+    min_outside_ratio: float = 0.35,
+) -> dict:
+    detected_frames = 0
+    max_weight = 0.0
+    sample_frames = 0
+
+    for frame in frames:
+        if frame is None or frame.size == 0:
+            continue
+        sample_frames += 1
+        h, w = frame.shape[:2]
+        x0, y0, x1, y1 = clamp_roi_to_frame(roi, w, h)
+        roi_w = max(1, x1 - x0)
+        roi_h = max(1, y1 - y0)
+        frame_area = float(max(1, w * h))
+        found = False
+
+        for bx, by, bw, bh, weight in detect_people_boxes(frame, hog, hit_threshold=hit_threshold):
+            if bw <= 0 or bh <= 0:
+                continue
+            area = float(bw * bh)
+            if area < frame_area * max(0.0, float(min_box_area_ratio)):
+                continue
+            inside_area = rect_intersection_area(bx, by, bw, bh, x0, y0, roi_w, roi_h)
+            outside_ratio = 1.0 - (float(inside_area) / area)
+            if outside_ratio < max(0.0, float(min_outside_ratio)):
+                continue
+            max_weight = max(max_weight, float(weight))
+            found = True
+
+        if found:
+            detected_frames += 1
+
+    return {
+        "person_present": detected_frames > 0,
+        "person_detected_frames": detected_frames,
+        "sample_frames": sample_frames,
+        "person_max_weight": round(max_weight, 3),
+    }
+
+
+def _extract_side_strips(
+    frame: np.ndarray,
+    roi: tuple[int, int, int, int],
+    strip_px: int,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    h, w = frame.shape[:2]
+    x0, y0, x1, y1 = clamp_roi_to_frame(roi, w, h)
+    strip = max(2, int(strip_px))
+    pairs: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    if x0 - strip >= 0:
+        pairs["left"] = (
+            frame[y0:y1, x0 : min(x1, x0 + strip)],
+            frame[y0:y1, x0 - strip : x0],
+        )
+    if x1 + strip <= w:
+        pairs["right"] = (
+            frame[y0:y1, max(x0, x1 - strip) : x1],
+            frame[y0:y1, x1 : x1 + strip],
+        )
+    if y0 - strip >= 0:
+        pairs["top"] = (
+            frame[y0 : min(y1, y0 + strip), x0:x1],
+            frame[y0 - strip : y0, x0:x1],
+        )
+    if y1 + strip <= h:
+        pairs["bottom"] = (
+            frame[max(y0, y1 - strip) : y1, x0:x1],
+            frame[y1 : y1 + strip, x0:x1],
+        )
+    return pairs
+
+
+def _side_strip_diff(inside: np.ndarray, outside: np.ndarray, side: str) -> float | None:
+    if inside.size == 0 or outside.size == 0:
+        return None
+    target = (16, 96) if side in {"left", "right"} else (96, 16)
+    inside_small = cv2.resize(cv2.GaussianBlur(inside, (7, 7), 0), target, interpolation=cv2.INTER_AREA)
+    outside_small = cv2.resize(cv2.GaussianBlur(outside, (7, 7), 0), target, interpolation=cv2.INTER_AREA)
+    inside_lab = cv2.cvtColor(inside_small, cv2.COLOR_BGR2Lab).astype(np.float32)
+    outside_lab = cv2.cvtColor(outside_small, cv2.COLOR_BGR2Lab).astype(np.float32)
+    return float(np.mean(np.abs(inside_lab - outside_lab)))
+
+
+def analyze_border_continuity(
+    frames: list[np.ndarray],
+    roi: tuple[int, int, int, int],
+    *,
+    strip_px: int,
+    diff_threshold: float,
+    min_matched_sides: int,
+) -> dict:
+    per_frame_counts: list[int] = []
+    matched_frame_count = 0
+    side_diffs_by_name: dict[str, list[float]] = {name: [] for name in ("left", "right", "top", "bottom")}
+
+    for frame in frames:
+        if frame is None or frame.size == 0:
+            continue
+        matched = 0
+        side_pairs = _extract_side_strips(frame, roi, strip_px)
+        for side, (inside, outside) in side_pairs.items():
+            diff = _side_strip_diff(inside, outside, side)
+            if diff is None:
+                continue
+            side_diffs_by_name[side].append(diff)
+            if diff <= float(diff_threshold):
+                matched += 1
+        per_frame_counts.append(matched)
+        if matched >= max(1, int(min_matched_sides)):
+            matched_frame_count += 1
+
+    if not per_frame_counts:
+        return {
+            "slide_extension_detected": False,
+            "sample_frames": 0,
+            "matched_frame_count": 0,
+            "median_matched_sides": 0,
+            "side_diff_left": "",
+            "side_diff_right": "",
+            "side_diff_top": "",
+            "side_diff_bottom": "",
+        }
+
+    median_matched_sides = int(round(float(np.median(per_frame_counts))))
+    sample_frames = len(per_frame_counts)
+    slide_extension_detected = matched_frame_count >= max(1, int(math.ceil(sample_frames / 2.0)))
+    return {
+        "slide_extension_detected": slide_extension_detected,
+        "sample_frames": sample_frames,
+        "matched_frame_count": matched_frame_count,
+        "median_matched_sides": median_matched_sides,
+        "side_diff_left": round(float(np.median(side_diffs_by_name["left"])), 3) if side_diffs_by_name["left"] else "",
+        "side_diff_right": round(float(np.median(side_diffs_by_name["right"])), 3) if side_diffs_by_name["right"] else "",
+        "side_diff_top": round(float(np.median(side_diffs_by_name["top"])), 3) if side_diffs_by_name["top"] else "",
+        "side_diff_bottom": round(float(np.median(side_diffs_by_name["bottom"])), 3) if side_diffs_by_name["bottom"] else "",
+    }
+
+
+def load_sample_frames_for_event(
+    cap: cv2.VideoCapture,
+    row: dict,
+    fps: float,
+    *,
+    sample_frames: int,
+    fallback_full_image: Path | None,
+) -> list[np.ndarray]:
+    frames: list[np.ndarray] = []
+    for frame_id in sample_event_frame_ids(float(row["slide_start"]), float(row["slide_end"]), fps, sample_frames):
+        frame = read_video_frame(cap, frame_id)
+        if frame is not None:
+            frames.append(frame)
+
+    if not frames and fallback_full_image is not None and fallback_full_image.exists():
+        fallback = cv2.imread(str(fallback_full_image), cv2.IMREAD_COLOR)
+        if fallback is not None and fallback.size > 0:
+            frames.append(fallback)
+    return frames
+
+
+def detect_final_source_modes(
+    kept_rows: list[dict],
+    *,
+    video_path: Path,
+    fps: float,
+    full_keyframes_dir: Path | None,
+    roi: tuple[int, int, int, int],
+    final_source_mode_auto: str,
+    fullslide_sample_frames: int,
+    fullslide_border_strip_px: int,
+    fullslide_min_matched_sides: int,
+    fullslide_border_diff_threshold: float,
+    fullslide_person_box_area_ratio: float,
+    fullslide_person_outside_ratio: float,
+) -> list[dict]:
+    source_rows: list[dict] = []
+    if not kept_rows:
+        return source_rows
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        cap.release()
+        raise RuntimeError(f"Failed to open video for final source detection: {video_path}")
+
+    hog = create_person_detector()
+    try:
+        for slide_index, row in enumerate(kept_rows, start=1):
+            event_id = int(row["event_id"])
+            src_full = find_event_image(full_keyframes_dir, event_id) if full_keyframes_dir is not None else None
+            info = {
+                "slide_index": slide_index,
+                "event_id": event_id,
+                "source_mode_auto": "slide",
+                "source_mode_final": "slide",
+                "source_reason": "auto_disabled",
+                "source_confidence": 0.0,
+                "sample_frames": 0,
+                "person_detected_frames": 0,
+                "person_present": False,
+                "person_max_weight": "",
+                "matched_frame_count": 0,
+                "median_matched_sides": 0,
+                "side_diff_left": "",
+                "side_diff_right": "",
+                "side_diff_top": "",
+                "side_diff_bottom": "",
+            }
+
+            if final_source_mode_auto != "auto":
+                source_rows.append(info)
+                continue
+            if src_full is None or not src_full.exists():
+                info["source_reason"] = "no_full_image"
+                source_rows.append(info)
+                continue
+
+            frames = load_sample_frames_for_event(
+                cap,
+                row,
+                fps,
+                sample_frames=max(1, int(fullslide_sample_frames)),
+                fallback_full_image=src_full,
+            )
+            if not frames:
+                info["source_reason"] = "no_sample_frames"
+                source_rows.append(info)
+                continue
+
+            height, width = frames[0].shape[:2]
+            frame_roi = clamp_roi_to_frame(roi, width, height)
+            person = detect_person_outside_roi(
+                frames,
+                frame_roi,
+                hog,
+                min_box_area_ratio=max(0.0, float(fullslide_person_box_area_ratio)),
+                min_outside_ratio=max(0.0, float(fullslide_person_outside_ratio)),
+            )
+            border = analyze_border_continuity(
+                frames,
+                frame_roi,
+                strip_px=max(2, int(fullslide_border_strip_px)),
+                diff_threshold=max(0.0, float(fullslide_border_diff_threshold)),
+                min_matched_sides=max(1, int(fullslide_min_matched_sides)),
+            )
+
+            info.update(
+                {
+                    "sample_frames": max(int(person["sample_frames"]), int(border["sample_frames"])),
+                    "person_detected_frames": int(person["person_detected_frames"]),
+                    "person_present": bool(person["person_present"]),
+                    "person_max_weight": person["person_max_weight"],
+                    "matched_frame_count": int(border["matched_frame_count"]),
+                    "median_matched_sides": int(border["median_matched_sides"]),
+                    "side_diff_left": border["side_diff_left"],
+                    "side_diff_right": border["side_diff_right"],
+                    "side_diff_top": border["side_diff_top"],
+                    "side_diff_bottom": border["side_diff_bottom"],
+                }
+            )
+
+            if (not person["person_present"]) and border["slide_extension_detected"]:
+                info["source_mode_auto"] = "full"
+                info["source_mode_final"] = "full"
+                info["source_reason"] = "person_absent_and_border_match"
+                conf = 0.55 + (0.1 * min(4, int(border["median_matched_sides"])))
+                info["source_confidence"] = round(min(0.99, conf), 3)
+            elif person["person_present"]:
+                info["source_reason"] = "person_detected_outside_roi"
+                info["source_confidence"] = round(min(0.99, 0.4 + (0.1 * int(person["person_detected_frames"]))), 3)
+            elif not border["slide_extension_detected"]:
+                info["source_reason"] = "border_match_insufficient"
+                info["source_confidence"] = round(
+                    max(0.0, min(0.95, 0.2 + (0.08 * int(border["median_matched_sides"])))),
+                    3,
+                )
+            else:
+                info["source_reason"] = "default_slide"
+
+            source_rows.append(info)
+    finally:
+        cap.release()
+
+    return source_rows
+
+
 def estimate_slide_background_color(
     patch: np.ndarray,
     *,
@@ -582,6 +972,7 @@ def format_source_ids(ids: list[int]) -> str:
 
 def copy_kept_images(
     kept_rows: list[dict],
+    source_info_by_event: dict[int, dict],
     src_slide_dir: Path,
     src_full_dir: Path | None,
     dst_slide_dir: Path | None,
@@ -607,25 +998,29 @@ def copy_kept_images(
 
     for idx, row in enumerate(kept_rows, start=1):
         event_id = int(row["event_id"])
+        source_info = source_info_by_event.get(event_id, {})
+        source_mode_final = str(source_info.get("source_mode_final", "slide") or "slide")
         src_slide = find_event_image(src_slide_dir, event_id)
-        if src_slide is not None and dst_slide_raw_dir is not None:
-            raw_name = f"slide_{idx:03d}_{src_slide.name}"
-            shutil.copy2(src_slide, dst_slide_raw_dir / raw_name)
+        src_full = find_event_image(src_full_dir, event_id) if src_full_dir is not None else None
+        raw_source = src_full if source_mode_final == "full" and src_full is not None else src_slide
 
-        if src_slide is not None and dst_slide_dir is not None:
-            dst_name = f"slide_{idx:03d}_{src_slide.name}"
+        if raw_source is not None and dst_slide_raw_dir is not None:
+            raw_name = f"slide_{idx:03d}_{raw_source.name}"
+            shutil.copy2(raw_source, dst_slide_raw_dir / raw_name)
+
+        if raw_source is not None and dst_slide_dir is not None:
+            dst_name = f"slide_{idx:03d}_{raw_source.name}"
             dst_path = dst_slide_dir / dst_name
-            if final_slide_clean_mode == "local" and idx != 1:
+            if final_slide_clean_mode == "local" and idx != 1 and source_mode_final == "slide" and src_slide is not None:
                 cleaned = clean_final_slide_image(src_slide)
                 if cleaned is None:
-                    shutil.copy2(src_slide, dst_path)
+                    shutil.copy2(raw_source, dst_path)
                 else:
                     cv2.imwrite(str(dst_path), cleaned)
             else:
-                shutil.copy2(src_slide, dst_path)
+                shutil.copy2(raw_source, dst_path)
 
         if src_full_dir is not None and dst_full_dir is not None:
-            src_full = find_event_image(src_full_dir, event_id)
             if src_full is not None:
                 dst_name = f"slide_{idx:03d}_{src_full.name}"
                 shutil.copy2(src_full, dst_full_dir / dst_name)
@@ -687,6 +1082,11 @@ def main() -> int:
     parser.add_argument("--out-json", required=True, help="Filtered map JSON output.")
     parser.add_argument("--out-csv", required=True, help="Filtered map CSV output.")
     parser.add_argument("--out-manifest-csv", required=True, help="Per-event decision manifest output.")
+    parser.add_argument(
+        "--out-final-source-manifest-csv",
+        default="",
+        help="Optional per-final-slide source selection manifest output.",
+    )
     parser.add_argument("--out-final-slide-dir", default="", help="Optional folder with copied kept slide images.")
     parser.add_argument(
         "--out-final-slide-raw-dir",
@@ -699,6 +1099,52 @@ def main() -> int:
         choices=("none", "local"),
         default="local",
         help="Final slide cleanup mode for copied kept ROI images (default: local).",
+    )
+    parser.add_argument(
+        "--final-source-mode-auto",
+        choices=("off", "auto"),
+        default="auto",
+        help="Choose whether final slides auto-switch from ROI to full image before postprocess steps.",
+    )
+    parser.add_argument("--roi-x0", type=int, default=0, help="ROI left coordinate in full-frame pixels.")
+    parser.add_argument("--roi-y0", type=int, default=0, help="ROI top coordinate in full-frame pixels.")
+    parser.add_argument("--roi-x1", type=int, default=0, help="ROI right coordinate in full-frame pixels.")
+    parser.add_argument("--roi-y1", type=int, default=0, help="ROI bottom coordinate in full-frame pixels.")
+    parser.add_argument(
+        "--fullslide-sample-frames",
+        type=int,
+        default=3,
+        help="Number of video frames sampled per final slide for auto full-slide detection (default: 3).",
+    )
+    parser.add_argument(
+        "--fullslide-border-strip-px",
+        type=int,
+        default=24,
+        help="Strip width outside/inside ROI used for full-slide border continuity checks (default: 24).",
+    )
+    parser.add_argument(
+        "--fullslide-min-matched-sides",
+        type=int,
+        default=2,
+        help="Minimum matched ROI border sides needed per sample frame to accept full-slide continuity (default: 2).",
+    )
+    parser.add_argument(
+        "--fullslide-border-diff-threshold",
+        type=float,
+        default=16.0,
+        help="Median Lab-strip difference threshold for border continuity (default: 16.0).",
+    )
+    parser.add_argument(
+        "--fullslide-person-box-area-ratio",
+        type=float,
+        default=0.02,
+        help="Minimum detected person box area ratio relative to full frame (default: 0.02).",
+    )
+    parser.add_argument(
+        "--fullslide-person-outside-ratio",
+        type=float,
+        default=0.35,
+        help="Minimum fraction of a detected person box that must lie outside the ROI (default: 0.35).",
     )
     parser.add_argument(
         "--speaker-min-stage1-video-ratio",
@@ -741,6 +1187,9 @@ def main() -> int:
     out_json = Path(args.out_json).resolve()
     out_csv = Path(args.out_csv).resolve()
     out_manifest_csv = Path(args.out_manifest_csv).resolve()
+    out_final_source_manifest_csv = (
+        Path(args.out_final_source_manifest_csv).resolve() if args.out_final_source_manifest_csv else None
+    )
     out_final_slide_dir = Path(args.out_final_slide_dir).resolve() if args.out_final_slide_dir else None
     out_final_slide_raw_dir = (
         Path(args.out_final_slide_raw_dir).resolve() if args.out_final_slide_raw_dir else None
@@ -761,6 +1210,17 @@ def main() -> int:
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     out_manifest_csv.parent.mkdir(parents=True, exist_ok=True)
+    if out_final_source_manifest_csv is not None:
+        out_final_source_manifest_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    roi = (
+        int(args.roi_x0),
+        int(args.roi_y0),
+        int(args.roi_x1),
+        int(args.roi_y1),
+    )
+    if str(args.final_source_mode_auto) == "auto" and (roi[0] >= roi[2] or roi[1] >= roi[3]):
+        raise ValueError("ROI must satisfy x0 < x1 and y0 < y1 when final source auto mode is enabled")
 
     rows = load_slide_map(slide_map_json)
     if slide_map_csv is not None and slide_map_csv.exists():
@@ -872,6 +1332,22 @@ def main() -> int:
                 manifest["action"] = "merged_duplicate_slide"
                 manifest["merge_target_event_id"] = duplicate_targets[event_id]
 
+    source_rows = detect_final_source_modes(
+        kept_rows,
+        video_path=video_path,
+        fps=fps,
+        full_keyframes_dir=full_keyframes_dir,
+        roi=roi,
+        final_source_mode_auto=str(args.final_source_mode_auto),
+        fullslide_sample_frames=max(1, int(args.fullslide_sample_frames)),
+        fullslide_border_strip_px=max(2, int(args.fullslide_border_strip_px)),
+        fullslide_min_matched_sides=max(1, int(args.fullslide_min_matched_sides)),
+        fullslide_border_diff_threshold=max(0.0, float(args.fullslide_border_diff_threshold)),
+        fullslide_person_box_area_ratio=max(0.0, float(args.fullslide_person_box_area_ratio)),
+        fullslide_person_outside_ratio=max(0.0, float(args.fullslide_person_outside_ratio)),
+    )
+    source_info_by_event = {int(row["event_id"]): row for row in source_rows}
+
     final_rows: list[dict] = []
     if leading_no_slide_parts or leading_no_slide_ids:
         leading_text = " ".join(x for x in leading_no_slide_parts if x).strip()
@@ -887,10 +1363,15 @@ def main() -> int:
                 "text": leading_text,
                 "segments_count": len(ids),
                 "source_segment_ids": ids,
+                "source_mode_auto": "",
+                "source_mode_final": "",
+                "source_reason": "",
+                "source_confidence": "",
             }
         )
 
     for row in kept_rows:
+        source_info = source_info_by_event.get(int(row["event_id"]), {})
         final_rows.append(
             {
                 "event_id": int(row["event_id"]),
@@ -902,6 +1383,10 @@ def main() -> int:
                 "text": str(row.get("text", "")).strip(),
                 "segments_count": int(row.get("segments_count", 0)),
                 "source_segment_ids": sorted(parse_source_segment_ids(row.get("source_segment_ids", []))),
+                "source_mode_auto": str(source_info.get("source_mode_auto", "slide")),
+                "source_mode_final": str(source_info.get("source_mode_final", "slide")),
+                "source_reason": str(source_info.get("source_reason", "")),
+                "source_confidence": float(source_info.get("source_confidence", 0.0)),
             }
         )
 
@@ -919,6 +1404,7 @@ def main() -> int:
         "final_event_count": len(final_rows),
         "kept_slide_event_count": len([r for r in final_rows if int(r["event_id"]) > 0]),
         "removed_event_count": len([r for r in manifest_rows if r["action"] in {"merged_to_previous", "leading_no_previous"}]),
+        "final_source_mode_auto": str(args.final_source_mode_auto),
         "events": final_rows,
     }
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -936,6 +1422,10 @@ def main() -> int:
                 "text",
                 "segments_count",
                 "source_segment_ids",
+                "source_mode_auto",
+                "source_mode_final",
+                "source_reason",
+                "source_confidence",
             ],
         )
         writer.writeheader()
@@ -951,6 +1441,10 @@ def main() -> int:
                     "text": row["text"],
                     "segments_count": row["segments_count"],
                     "source_segment_ids": format_source_ids(row["source_segment_ids"]),
+                    "source_mode_auto": row.get("source_mode_auto", ""),
+                    "source_mode_final": row.get("source_mode_final", ""),
+                    "source_reason": row.get("source_reason", ""),
+                    "source_confidence": row.get("source_confidence", ""),
                 }
             )
 
@@ -977,8 +1471,35 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(manifest_rows)
 
+    if out_final_source_manifest_csv is not None:
+        with out_final_source_manifest_csv.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "slide_index",
+                    "event_id",
+                    "source_mode_auto",
+                    "source_mode_final",
+                    "source_reason",
+                    "source_confidence",
+                    "sample_frames",
+                    "person_detected_frames",
+                    "person_present",
+                    "person_max_weight",
+                    "matched_frame_count",
+                    "median_matched_sides",
+                    "side_diff_left",
+                    "side_diff_right",
+                    "side_diff_top",
+                    "side_diff_bottom",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(source_rows)
+
     copy_kept_images(
         [row for row in final_rows if int(row["event_id"]) > 0],
+        source_info_by_event,
         slide_keyframes_dir,
         full_keyframes_dir,
         out_final_slide_dir,
@@ -993,12 +1514,17 @@ def main() -> int:
     print(f"[ASR] Wrote final slide text map JSON: {out_json}")
     print(f"[ASR] Wrote final slide text map CSV: {out_csv}")
     print(f"[ASR] Wrote filter manifest CSV: {out_manifest_csv}")
+    if out_final_source_manifest_csv is not None:
+        print(f"[ASR] Wrote final image source manifest CSV: {out_final_source_manifest_csv}")
     if out_final_slide_dir is not None:
         print(f"[ASR] Wrote kept slide images: {out_final_slide_dir}")
     if out_final_slide_raw_dir is not None:
         print(f"[ASR] Wrote raw kept slide images: {out_final_slide_raw_dir}")
     if out_final_full_dir is not None:
         print(f"[ASR] Wrote kept full images: {out_final_full_dir}")
+    auto_full_count = len([row for row in source_rows if row.get("source_mode_final") == "full"])
+    print(f"[ASR] Final source mode auto: {args.final_source_mode_auto}")
+    print(f"[ASR] Final slides routed to full source: {auto_full_count}")
     return 0
 
 

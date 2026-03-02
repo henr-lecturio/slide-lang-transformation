@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 import io
 import os
 import re
@@ -39,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Skip Gemini editing for the first N slide images (default: 1).",
+    )
+    parser.add_argument(
+        "--source-manifest-csv",
+        default="",
+        help="Optional final image source manifest. Slides with source_mode_final=full are copied through unchanged.",
     )
     parser.add_argument("--mask-debug-dir", default="", help="Optional output directory for binary masks.")
     parser.add_argument(
@@ -90,6 +96,24 @@ def slide_index_from_name(path: Path) -> int | None:
     match = SLIDE_INDEX_RE.match(path.name)
     if not match:
         return None
+
+
+def load_source_manifest(path: Path | None) -> dict[int, str]:
+    if path is None or not path.exists():
+        return {}
+    out: dict[int, str] = {}
+    with path.open("r", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            try:
+                slide_index = int(row.get("slide_index", "0") or "0")
+            except ValueError:
+                continue
+            if slide_index <= 0:
+                continue
+            mode = str(row.get("source_mode_final", "") or "").strip().lower()
+            if mode in {"slide", "full"}:
+                out[slide_index] = mode
+    return out
     try:
         return int(match.group(1))
     except ValueError:
@@ -206,6 +230,7 @@ def main() -> int:
     prompt = load_prompt(Path(args.prompt_file).resolve())
     input_dir = Path(args.input_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
+    source_manifest_csv = Path(args.source_manifest_csv).resolve() if args.source_manifest_csv else None
     mask_debug_dir = Path(args.mask_debug_dir).resolve() if args.mask_debug_dir else None
     overlay_debug_dir = Path(args.overlay_debug_dir).resolve() if args.overlay_debug_dir else None
 
@@ -213,6 +238,7 @@ def main() -> int:
         raise FileNotFoundError(input_dir)
 
     client, types = ensure_client()
+    source_modes = load_source_manifest(source_manifest_csv)
     clear_pngs(output_dir)
     if mask_debug_dir is not None:
         clear_pngs(mask_debug_dir)
@@ -232,6 +258,11 @@ def main() -> int:
             shutil.copy2(slide_path, dst_path)
             skipped_count += 1
             print(f"[Gemini] Skip {slide_path.name}: configured skip window.")
+            continue
+        if slide_idx is not None and source_modes.get(slide_idx) == "full":
+            shutil.copy2(slide_path, dst_path)
+            skipped_count += 1
+            print(f"[Gemini] Skip {slide_path.name}: final source is full.")
             continue
 
         original = cv2.imread(str(slide_path), cv2.IMREAD_COLOR)
@@ -271,6 +302,8 @@ def main() -> int:
     print(f"[Gemini] Skipped: {skipped_count}")
     print(f"[Gemini] Raw fallback: {fallback_count}")
     print(f"[Gemini] Prompt file: {Path(args.prompt_file).resolve()}")
+    if source_manifest_csv is not None:
+        print(f"[Gemini] Source manifest: {source_manifest_csv}")
     print(f"[Gemini] Output dir: {output_dir}")
     return 0
 
