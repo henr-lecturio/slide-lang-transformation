@@ -193,28 +193,115 @@ def build_final_corner_cleanup_mask(
     return full_mask
 
 
-def local_row_fill(
+def analyze_visible_corner(
     patch: np.ndarray,
     mask: np.ndarray,
     *,
+    corner_right_ratio: float = 0.12,
+    corner_bottom_ratio: float = 0.40,
+    bg_sat_threshold: int = 42,
+    bg_grad_threshold: float = 20.0,
+    graphic_diff_threshold: float = 20.0,
+    graphic_sat_threshold: int = 52,
+    graphic_grad_threshold: float = 18.0,
+    min_graphic_area: int = 24,
+    border_tolerance_px: int = 2,
+) -> tuple[np.ndarray, np.ndarray, set[int]]:
+    h, w = patch.shape[:2]
+    right_ratio = min(0.50, max(0.04, float(corner_right_ratio)))
+    bottom_ratio = min(0.60, max(0.12, float(corner_bottom_ratio)))
+    zone_x0 = max(0, int(round(w * (1.0 - right_ratio))))
+    zone_y0 = max(0, int(round(h * (1.0 - bottom_ratio))))
+
+    zone = patch[zone_y0:, zone_x0:]
+    zone_mask = mask[zone_y0:, zone_x0:] > 0
+    zh, zw = zone.shape[:2]
+    valid = ~zone_mask
+
+    hsv = cv2.cvtColor(zone, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(zone, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    grad = cv2.magnitude(grad_x, grad_y)
+
+    bg_seed = valid & (hsv[:, :, 1] <= bg_sat_threshold) & (grad <= bg_grad_threshold)
+    if int(np.count_nonzero(bg_seed)) < 48:
+        bg_seed = valid & (hsv[:, :, 1] <= max(55, bg_sat_threshold + 10))
+    if int(np.count_nonzero(bg_seed)) < 48:
+        bg_seed = valid
+
+    bg_pixels = zone[bg_seed]
+    if bg_pixels.size == 0:
+        bg_pixels = zone[valid]
+    if bg_pixels.size == 0:
+        bg_pixels = zone.reshape(-1, 3)
+    bg_color = np.median(bg_pixels.reshape(-1, 3), axis=0).astype(np.uint8)
+
+    diff = np.max(np.abs(zone.astype(np.int16) - bg_color.reshape(1, 1, 3).astype(np.int16)), axis=2)
+    graphic = valid & (
+        (diff >= graphic_diff_threshold)
+        | (hsv[:, :, 1] >= graphic_sat_threshold)
+        | (grad >= graphic_grad_threshold)
+    )
+    graphic = graphic.astype(np.uint8) * 255
+    if np.any(graphic):
+        open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        graphic = cv2.morphologyEx(graphic, cv2.MORPH_OPEN, open_kernel)
+        graphic = cv2.morphologyEx(graphic, cv2.MORPH_CLOSE, close_kernel)
+
+    labels_full = np.zeros((h, w), dtype=np.int32)
+    border_ids: set[int] = set()
+    if not np.any(graphic):
+        return bg_color, labels_full, border_ids
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(graphic, connectivity=8)
+    next_label = 1
+    for label_idx in range(1, num_labels):
+        x, y, comp_w, comp_h, area = stats[label_idx]
+        if area < max(1, int(min_graphic_area)):
+            continue
+        comp_mask = labels == label_idx
+        full_label = next_label
+        next_label += 1
+        labels_full[zone_y0:, zone_x0:][comp_mask] = full_label
+
+        full_x = zone_x0 + x
+        full_y = zone_y0 + y
+        touches_right = (full_x + comp_w) >= (w - max(0, int(border_tolerance_px)))
+        touches_bottom = (full_y + comp_h) >= (h - max(0, int(border_tolerance_px)))
+        if touches_right or touches_bottom:
+            border_ids.add(full_label)
+
+    return bg_color, labels_full, border_ids
+
+
+def local_row_fill(
+    patch: np.ndarray,
+    mask: np.ndarray,
+    background_color: np.ndarray,
+    graphic_labels: np.ndarray,
+    border_component_ids: set[int],
+    *,
     sample_width: int = 18,
     vertical_radius: int = 2,
+    bg_match_threshold: float = 24.0,
 ) -> np.ndarray | None:
-    if patch.ndim != 3 or mask.ndim != 2 or patch.shape[:2] != mask.shape[:2]:
+    if (
+        patch.ndim != 3
+        or mask.ndim != 2
+        or graphic_labels.ndim != 2
+        or patch.shape[:2] != mask.shape[:2]
+        or patch.shape[:2] != graphic_labels.shape[:2]
+    ):
         return None
     if not np.any(mask):
         return patch.copy()
 
     h, w = mask.shape
     cleaned = patch.copy()
-    fallback_y0 = max(0, h - max(48, h // 6))
-    fallback_x1 = max(1, w - max(64, w // 10))
-    fallback_x0 = max(0, fallback_x1 - max(24, sample_width))
-    fallback_strip = patch[fallback_y0:, fallback_x0:fallback_x1]
-    if fallback_strip.size == 0:
-        fallback_strip = patch[max(0, h - max(48, h // 6)) :, : max(24, sample_width)]
-    fallback_color = np.median(fallback_strip.reshape(-1, 3), axis=0).astype(np.uint8)
-    last_color = fallback_color.astype(np.float32)
+    bg_ref = background_color.astype(np.float32)
+    last_border_color = bg_ref.copy()
 
     for y in range(h):
         xs = np.flatnonzero(mask[y] > 0)
@@ -223,7 +310,14 @@ def local_row_fill(
 
         x_start = int(xs.min())
         x_end = int(xs.max())
-        samples: list[np.ndarray] = []
+        bg_samples: list[np.ndarray] = []
+        border_samples: list[np.ndarray] = []
+        nearest_border = False
+        nearest_label = 0
+        if x_start > 0:
+            nearest_label = int(graphic_labels[y, x_start - 1])
+            nearest_border = nearest_label in border_component_ids
+
         for dy in range(-vertical_radius, vertical_radius + 1):
             yy = y + dy
             if yy < 0 or yy >= h:
@@ -232,16 +326,40 @@ def local_row_fill(
             left_start = max(0, left_end - sample_width)
             if left_end <= left_start:
                 continue
-            row_mask = mask[yy, left_start:left_end] == 0
-            row_pixels = patch[yy, left_start:left_end][row_mask]
-            if row_pixels.size:
-                samples.append(row_pixels.reshape(-1, 3))
+            row_valid = mask[yy, left_start:left_end] == 0
+            row_pixels = patch[yy, left_start:left_end]
+            row_labels = graphic_labels[yy, left_start:left_end]
+            if not np.any(row_valid):
+                continue
 
-        if samples:
-            color = np.median(np.vstack(samples), axis=0).astype(np.float32)
-            last_color = color
+            valid_pixels = row_pixels[row_valid]
+            valid_labels = row_labels[row_valid]
+            if valid_pixels.size == 0:
+                continue
+
+            is_border = np.isin(valid_labels, list(border_component_ids)) if border_component_ids else np.zeros(valid_labels.shape, dtype=bool)
+            if np.any(is_border):
+                border_samples.append(valid_pixels[is_border].reshape(-1, 3))
+
+            is_plain = valid_labels == 0
+            if np.any(is_plain):
+                plain_pixels = valid_pixels[is_plain].reshape(-1, 3)
+                plain_diff = np.max(np.abs(plain_pixels.astype(np.float32) - bg_ref.reshape(1, 3)), axis=1)
+                matched = plain_pixels[plain_diff <= max(0.0, float(bg_match_threshold))]
+                if matched.size:
+                    bg_samples.append(matched.reshape(-1, 3))
+                elif plain_pixels.size:
+                    bg_samples.append(plain_pixels)
+
+        if nearest_border and border_samples:
+            color = np.median(np.vstack(border_samples), axis=0).astype(np.float32)
+            last_border_color = color
+        elif bg_samples:
+            color = np.median(np.vstack(bg_samples), axis=0).astype(np.float32)
+        elif border_samples and nearest_border:
+            color = last_border_color
         else:
-            color = last_color
+            color = bg_ref
 
         cleaned[y, x_start : x_end + 1] = np.clip(color, 0, 255).astype(np.uint8)
 
@@ -257,7 +375,14 @@ def clean_final_slide_image(src_slide: Path) -> np.ndarray | None:
     mask = build_final_corner_cleanup_mask(patch)
     if mask is None:
         return patch
-    cleaned = local_row_fill(patch, mask)
+    bg_color, graphic_labels, border_component_ids = analyze_visible_corner(patch, mask)
+    cleaned = local_row_fill(
+        patch,
+        mask,
+        bg_color,
+        graphic_labels,
+        border_component_ids,
+    )
     return cleaned if cleaned is not None else patch
 
 
