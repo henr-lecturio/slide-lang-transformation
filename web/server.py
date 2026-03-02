@@ -607,9 +607,11 @@ def start_run() -> tuple[bool, str]:
     if not video_path:
         return False, "No video selected"
     resolve_video_config_path(video_path)
+    run_step_edit = (env.get("RUN_STEP_EDIT", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
+    run_step_translate = (env.get("RUN_STEP_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
-    if (final_slide_mode == "gemini" or translation_mode == "gemini") and not (os.environ.get("GEMINI_API_KEY") or "").strip():
+    if ((run_step_edit and final_slide_mode == "gemini") or (run_step_translate and translation_mode == "gemini")) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
         return False, "GEMINI_API_KEY is not set in the server environment"
 
     with RUN_LOCK:
@@ -687,6 +689,9 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(env.get("ROI_Y0", "0")),
                     "ROI_X1": int(env.get("ROI_X1", "0")),
                     "ROI_Y1": int(env.get("ROI_Y1", "0")),
+                    "RUN_STEP_EDIT": int(env.get("RUN_STEP_EDIT", "1")),
+                    "RUN_STEP_TRANSLATE": int(env.get("RUN_STEP_TRANSLATE", "1")),
+                    "RUN_STEP_UPSCALE": int(env.get("RUN_STEP_UPSCALE", "1")),
                     "FINAL_SOURCE_MODE_AUTO": env.get("FINAL_SOURCE_MODE_AUTO", "auto"),
                     "FULLSLIDE_SAMPLE_FRAMES": int(env.get("FULLSLIDE_SAMPLE_FRAMES", "3")),
                     "FULLSLIDE_BORDER_STRIP_PX": int(env.get("FULLSLIDE_BORDER_STRIP_PX", "24")),
@@ -851,6 +856,9 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(data["ROI_Y0"]),
                     "ROI_X1": int(data["ROI_X1"]),
                     "ROI_Y1": int(data["ROI_Y1"]),
+                    "RUN_STEP_EDIT": int(data["RUN_STEP_EDIT"]),
+                    "RUN_STEP_TRANSLATE": int(data["RUN_STEP_TRANSLATE"]),
+                    "RUN_STEP_UPSCALE": int(data["RUN_STEP_UPSCALE"]),
                     "FINAL_SOURCE_MODE_AUTO": str(data["FINAL_SOURCE_MODE_AUTO"]).strip(),
                     "FULLSLIDE_SAMPLE_FRAMES": int(data["FULLSLIDE_SAMPLE_FRAMES"]),
                     "FULLSLIDE_BORDER_STRIP_PX": int(data["FULLSLIDE_BORDER_STRIP_PX"]),
@@ -880,6 +888,13 @@ class Handler(BaseHTTPRequestHandler):
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
+                for key in (
+                    "RUN_STEP_EDIT",
+                    "RUN_STEP_TRANSLATE",
+                    "RUN_STEP_UPSCALE",
+                ):
+                    if cfg[key] not in {0, 1}:
+                        raise ValueError(f"{key} must be 0 or 1")
                 if cfg["FINAL_SOURCE_MODE_AUTO"] not in {"off", "auto"}:
                     raise ValueError("FINAL_SOURCE_MODE_AUTO must be off or auto")
                 if cfg["FULLSLIDE_SAMPLE_FRAMES"] < 1:

@@ -16,6 +16,7 @@
         <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
         <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
         <button id="tab-roi" class="tab-btn" data-tab="roi" type="button">ROI</button>
+        <button id="tab-settings" class="tab-btn" data-tab="settings" type="button">Settings</button>
       </nav>
     </header>
 
@@ -115,72 +116,15 @@
 
       <section id="panel-roi" class="panel">
         <section class="card">
-          <h2>ROI + Run Config</h2>
+          <h2>ROI</h2>
           <div class="grid roi-grid">
             <label>ROI_X0 <input id="roi_x0" type="number" /></label>
             <label>ROI_Y0 <input id="roi_y0" type="number" /></label>
             <label>ROI_X1 <input id="roi_x1" type="number" /></label>
             <label>ROI_Y1 <input id="roi_y1" type="number" /></label>
-            <label>FINAL_SOURCE_MODE_AUTO
-              <select id="final_source_mode_auto">
-                <option value="auto">auto</option>
-                <option value="off">off</option>
-              </select>
-            </label>
-            <label>FULLSLIDE_SAMPLE_FRAMES <input id="fullslide_sample_frames" type="number" min="1" step="1" /></label>
-            <label>FULLSLIDE_BORDER_STRIP_PX <input id="fullslide_border_strip_px" type="number" min="2" step="1" /></label>
-            <label>FULLSLIDE_MIN_MATCHED_SIDES <input id="fullslide_min_matched_sides" type="number" min="1" max="4" step="1" /></label>
-            <label>FULLSLIDE_BORDER_DIFF_THRESHOLD <input id="fullslide_border_diff_threshold" type="number" min="0" step="0.1" /></label>
-            <label>FULLSLIDE_PERSON_BOX_AREA_RATIO <input id="fullslide_person_box_area_ratio" type="number" min="0" max="1" step="0.01" /></label>
-            <label>FULLSLIDE_PERSON_OUTSIDE_RATIO <input id="fullslide_person_outside_ratio" type="number" min="0" max="1" step="0.01" /></label>
-            <label>KEYFRAME_SETTLE_FRAMES <input id="keyframe_settle_frames" type="number" min="0" step="1" /></label>
-            <label>KEYFRAME_STABLE_END_GUARD_FRAMES <input id="keyframe_stable_end_guard_frames" type="number" min="0" step="1" /></label>
-            <label>KEYFRAME_STABLE_LOOKAHEAD_FRAMES <input id="keyframe_stable_lookahead_frames" type="number" min="1" step="1" /></label>
-            <label>SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO <input id="speaker_filter_min_stage1_video_ratio" type="number" min="0" max="1" step="0.01" /></label>
-            <label>SPEAKER_FILTER_MAX_EDGE_DENSITY <input id="speaker_filter_max_edge_density" type="number" min="0" max="1" step="0.001" /></label>
-            <label>SPEAKER_FILTER_MAX_LAPLACIAN_VAR <input id="speaker_filter_max_laplacian_var" type="number" min="0" step="1" /></label>
-            <label>SPEAKER_FILTER_MAX_DURATION_SEC <input id="speaker_filter_max_duration_sec" type="number" min="0" step="0.1" /></label>
-            <label>FINAL_SLIDE_POSTPROCESS_MODE
-              <select id="final_slide_postprocess_mode">
-                <option value="local">local</option>
-                <option value="gemini">gemini</option>
-                <option value="none">none</option>
-              </select>
-            </label>
-            <label>GEMINI_EDIT_MODEL <input id="gemini_edit_model" type="text" /></label>
-            <label>FINAL_SLIDE_TRANSLATION_MODE
-              <select id="final_slide_translation_mode">
-                <option value="none">none</option>
-                <option value="gemini">gemini</option>
-              </select>
-            </label>
-            <label>FINAL_SLIDE_TARGET_LANGUAGE <input id="final_slide_target_language" type="text" /></label>
-            <label>GEMINI_TRANSLATE_MODEL <input id="gemini_translate_model" type="text" /></label>
-            <label>FINAL_SLIDE_UPSCALE_MODE
-              <select id="final_slide_upscale_mode">
-                <option value="none">none</option>
-                <option value="swin2sr">swin2sr</option>
-              </select>
-            </label>
-            <label>FINAL_SLIDE_UPSCALE_MODEL <input id="final_slide_upscale_model" type="text" /></label>
-            <label>FINAL_SLIDE_UPSCALE_DEVICE
-              <select id="final_slide_upscale_device">
-                <option value="auto">auto</option>
-                <option value="cuda">cuda</option>
-                <option value="cpu">cpu</option>
-              </select>
-            </label>
-            <label>FINAL_SLIDE_UPSCALE_TILE_SIZE <input id="final_slide_upscale_tile_size" type="number" min="0" step="1" /></label>
-            <label>FINAL_SLIDE_UPSCALE_TILE_OVERLAP <input id="final_slide_upscale_tile_overlap" type="number" min="0" step="1" /></label>
           </div>
-          <label class="wide-field">GEMINI_EDIT_PROMPT
-            <textarea id="gemini_edit_prompt" rows="12"></textarea>
-          </label>
-          <label class="wide-field">GEMINI_TRANSLATE_PROMPT
-            <textarea id="gemini_translate_prompt" rows="10"></textarea>
-          </label>
           <div class="row">
-            <button id="save-roi">Save Config</button>
+            <button id="save-roi">Save ROI</button>
             <span id="config-meta" class="muted"></span>
           </div>
         </section>
@@ -198,6 +142,105 @@
             <img id="overlay-image" alt="ROI overlay preview" />
           </div>
           <pre id="overlay-log" class="log muted"></pre>
+        </section>
+      </section>
+
+      <section id="panel-settings" class="panel">
+        <section class="card">
+          <h2>Settings</h2>
+          <div class="settings-note muted">Scene-detection, transcription und transcript mapping werden immer durchgeführt. Die Toggles unten steuern nur die nachgelagerten Steps.</div>
+
+          <h3>Pipeline Steps</h3>
+          <div class="grid settings-grid">
+            <label class="toggle-field"><input id="run_step_edit" type="checkbox" /> <span>Edit</span></label>
+            <label class="toggle-field"><input id="run_step_translate" type="checkbox" /> <span>Translate</span></label>
+            <label class="toggle-field"><input id="run_step_upscale" type="checkbox" /> <span>Upscale</span></label>
+          </div>
+
+          <h3>Detection</h3>
+          <div class="grid settings-grid">
+            <label>KEYFRAME_SETTLE_FRAMES <input id="keyframe_settle_frames" type="number" min="0" step="1" /></label>
+            <label>KEYFRAME_STABLE_END_GUARD_FRAMES <input id="keyframe_stable_end_guard_frames" type="number" min="0" step="1" /></label>
+            <label>KEYFRAME_STABLE_LOOKAHEAD_FRAMES <input id="keyframe_stable_lookahead_frames" type="number" min="1" step="1" /></label>
+          </div>
+
+          <h3>Speaker Filter</h3>
+          <div class="grid settings-grid">
+            <label>SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO <input id="speaker_filter_min_stage1_video_ratio" type="number" min="0" max="1" step="0.01" /></label>
+            <label>SPEAKER_FILTER_MAX_EDGE_DENSITY <input id="speaker_filter_max_edge_density" type="number" min="0" max="1" step="0.001" /></label>
+            <label>SPEAKER_FILTER_MAX_LAPLACIAN_VAR <input id="speaker_filter_max_laplacian_var" type="number" min="0" step="1" /></label>
+            <label>SPEAKER_FILTER_MAX_DURATION_SEC <input id="speaker_filter_max_duration_sec" type="number" min="0" step="0.1" /></label>
+          </div>
+
+          <h3>Final Source Auto</h3>
+          <div class="grid settings-grid">
+            <label>FINAL_SOURCE_MODE_AUTO
+              <select id="final_source_mode_auto">
+                <option value="auto">auto</option>
+                <option value="off">off</option>
+              </select>
+            </label>
+            <label>FULLSLIDE_SAMPLE_FRAMES <input id="fullslide_sample_frames" type="number" min="1" step="1" /></label>
+            <label>FULLSLIDE_BORDER_STRIP_PX <input id="fullslide_border_strip_px" type="number" min="2" step="1" /></label>
+            <label>FULLSLIDE_MIN_MATCHED_SIDES <input id="fullslide_min_matched_sides" type="number" min="1" max="4" step="1" /></label>
+            <label>FULLSLIDE_BORDER_DIFF_THRESHOLD <input id="fullslide_border_diff_threshold" type="number" min="0" step="0.1" /></label>
+            <label>FULLSLIDE_PERSON_BOX_AREA_RATIO <input id="fullslide_person_box_area_ratio" type="number" min="0" max="1" step="0.01" /></label>
+            <label>FULLSLIDE_PERSON_OUTSIDE_RATIO <input id="fullslide_person_outside_ratio" type="number" min="0" max="1" step="0.01" /></label>
+          </div>
+
+          <h3>Edit</h3>
+          <div class="grid settings-grid">
+            <label>FINAL_SLIDE_POSTPROCESS_MODE
+              <select id="final_slide_postprocess_mode">
+                <option value="local">local</option>
+                <option value="gemini">gemini</option>
+                <option value="none">none</option>
+              </select>
+            </label>
+            <label>GEMINI_EDIT_MODEL <input id="gemini_edit_model" type="text" /></label>
+          </div>
+          <label class="wide-field">GEMINI_EDIT_PROMPT
+            <textarea id="gemini_edit_prompt" rows="12"></textarea>
+          </label>
+
+          <h3>Translate</h3>
+          <div class="grid settings-grid">
+            <label>FINAL_SLIDE_TRANSLATION_MODE
+              <select id="final_slide_translation_mode">
+                <option value="none">none</option>
+                <option value="gemini">gemini</option>
+              </select>
+            </label>
+            <label>FINAL_SLIDE_TARGET_LANGUAGE <input id="final_slide_target_language" type="text" /></label>
+            <label>GEMINI_TRANSLATE_MODEL <input id="gemini_translate_model" type="text" /></label>
+          </div>
+          <label class="wide-field">GEMINI_TRANSLATE_PROMPT
+            <textarea id="gemini_translate_prompt" rows="10"></textarea>
+          </label>
+
+          <h3>Upscale</h3>
+          <div class="grid settings-grid">
+            <label>FINAL_SLIDE_UPSCALE_MODE
+              <select id="final_slide_upscale_mode">
+                <option value="none">none</option>
+                <option value="swin2sr">swin2sr</option>
+              </select>
+            </label>
+            <label>FINAL_SLIDE_UPSCALE_MODEL <input id="final_slide_upscale_model" type="text" /></label>
+            <label>FINAL_SLIDE_UPSCALE_DEVICE
+              <select id="final_slide_upscale_device">
+                <option value="auto">auto</option>
+                <option value="cuda">cuda</option>
+                <option value="cpu">cpu</option>
+              </select>
+            </label>
+            <label>FINAL_SLIDE_UPSCALE_TILE_SIZE <input id="final_slide_upscale_tile_size" type="number" min="0" step="1" /></label>
+            <label>FINAL_SLIDE_UPSCALE_TILE_OVERLAP <input id="final_slide_upscale_tile_overlap" type="number" min="0" step="1" /></label>
+          </div>
+
+          <div class="row">
+            <button id="save-settings">Save Settings</button>
+          </div>
         </section>
       </section>
     </main>

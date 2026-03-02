@@ -4,12 +4,17 @@ const el = {
   panelHome: document.getElementById("panel-home"),
   panelAllRuns: document.getElementById("panel-all-runs"),
   panelRoi: document.getElementById("panel-roi"),
+  panelSettings: document.getElementById("panel-settings"),
   configMeta: document.getElementById("config-meta"),
   saveRoi: document.getElementById("save-roi"),
+  saveSettings: document.getElementById("save-settings"),
   roiX0: document.getElementById("roi_x0"),
   roiY0: document.getElementById("roi_y0"),
   roiX1: document.getElementById("roi_x1"),
   roiY1: document.getElementById("roi_y1"),
+  runStepEdit: document.getElementById("run_step_edit"),
+  runStepTranslate: document.getElementById("run_step_translate"),
+  runStepUpscale: document.getElementById("run_step_upscale"),
   finalSourceModeAuto: document.getElementById("final_source_mode_auto"),
   fullslideSampleFrames: document.getElementById("fullslide_sample_frames"),
   fullslideBorderStripPx: document.getElementById("fullslide_border_strip_px"),
@@ -175,6 +180,9 @@ function setConfig(cfg) {
   el.roiY0.value = cfg.ROI_Y0;
   el.roiX1.value = cfg.ROI_X1;
   el.roiY1.value = cfg.ROI_Y1;
+  el.runStepEdit.checked = Boolean(cfg.RUN_STEP_EDIT);
+  el.runStepTranslate.checked = Boolean(cfg.RUN_STEP_TRANSLATE);
+  el.runStepUpscale.checked = Boolean(cfg.RUN_STEP_UPSCALE);
   el.finalSourceModeAuto.value = cfg.FINAL_SOURCE_MODE_AUTO || "auto";
   el.fullslideSampleFrames.value = cfg.FULLSLIDE_SAMPLE_FRAMES ?? 3;
   el.fullslideBorderStripPx.value = cfg.FULLSLIDE_BORDER_STRIP_PX ?? 24;
@@ -203,7 +211,8 @@ function setConfig(cfg) {
   el.finalSlideUpscaleTileOverlap.value = cfg.FINAL_SLIDE_UPSCALE_TILE_OVERLAP ?? 24;
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
-  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | settle: ${cfg.KEYFRAME_SETTLE_FRAMES} | end_guard: ${cfg.KEYFRAME_STABLE_END_GUARD_FRAMES} | lookahead: ${cfg.KEYFRAME_STABLE_LOOKAHEAD_FRAMES} | speaker_ratio: ${cfg.SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | target_lang: ${cfg.FINAL_SLIDE_TARGET_LANGUAGE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState}`;
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | edit:${cfg.RUN_STEP_EDIT ? "on" : "off"} | translate:${cfg.RUN_STEP_TRANSLATE ? "on" : "off"} | upscale:${cfg.RUN_STEP_UPSCALE ? "on" : "off"} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState}`;
+  syncSettingsFieldState();
   renderSelectedVideo();
 }
 
@@ -215,6 +224,7 @@ function setActiveTab(tabName) {
   el.panelHome.classList.toggle("active", tabName === "home");
   el.panelAllRuns.classList.toggle("active", tabName === "all-runs");
   el.panelRoi.classList.toggle("active", tabName === "roi");
+  el.panelSettings.classList.toggle("active", tabName === "settings");
 }
 
 async function loadConfig() {
@@ -233,6 +243,9 @@ async function saveConfig() {
     ROI_Y0: Number(el.roiY0.value),
     ROI_X1: Number(el.roiX1.value),
     ROI_Y1: Number(el.roiY1.value),
+    RUN_STEP_EDIT: el.runStepEdit.checked ? 1 : 0,
+    RUN_STEP_TRANSLATE: el.runStepTranslate.checked ? 1 : 0,
+    RUN_STEP_UPSCALE: el.runStepUpscale.checked ? 1 : 0,
     FINAL_SOURCE_MODE_AUTO: el.finalSourceModeAuto.value,
     FULLSLIDE_SAMPLE_FRAMES: Number(el.fullslideSampleFrames.value),
     FULLSLIDE_BORDER_STRIP_PX: Number(el.fullslideBorderStripPx.value),
@@ -262,6 +275,27 @@ async function saveConfig() {
   };
   await apiPost("/api/config", payload);
   await loadConfig();
+}
+
+function syncSettingsFieldState() {
+  const editEnabled = el.runStepEdit.checked;
+  const translateEnabled = el.runStepTranslate.checked;
+  const upscaleEnabled = el.runStepUpscale.checked;
+
+  el.finalSlidePostprocessMode.disabled = !editEnabled;
+  el.geminiEditModel.disabled = !editEnabled;
+  el.geminiEditPrompt.disabled = !editEnabled;
+
+  el.finalSlideTranslationMode.disabled = !translateEnabled;
+  el.finalSlideTargetLanguage.disabled = !translateEnabled;
+  el.geminiTranslateModel.disabled = !translateEnabled;
+  el.geminiTranslatePrompt.disabled = !translateEnabled;
+
+  el.finalSlideUpscaleMode.disabled = !upscaleEnabled;
+  el.finalSlideUpscaleModel.disabled = !upscaleEnabled;
+  el.finalSlideUpscaleDevice.disabled = !upscaleEnabled;
+  el.finalSlideUpscaleTileSize.disabled = !upscaleEnabled;
+  el.finalSlideUpscaleTileOverlap.disabled = !upscaleEnabled;
 }
 
 function closeVideoPicker() {
@@ -977,11 +1011,15 @@ function bindEvents() {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   }
   el.saveRoi.addEventListener("click", () => runTask(saveConfig));
+  el.saveSettings.addEventListener("click", () => runTask(saveConfig));
   el.regenOverlay.addEventListener("click", () => runTask(regenerateOverlay));
   el.refreshOverlay.addEventListener("click", () => runTask(loadOverlay));
   el.startRun.addEventListener("click", () => runTask(startRun));
   el.refreshRuns.addEventListener("click", () => runTaskImmediate(loadRuns));
   el.pickVideo.addEventListener("click", () => runTask(openVideoPicker));
+  el.runStepEdit.addEventListener("change", syncSettingsFieldState);
+  el.runStepTranslate.addEventListener("change", syncSettingsFieldState);
+  el.runStepUpscale.addEventListener("change", syncSettingsFieldState);
   el.latestViewMode.addEventListener("change", () => {
     state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
     runTaskImmediate(loadLatestSlides);
@@ -1067,6 +1105,7 @@ async function init() {
   state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
   state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
   syncFinalViewControls();
+  syncSettingsFieldState();
   setActiveTab("home");
   await runTask(loadConfig);
   await runTask(loadOverlay);

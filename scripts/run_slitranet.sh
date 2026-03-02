@@ -80,6 +80,24 @@ FULLSLIDE_MIN_MATCHED_SIDES="${FULLSLIDE_MIN_MATCHED_SIDES:-2}"
 FULLSLIDE_BORDER_DIFF_THRESHOLD="${FULLSLIDE_BORDER_DIFF_THRESHOLD:-16.0}"
 FULLSLIDE_PERSON_BOX_AREA_RATIO="${FULLSLIDE_PERSON_BOX_AREA_RATIO:-0.02}"
 FULLSLIDE_PERSON_OUTSIDE_RATIO="${FULLSLIDE_PERSON_OUTSIDE_RATIO:-0.35}"
+RUN_STEP_EDIT="${RUN_STEP_EDIT:-1}"
+RUN_STEP_TRANSLATE="${RUN_STEP_TRANSLATE:-1}"
+RUN_STEP_UPSCALE="${RUN_STEP_UPSCALE:-1}"
+
+toggle_to_flag() {
+  case "${1:-1}" in
+    1|true|TRUE|True|yes|YES|on|ON) printf '1' ;;
+    0|false|FALSE|False|no|NO|off|OFF) printf '0' ;;
+    *)
+      echo "ERROR: invalid step toggle value: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+RUN_STEP_EDIT="$(toggle_to_flag "$RUN_STEP_EDIT")"
+RUN_STEP_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TRANSLATE")"
+RUN_STEP_UPSCALE="$(toggle_to_flag "$RUN_STEP_UPSCALE")"
 
 VIDEO_PATH_RESOLVED="${VIDEO_PATH_ARG:-${VIDEO_PATH:-}}"
 if [ -z "$VIDEO_PATH_RESOLVED" ]; then
@@ -180,12 +198,14 @@ if [ -n "${WHISPER_LANGUAGE:-}" ]; then
 fi
 
 echo "[ASR] Preparing transcription step ..."
+echo "[Step] transcription: run"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
 echo "[ASR] Transcription step finished."
 
 SLIDE_TEXT_MAP_JSON="$OUT_BASE/slide_text_map.json"
 SLIDE_TEXT_MAP_CSV="$OUT_BASE/slide_text_map.csv"
 echo "[ASR] Mapping transcript to slide windows ..."
+echo "[Step] transcript-mapping: run"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --slide-csv "$OUT_BASE/slide_changes.csv" \
@@ -205,21 +225,25 @@ FINAL_SLIDE_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_upscaled"
 FINAL_SLIDE_TRANSLATED_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_translated_upscaled"
 FINAL_FULL_DIR="$OUT_BASE/keyframes/final/full"
 FINAL_SLIDE_CLEAN_MODE="none"
-case "$FINAL_SLIDE_POSTPROCESS_MODE" in
-  none)
-    FINAL_SLIDE_CLEAN_MODE="none"
-    ;;
-  local)
-    FINAL_SLIDE_CLEAN_MODE="local"
-    ;;
-  gemini)
-    FINAL_SLIDE_CLEAN_MODE="none"
-    ;;
-  *)
-    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE must be one of: none, local, gemini" >&2
-    exit 1
-    ;;
-esac
+if [ "$RUN_STEP_EDIT" = "1" ]; then
+  case "$FINAL_SLIDE_POSTPROCESS_MODE" in
+    none)
+      FINAL_SLIDE_CLEAN_MODE="none"
+      ;;
+    local)
+      FINAL_SLIDE_CLEAN_MODE="local"
+      ;;
+    gemini)
+      FINAL_SLIDE_CLEAN_MODE="none"
+      ;;
+    *)
+      echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE must be one of: none, local, gemini" >&2
+      exit 1
+      ;;
+  esac
+else
+  FINAL_SLIDE_CLEAN_MODE="none"
+fi
 FILTER_ARGS=(
   --video "$PHASE_DIR/$VIDEO_NAME"
   --slide-map-json "$SLIDE_TEXT_MAP_JSON"
@@ -258,7 +282,7 @@ echo "[ASR] Filtering speaker-only slides and merging transcript ..."
 "$PYTHON_BIN" "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
 echo "[ASR] Speaker-only filtering finished."
 
-if [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
+if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
   if [ -z "${GEMINI_API_KEY:-}" ]; then
     echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
     exit 1
@@ -274,64 +298,74 @@ if [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
     --mask-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_mask" \
     --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay"
   echo "[Gemini] Editing finished."
+elif [ "$RUN_STEP_EDIT" = "0" ]; then
+  echo "[Step] edit: skipped"
 fi
 
-case "$FINAL_SLIDE_TRANSLATION_MODE" in
-  none)
-    ;;
-  gemini)
-    if [ -z "${GEMINI_API_KEY:-}" ]; then
-      echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
+if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
+  case "$FINAL_SLIDE_TRANSLATION_MODE" in
+    none)
+      ;;
+    gemini)
+      if [ -z "${GEMINI_API_KEY:-}" ]; then
+        echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
+        exit 1
+      fi
+      if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
+        echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled." >&2
+        exit 1
+      fi
+      echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_final_slides_gemini.py" \
+        --input-dir "$FINAL_SLIDE_DIR" \
+        --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+        --model "$GEMINI_TRANSLATE_MODEL" \
+        --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
+        --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+      echo "[Translate] Translation finished."
+      ;;
+    *)
+      echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE must be one of: none, gemini" >&2
       exit 1
-    fi
-    if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
-      echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled." >&2
-      exit 1
-    fi
-    echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_final_slides_gemini.py" \
-      --input-dir "$FINAL_SLIDE_DIR" \
-      --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
-      --model "$GEMINI_TRANSLATE_MODEL" \
-      --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
-      --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
-    echo "[Translate] Translation finished."
-    ;;
-  *)
-    echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE must be one of: none, gemini" >&2
-    exit 1
-    ;;
-esac
+      ;;
+  esac
+else
+  echo "[Step] translate: skipped"
+fi
 
-case "$FINAL_SLIDE_UPSCALE_MODE" in
-  none)
-    ;;
-  swin2sr)
-    echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
-      --input-dir "$FINAL_SLIDE_DIR" \
-      --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
-      --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
-      --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
-      --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
-      --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
-    if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
-      echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
+if [ "$RUN_STEP_UPSCALE" = "1" ]; then
+  case "$FINAL_SLIDE_UPSCALE_MODE" in
+    none)
+      ;;
+    swin2sr)
+      echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
       "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
-        --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
-        --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
+        --input-dir "$FINAL_SLIDE_DIR" \
+        --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
         --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
         --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
         --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
         --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
-    fi
-    echo "[Upscale] Upscaling finished."
-    ;;
-  *)
-    echo "ERROR: FINAL_SLIDE_UPSCALE_MODE must be one of: none, swin2sr" >&2
-    exit 1
-    ;;
-esac
+      if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
+        echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
+          --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+          --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
+          --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
+          --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
+          --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
+          --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+      fi
+      echo "[Upscale] Upscaling finished."
+      ;;
+    *)
+      echo "ERROR: FINAL_SLIDE_UPSCALE_MODE must be one of: none, swin2sr" >&2
+      exit 1
+      ;;
+  esac
+else
+  echo "[Step] upscale: skipped"
+fi
 
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
@@ -348,6 +382,9 @@ echo "Final slide raw images: $FINAL_SLIDE_RAW_DIR"
 echo "Final image source manifest: $FINAL_SOURCE_MANIFEST_CSV"
 echo "Final slide mode: $FINAL_SLIDE_POSTPROCESS_MODE"
 echo "Final source mode auto: $FINAL_SOURCE_MODE_AUTO"
+echo "Run step edit: $RUN_STEP_EDIT"
+echo "Run step translate: $RUN_STEP_TRANSLATE"
+echo "Run step upscale: $RUN_STEP_UPSCALE"
 echo "Final slide translated images: $FINAL_SLIDE_TRANSLATED_DIR"
 echo "Final slide translation mode: $FINAL_SLIDE_TRANSLATION_MODE"
 echo "Final slide upscaled images: $FINAL_SLIDE_UPSCALED_DIR"
