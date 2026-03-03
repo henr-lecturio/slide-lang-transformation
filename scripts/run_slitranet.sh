@@ -148,6 +148,37 @@ step_detail() {
   emit_step DETAIL "$@"
 }
 
+refresh_latest_link() {
+  if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
+    ln -sfn "$RUN_DIR" "$LATEST_LINK"
+  fi
+}
+
+publish_dir() {
+  local tmp_dir="$1"
+  local final_dir="$2"
+  if [ ! -d "$tmp_dir" ]; then
+    echo "ERROR: temp dir missing for publish: $tmp_dir" >&2
+    exit 1
+  fi
+  rm -rf "$final_dir"
+  mv "$tmp_dir" "$final_dir"
+  refresh_latest_link
+}
+
+publish_file() {
+  local tmp_file="$1"
+  local final_file="$2"
+  if [ ! -f "$tmp_file" ]; then
+    echo "ERROR: temp file missing for publish: $tmp_file" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$final_file")"
+  rm -f "$final_file"
+  mv "$tmp_file" "$final_file"
+  refresh_latest_link
+}
+
 VIDEO_PATH_RESOLVED="${VIDEO_PATH_ARG:-${VIDEO_PATH:-}}"
 if [ -z "$VIDEO_PATH_RESOLVED" ]; then
   echo "ERROR: No video selected. Set VIDEO_PATH in config or pass --video." >&2
@@ -168,6 +199,7 @@ VIDEO_BASE="${VIDEO_NAME%.*}"
 
 RUN_ID="$(date +%Y-%m-%d_%H-%M-%S)"
 RUN_DIR="$ROOT_DIR/output/runs/$RUN_ID"
+LATEST_LINK="$ROOT_DIR/output/latest"
 DATASET_DIR="$RUN_DIR/dataset"
 OUT_BASE="$RUN_DIR/slitranet"
 PRED_DIR="$OUT_BASE/pred_stage1"
@@ -237,6 +269,7 @@ step_detail slide-detection "postprocess"
   --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}" \
   --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
   --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
+refresh_latest_link
 step_done slide-detection
 
 TRANSCRIPT_JSON="$OUT_BASE/transcript_segments.json"
@@ -321,6 +354,7 @@ TTS_MANIFEST_CSV="$OUT_BASE/tts/tts_manifest.csv"
 VIDEO_EXPORT_DIR="$OUT_BASE/video_export"
 VIDEO_EXPORT_TIMELINE_JSON="$VIDEO_EXPORT_DIR/timeline.json"
 VIDEO_EXPORT_TIMELINE_CSV="$VIDEO_EXPORT_DIR/timeline.csv"
+UPSCALE_TRANSLATED_MANIFEST_JSON="$OUT_BASE/keyframes/final/upscale_translated_manifest.json"
 
 lang_slug() {
   local raw="$1"
@@ -362,13 +396,13 @@ FILTER_ARGS=(
   --slide-map-csv "$SLIDE_TEXT_MAP_CSV"
   --slide-keyframes-dir "$OUT_BASE/keyframes/slide"
   --full-keyframes-dir "$OUT_BASE/keyframes/full"
-  --out-json "$SLIDE_TEXT_MAP_FINAL_JSON"
-  --out-csv "$SLIDE_TEXT_MAP_FINAL_CSV"
-  --out-manifest-csv "$SLIDE_FILTER_MANIFEST_CSV"
-  --out-final-source-manifest-csv "$FINAL_SOURCE_MANIFEST_CSV"
-  --out-final-slide-dir "$FINAL_SLIDE_DIR"
-  --out-final-slide-raw-dir "$FINAL_SLIDE_RAW_DIR"
-  --out-final-full-dir "$FINAL_FULL_DIR"
+  --out-json "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp"
+  --out-csv "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp"
+  --out-manifest-csv "$SLIDE_FILTER_MANIFEST_CSV.__tmp"
+  --out-final-source-manifest-csv "$FINAL_SOURCE_MANIFEST_CSV.__tmp"
+  --out-final-slide-dir "$FINAL_SLIDE_DIR.__tmp"
+  --out-final-slide-raw-dir "$FINAL_SLIDE_RAW_DIR.__tmp"
+  --out-final-full-dir "$FINAL_FULL_DIR.__tmp"
   --final-slide-clean-mode "$FINAL_SLIDE_CLEAN_MODE"
   --final-source-mode-auto "$FINAL_SOURCE_MODE_AUTO"
   --roi-x0 "${ROI_X0:-0}"
@@ -393,7 +427,16 @@ fi
 echo "[ASR] Filtering speaker-only slides and merging transcript ..."
 step_start finalize-slides
 step_detail finalize-slides "speaker-filter-and-final-export"
+rm -f "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp" "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp" "$SLIDE_FILTER_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV.__tmp"
+rm -rf "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_FULL_DIR.__tmp"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
+publish_file "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp" "$SLIDE_TEXT_MAP_FINAL_JSON"
+publish_file "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp" "$SLIDE_TEXT_MAP_FINAL_CSV"
+publish_file "$SLIDE_FILTER_MANIFEST_CSV.__tmp" "$SLIDE_FILTER_MANIFEST_CSV"
+publish_file "$FINAL_SOURCE_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV"
+publish_dir "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR"
+publish_dir "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_DIR"
+publish_dir "$FINAL_FULL_DIR.__tmp" "$FINAL_FULL_DIR"
 step_done finalize-slides
 if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "local" ]; then
   step_done edit "local cleanup applied within finalize-slides"
@@ -409,14 +452,16 @@ if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ];
   echo "[Gemini] Editing raw final slides with model $GEMINI_EDIT_MODEL ..."
   step_start edit
   step_detail edit "gemini-image-edit"
+  rm -rf "$FINAL_SLIDE_DIR.__tmp"
   "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/edit_final_slides_gemini.py" \
     --input-dir "$FINAL_SLIDE_RAW_DIR" \
-    --output-dir "$FINAL_SLIDE_DIR" \
+    --output-dir "$FINAL_SLIDE_DIR.__tmp" \
     --model "$GEMINI_EDIT_MODEL" \
     --prompt-file "$GEMINI_PROMPT_FILE" \
     --source-manifest-csv "$FINAL_SOURCE_MANIFEST_CSV" \
     --mask-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_mask" \
     --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay"
+  publish_dir "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_DIR"
   step_done edit
   echo "[Gemini] Editing finished."
 elif [ "$RUN_STEP_EDIT" = "0" ]; then
@@ -443,13 +488,15 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
       echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
       step_start translate
       step_detail translate "$FINAL_SLIDE_TARGET_LANGUAGE"
+      rm -rf "$FINAL_SLIDE_TRANSLATED_DIR.__tmp"
       "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/translate_final_slides_gemini.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
-        --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+        --output-dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" \
         --model "$GEMINI_TRANSLATE_MODEL" \
         --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
         --termbase-file "$TRANSLATION_TERMBASE_FILE" \
         --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+      publish_dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR"
       step_done translate
       echo "[Translate] Translation finished."
       ;;
@@ -472,23 +519,26 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
       step_start upscale
       step_detail upscale "processed-final-slides"
+      rm -rf "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp"
       "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_swin2sr.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
-        --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
+        --output-dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" \
         --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
         --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
         --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
         --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+      publish_dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_UPSCALED_DIR"
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
         echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
         step_detail upscale "translated-final-slides"
         "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_swin2sr.py" \
           --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
-          --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
+          --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp" \
           --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
           --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
           --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
           --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+        publish_dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
       fi
       step_done upscale
       echo "[Upscale] Upscaling finished."
@@ -509,23 +559,29 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       echo "[Upscale] Upscaling processed final slides with Replicate provider $REPLICATE_PROVIDER ..."
       step_start upscale
       step_detail upscale "processed-final-slides:$REPLICATE_PROVIDER"
+      rm -rf "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp"
+      rm -f "$UPSCALE_MANIFEST_JSON.__tmp" "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp"
       "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_replicate.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
-        --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
+        --output-dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" \
         --provider "$REPLICATE_PROVIDER" \
         --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
-        --manifest-path "$UPSCALE_MANIFEST_JSON" \
+        --manifest-path "$UPSCALE_MANIFEST_JSON.__tmp" \
         "${REPLICATE_EXTRA_ARGS[@]}"
+      publish_dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_UPSCALED_DIR"
+      publish_file "$UPSCALE_MANIFEST_JSON.__tmp" "$UPSCALE_MANIFEST_JSON"
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
         echo "[Upscale] Upscaling translated final slides with Replicate provider $REPLICATE_PROVIDER ..."
         step_detail upscale "translated-final-slides:$REPLICATE_PROVIDER"
         "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_replicate.py" \
           --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
-          --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
+          --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp" \
           --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
-          --manifest-path "$OUT_BASE/keyframes/final/upscale_translated_manifest.json" \
+          --manifest-path "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp" \
           --provider "$REPLICATE_PROVIDER" \
           "${REPLICATE_EXTRA_ARGS[@]}"
+        publish_dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
+        publish_file "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp" "$UPSCALE_TRANSLATED_MANIFEST_JSON"
       fi
       step_done upscale
       echo "[Upscale] Replicate upscaling finished."
@@ -555,16 +611,19 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
   echo "[TextTranslate] Translating mapped slide text to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TEXT_TRANSLATE_MODEL ..."
   step_start text-translate
   step_detail text-translate "$FINAL_SLIDE_TARGET_LANGUAGE"
+  rm -f "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_CSV.__tmp"
   "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/translate_slide_text.py" \
     --input-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
-    --out-json "$TEXT_TRANSLATED_JSON" \
-    --out-csv "$TEXT_TRANSLATED_CSV" \
+    --out-json "$TEXT_TRANSLATED_JSON.__tmp" \
+    --out-csv "$TEXT_TRANSLATED_CSV.__tmp" \
     --model "$GEMINI_TEXT_TRANSLATE_MODEL" \
     --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE" \
     --termbase-file "$TRANSLATION_TERMBASE_FILE" \
     --tm-db "$TRANSLATION_MEMORY_DB" \
     --origin-run-id "$RUN_ID" \
     --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+  publish_file "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_JSON"
+  publish_file "$TEXT_TRANSLATED_CSV.__tmp" "$TEXT_TRANSLATED_CSV"
   step_done text-translate
   TEXT_TRANSLATE_INPUT_JSON="$TEXT_TRANSLATED_JSON"
   echo "[TextTranslate] Translation finished."
@@ -591,17 +650,22 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
   echo "[TTS] Generating voiceover with model $GEMINI_TTS_MODEL and voice $GEMINI_TTS_VOICE ..."
   step_start tts
   step_detail tts "$GEMINI_TTS_VOICE"
+  rm -rf "$TTS_AUDIO_DIR.__tmp"
+  rm -f "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_CSV.__tmp"
   "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/generate_slide_tts.py" \
     --input-json "$TTS_INPUT_JSON" \
-    --output-dir "$TTS_AUDIO_DIR" \
-    --out-manifest-json "$TTS_MANIFEST_JSON" \
-    --out-manifest-csv "$TTS_MANIFEST_CSV" \
+    --output-dir "$TTS_AUDIO_DIR.__tmp" \
+    --out-manifest-json "$TTS_MANIFEST_JSON.__tmp" \
+    --out-manifest-csv "$TTS_MANIFEST_CSV.__tmp" \
     --model "$GEMINI_TTS_MODEL" \
     --voice "$GEMINI_TTS_VOICE" \
     --project-id "$GOOGLE_TTS_PROJECT_ID" \
     --language-code "$GOOGLE_TTS_LANGUAGE_CODE" \
     --prompt-file "$GEMINI_TTS_PROMPT_FILE" \
     --language-label "$TTS_LANGUAGE_LABEL"
+  publish_dir "$TTS_AUDIO_DIR.__tmp" "$TTS_AUDIO_DIR"
+  publish_file "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_JSON"
+  publish_file "$TTS_MANIFEST_CSV.__tmp" "$TTS_MANIFEST_CSV"
   step_done tts
   echo "[TTS] Voiceover generation finished."
 else
@@ -634,20 +698,23 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
   if [ -f "$TTS_MANIFEST_JSON" ]; then
     TTS_MANIFEST_ARG+=(--tts-manifest-json "$TTS_MANIFEST_JSON")
   fi
+  rm -rf "$VIDEO_EXPORT_DIR.__tmp"
+  mkdir -p "$VIDEO_EXPORT_DIR.__tmp"
   "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/export_slide_video.py" \
     --slide-map-json "$TTS_INPUT_JSON" \
     --image-dir "$EXPORT_IMAGE_DIR" \
     "${TTS_MANIFEST_ARG[@]}" \
-    --out-video "$VIDEO_EXPORT_MP4" \
-    --out-timeline-json "$VIDEO_EXPORT_TIMELINE_JSON" \
-    --out-timeline-csv "$VIDEO_EXPORT_TIMELINE_CSV" \
-    --out-srt "$VIDEO_EXPORT_SRT" \
+    --out-video "$VIDEO_EXPORT_DIR.__tmp/final_${VIDEO_LANG_SLUG}.mp4" \
+    --out-timeline-json "$VIDEO_EXPORT_DIR.__tmp/timeline.json" \
+    --out-timeline-csv "$VIDEO_EXPORT_DIR.__tmp/timeline.csv" \
+    --out-srt "$VIDEO_EXPORT_DIR.__tmp/final_${VIDEO_LANG_SLUG}.srt" \
     --min-slide-sec "$VIDEO_EXPORT_MIN_SLIDE_SEC" \
     --tail-pad-sec "$VIDEO_EXPORT_TAIL_PAD_SEC" \
     --width "$VIDEO_EXPORT_WIDTH" \
     --height "$VIDEO_EXPORT_HEIGHT" \
     --fps "$VIDEO_EXPORT_FPS" \
     --bg-color "$VIDEO_EXPORT_BG_COLOR"
+  publish_dir "$VIDEO_EXPORT_DIR.__tmp" "$VIDEO_EXPORT_DIR"
   step_done video-export
   echo "[VideoExport] Export finished."
 else
@@ -655,10 +722,7 @@ else
   step_skip video-export "disabled"
 fi
 
-LATEST_LINK="$ROOT_DIR/output/latest"
-if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
-  ln -sfn "$RUN_DIR" "$LATEST_LINK"
-fi
+refresh_latest_link
 
 echo "Done."
 echo "Run dir: $RUN_DIR"

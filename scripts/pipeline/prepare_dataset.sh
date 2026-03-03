@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
 DATASET_DIR="${DATASET_DIR:-$ROOT_DIR/dataset}"
 

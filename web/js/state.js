@@ -1,6 +1,7 @@
 export const state = {
   selectedRunId: null,
   latestRunId: null,
+  latestRunDetail: null,
   currentRunId: null,
   selectedVideoPath: "",
   videoItems: [],

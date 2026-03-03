@@ -197,6 +197,45 @@ export function syncFinalViewControls() {
   el.runFinalResolutionMode.disabled = state.runFinalDisplayMode === "compare";
 }
 
+function shouldAutoPreviewLatest(detail) {
+  const status = detail?.run_status || "";
+  return ["running", "error", "stopped"].includes(status);
+}
+
+function deriveLatestAutoPreview(detail) {
+  if (!detail) return null;
+  if (detail.translated_upscaled_slides_ready) {
+    return { slidesMode: "final", sourceMode: "translated", resolutionMode: "x4" };
+  }
+  if (detail.upscaled_slides_ready) {
+    return { slidesMode: "final", sourceMode: "processed", resolutionMode: "x4" };
+  }
+  if (detail.translated_slides_ready) {
+    return { slidesMode: "final", sourceMode: "translated", resolutionMode: "native" };
+  }
+  if (detail.final_slides_ready) {
+    return { slidesMode: "final", sourceMode: "processed", resolutionMode: "native" };
+  }
+  if (detail.base_events_ready) {
+    return { slidesMode: "base", sourceMode: "processed", resolutionMode: "native" };
+  }
+  return null;
+}
+
+function applyLatestAutoPreview(detail) {
+  const preview = deriveLatestAutoPreview(detail);
+  if (!preview) return;
+  state.latestSlidesMode = preview.slidesMode;
+  el.latestViewMode.value = preview.slidesMode === "base" ? "base" : "final";
+  if (preview.slidesMode === "final") {
+    state.latestFinalSourceMode = preview.sourceMode;
+    el.latestFinalSourceMode.value = preview.sourceMode;
+    state.latestFinalResolutionMode = preview.resolutionMode;
+    el.latestFinalResolutionMode.value = preview.resolutionMode;
+  }
+  syncFinalViewControls();
+}
+
 function canUseX4ForSource(items, slideSourceMode) {
   if (!Array.isArray(items) || items.length === 0) return false;
   if (slideSourceMode === "raw") return false;
@@ -459,6 +498,9 @@ export async function loadLatestSlides() {
     applyResolutionAvailability(el.latestFinalResolutionMode, [], state.latestFinalSourceMode, "latestFinalResolutionMode", true);
     return;
   }
+  if (shouldAutoPreviewLatest(state.latestRunDetail)) {
+    applyLatestAutoPreview(state.latestRunDetail);
+  }
   if (state.latestSlidesMode === "base") {
     applyResolutionAvailability(el.latestFinalResolutionMode, [], state.latestFinalSourceMode, "latestFinalResolutionMode", true);
     await renderBaseEvents(runId, el.latestSlidesList);
@@ -491,10 +533,12 @@ export async function loadRunDetails() {
 export async function loadLatestRunDetails() {
   const runId = state.latestRunId;
   if (!runId) {
+    state.latestRunDetail = null;
     clearLatestOutput();
     return;
   }
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
+  state.latestRunDetail = detail;
   el.latestSummary.textContent = buildRunSummary(detail, "latest");
   renderDownloadLinks(el.latestDownloads, detail);
   state.latestCsvLines = detail.final_csv_preview || detail.csv_preview || [];
@@ -532,6 +576,7 @@ export async function loadRuns() {
   renderRunSelect(runs);
   if (runs.length === 0) {
     state.selectedRunId = null;
+    state.latestRunDetail = null;
     clearLatestOutput();
     clearSelectedRunOutput();
     return;

@@ -1,5 +1,4 @@
 @media (max-width: 1240px) {
-  .topbar-main,
   .topnav-row,
   main {
     width: min(100vw - 40px, 1528px);
@@ -21,16 +20,9 @@
 }
 
 @media (max-width: 860px) {
-  .topbar-main,
   .topnav-row,
   main {
     width: min(100vw - 24px, 1528px);
-  }
-
-  .topbar-main {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
   }
 
   .topnav-row {
