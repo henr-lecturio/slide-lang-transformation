@@ -7,6 +7,8 @@ GEMINI_PROMPT_FILE="$ROOT_DIR/config/gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_translate_prompt.txt"
 GEMINI_TEXT_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_text_translate_prompt.txt"
 GEMINI_TTS_PROMPT_FILE="$ROOT_DIR/config/gemini_tts_prompt.txt"
+TRANSLATION_TERMBASE_FILE="$ROOT_DIR/config/translation_termbase.csv"
+TRANSLATION_MEMORY_DB="$ROOT_DIR/output/translation_memory/translation_memory.sqlite"
 LOCAL_ENV_FILE="$ROOT_DIR/.env.local"
 VENV_DIR="$ROOT_DIR/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python"
@@ -446,6 +448,7 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
         --model "$GEMINI_TRANSLATE_MODEL" \
         --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
+        --termbase-file "$TRANSLATION_TERMBASE_FILE" \
         --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
       step_done translate
       echo "[Translate] Translation finished."
@@ -558,6 +561,9 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
     --out-csv "$TEXT_TRANSLATED_CSV" \
     --model "$GEMINI_TEXT_TRANSLATE_MODEL" \
     --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE" \
+    --termbase-file "$TRANSLATION_TERMBASE_FILE" \
+    --tm-db "$TRANSLATION_MEMORY_DB" \
+    --origin-run-id "$RUN_ID" \
     --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
   step_done text-translate
   TEXT_TRANSLATE_INPUT_JSON="$TEXT_TRANSLATED_JSON"

@@ -6,14 +6,19 @@ import base64
 import io
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
 
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from scripts.translation_memory import DEFAULT_TERMBASE_PATH, append_glossary_to_prompt, load_termbase_entries
+
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.txt"
 
@@ -34,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         "--target-language",
         required=True,
         help="Target language label injected into the prompt, e.g. German or French.",
+    )
+    parser.add_argument(
+        "--termbase-file",
+        default=str(DEFAULT_TERMBASE_PATH),
+        help="CSV termbase applied as glossary instructions to the image translation prompt.",
     )
     return parser.parse_args()
 
@@ -166,7 +176,9 @@ def main() -> int:
     if not target_language:
         raise RuntimeError("--target-language must not be empty.")
 
-    prompt = load_prompt(Path(args.prompt_file).resolve(), target_language)
+    termbase_file = Path(args.termbase_file).resolve()
+    termbase_entries = load_termbase_entries(termbase_file, target_language)
+    prompt = append_glossary_to_prompt(load_prompt(Path(args.prompt_file).resolve(), target_language), termbase_entries)
     input_dir = Path(args.input_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     if not input_dir.exists():
@@ -205,6 +217,8 @@ def main() -> int:
     print(f"[Translate] Translated: {translated_count}")
     print(f"[Translate] Fallback: {fallback_count}")
     print(f"[Translate] Target language: {target_language}")
+    print(f"[Translate] Termbase glossary entries: {len(termbase_entries)}")
+    print(f"[Translate] Termbase file: {termbase_file}")
     print(f"[Translate] Prompt file: {Path(args.prompt_file).resolve()}")
     print(f"[Translate] Output dir: {output_dir}")
     return 0

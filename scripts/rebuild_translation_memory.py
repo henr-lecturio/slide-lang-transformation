@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.translation_memory import (
     DEFAULT_TM_DB_PATH,
@@ -12,8 +17,6 @@ from scripts.translation_memory import (
     split_translation_units,
     upsert_tm_entry,
 )
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_RUNS_DIR = ROOT_DIR / "output" / "runs"
 
 

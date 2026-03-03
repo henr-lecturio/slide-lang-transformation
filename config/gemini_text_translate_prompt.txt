@@ -5,5 +5,7 @@ Rules:
 - Do not summarize.
 - Do not omit or add content.
 - Preserve numbers, names, compliance terms, and enumerations.
+- If the source contains placeholders such as __TERM_0001__, preserve them exactly.
+- Do not translate, rewrite, delete, or reorder placeholders.
 - Keep the tone factual and suitable for narrated training slides.
 - Return valid JSON only with this shape: {"translated_text": "..."}

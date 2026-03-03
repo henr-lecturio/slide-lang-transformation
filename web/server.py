@@ -27,6 +27,12 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
+from scripts.translation_memory import (
+    append_glossary_to_prompt,
+    apply_termbase_placeholders,
+    load_termbase_entries,
+    restore_termbase_placeholders,
+)
 
 WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
@@ -35,6 +41,7 @@ GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.tx
 GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_text_translate_prompt.txt"
 GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
 GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "gemini_tts_languages.json"
+TRANSLATION_TERMBASE_PATH = ROOT_DIR / "config" / "translation_termbase.csv"
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
@@ -1854,10 +1861,11 @@ def run_slide_translate_health_check(payload: dict) -> dict:
     start = time.perf_counter()
     try:
         client, types = ensure_gemini_client()
+        glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
         response = client.models.generate_content(
             model=model,
             contents=[
-                inject_target_language(prompt, target_language),
+                append_glossary_to_prompt(inject_target_language(prompt, target_language), glossary_entries),
                 types.Part.from_bytes(data=encode_png(make_health_slide_image()), mime_type="image/png"),
             ],
             config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
@@ -1875,6 +1883,7 @@ def run_slide_translate_health_check(payload: dict) -> dict:
             "image_width": int(image.shape[1]),
             "image_height": int(image.shape[0]),
             "image_bytes": len(image_bytes),
+            "glossary_entries": len(glossary_entries),
             "message": "Slide Translate API reachable.",
         }
     except Exception as exc:  # noqa: BLE001
@@ -1899,11 +1908,14 @@ def run_text_translate_health_check(payload: dict) -> dict:
     start = time.perf_counter()
     try:
         client, _types = ensure_gemini_client()
-        source_text = "Compliance training starts on Monday."
+        glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
+        source_text = "Code of Conduct and Compliance training starts on Monday."
+        protected_text, placeholder_map, term_hits = apply_termbase_placeholders(source_text, glossary_entries)
         response = client.models.generate_content(
             model=model,
             contents=[
-                f"{inject_target_language(prompt, target_language)}\n\nSource text:\n{json.dumps(source_text, ensure_ascii=False)}"
+                f"{append_glossary_to_prompt(inject_target_language(prompt, target_language), glossary_entries)}\n\n"
+                f"Source text:\n{json.dumps(protected_text, ensure_ascii=False)}"
             ],
             config={"response_mime_type": "application/json"},
         )
@@ -1912,6 +1924,7 @@ def run_text_translate_health_check(payload: dict) -> dict:
         translated_text = str(parsed.get("translated_text", "") or "").strip()
         if not translated_text:
             raise RuntimeError("Gemini translation JSON did not include translated_text.")
+        translated_text = restore_termbase_placeholders(translated_text, placeholder_map)
         latency_ms = int(round((time.perf_counter() - start) * 1000))
         return {
             "ok": True,
@@ -1919,6 +1932,8 @@ def run_text_translate_health_check(payload: dict) -> dict:
             "target_language": target_language,
             "latency_ms": latency_ms,
             "translated_text": translated_text,
+            "glossary_entries": len(glossary_entries),
+            "termbase_hits": len(term_hits),
             "message": "Text Translate API reachable.",
         }
     except Exception as exc:  # noqa: BLE001

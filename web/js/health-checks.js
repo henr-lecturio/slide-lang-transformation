@@ -162,6 +162,7 @@ export async function testSlideTranslateHealth() {
     const meta = [
       `target=${result.target_language || "-"}`,
       `model=${result.model || "-"}`,
+      result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
       `${result.latency_ms || 0} ms`,
       `${result.image_width || 0}x${result.image_height || 0}`,
       `${result.image_bytes || 0} bytes`,
@@ -185,6 +186,8 @@ export async function testTextTranslateHealth() {
     const meta = [
       `target=${result.target_language || "-"}`,
       `model=${result.model || "-"}`,
+      result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
+      result.termbase_hits != null ? `termbase_hits=${result.termbase_hits}` : "",
       `${result.latency_ms || 0} ms`,
       preview ? `sample=\"${preview}\"` : "",
     ].filter(Boolean).join(" | ");
@@ -245,4 +248,3 @@ export async function testTtsHealth() {
   ].filter(Boolean).join(" | ");
   setHealthStatus("tts", "error", "Failed", meta);
 }
-

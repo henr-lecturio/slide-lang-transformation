@@ -5,10 +5,27 @@ import argparse
 import csv
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from scripts.translation_memory import (
+    DEFAULT_TERMBASE_PATH,
+    DEFAULT_TM_DB_PATH,
+    apply_termbase_placeholders,
+    append_glossary_to_prompt,
+    init_translation_memory,
+    load_termbase_entries,
+    lookup_tm_exact,
+    restore_termbase_placeholders,
+    split_translation_units,
+    upsert_tm_entry,
+)
+
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_text_translate_prompt.txt"
 
@@ -28,6 +45,21 @@ def parse_args() -> argparse.Namespace:
         "--target-language",
         required=True,
         help="Target language, e.g. German or French.",
+    )
+    parser.add_argument(
+        "--termbase-file",
+        default=str(DEFAULT_TERMBASE_PATH),
+        help="CSV termbase with source_text,target_language,target_text rows.",
+    )
+    parser.add_argument(
+        "--tm-db",
+        default=str(DEFAULT_TM_DB_PATH),
+        help="SQLite translation memory database path.",
+    )
+    parser.add_argument(
+        "--origin-run-id",
+        default="",
+        help="Optional run id stored alongside newly created TM entries.",
     )
     return parser.parse_args()
 
@@ -52,6 +84,11 @@ def load_prompt(path: Path, target_language: str) -> str:
     prompt = template.replace("{{TARGET_LANGUAGE}}", target_language.strip())
     if "{{TARGET_LANGUAGE}}" not in template:
         prompt = f"Target language: {target_language.strip()}\n\n{prompt}"
+    if "placeholder" not in prompt.lower():
+        prompt = (
+            f"{prompt}\n\n"
+            "If the source text contains placeholders like __TERM_0001__, preserve them exactly and do not translate, rewrite, or remove them."
+        )
     return prompt
 
 
@@ -114,6 +151,37 @@ def translate_text(client, model: str, prompt: str, source_text: str) -> str:
     return translated
 
 
+def translate_segment(
+    client,
+    *,
+    model: str,
+    prompt: str,
+    source_segment: str,
+    target_language: str,
+    termbase_entries,
+    tm_conn,
+    origin_run_id: str,
+) -> tuple[str, str, int]:
+    tm_hit = lookup_tm_exact(tm_conn, source_segment, target_language)
+    if tm_hit:
+        return str(tm_hit.get("target_text", "") or ""), "tm_exact", 0
+
+    protected_text, placeholder_map, term_hits = apply_termbase_placeholders(source_segment, termbase_entries)
+    translated_segment = translate_text(client, model, prompt, protected_text)
+    restored_segment = restore_termbase_placeholders(translated_segment, placeholder_map)
+    upsert_tm_entry(
+        tm_conn,
+        source_text=source_segment,
+        target_language=target_language,
+        target_text=restored_segment,
+        status="machine_unreviewed",
+        origin_run_id=origin_run_id,
+    )
+    if term_hits:
+        return restored_segment, "translated_with_termbase", len(term_hits)
+    return restored_segment, "translated", 0
+
+
 def write_csv(path: Path, events: list[dict[str, Any]]) -> None:
     fieldnames = [
         "slide_index",
@@ -127,6 +195,9 @@ def write_csv(path: Path, events: list[dict[str, Any]]) -> None:
         "translated_text",
         "target_language",
         "translation_status",
+        "tm_exact_hits",
+        "tm_new_segments",
+        "termbase_hits",
         "segments_count",
         "source_segment_ids",
     ]
@@ -147,6 +218,9 @@ def write_csv(path: Path, events: list[dict[str, Any]]) -> None:
                     "translated_text": row.get("translated_text", ""),
                     "target_language": row.get("target_language", ""),
                     "translation_status": row.get("translation_status", ""),
+                    "tm_exact_hits": row.get("tm_exact_hits", ""),
+                    "tm_new_segments": row.get("tm_new_segments", ""),
+                    "termbase_hits": row.get("termbase_hits", ""),
                     "segments_count": row.get("segments_count", ""),
                     "source_segment_ids": json.dumps(row.get("source_segment_ids", []), ensure_ascii=False),
                 }
@@ -165,6 +239,8 @@ def main() -> int:
     out_json = Path(args.out_json).resolve()
     out_csv = Path(args.out_csv).resolve()
     prompt_file = Path(args.prompt_file).resolve()
+    termbase_file = Path(args.termbase_file).resolve()
+    tm_db_path = Path(args.tm_db).resolve()
 
     if not input_json.exists():
         raise FileNotFoundError(input_json)
@@ -177,13 +253,18 @@ def main() -> int:
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
-    prompt = load_prompt(prompt_file, target_language)
+    termbase_entries = load_termbase_entries(termbase_file, target_language)
+    prompt = append_glossary_to_prompt(load_prompt(prompt_file, target_language), termbase_entries)
     client = ensure_client()
+    tm_conn = init_translation_memory(tm_db_path)
 
     translated_events: list[dict[str, Any]] = []
     translated_count = 0
     skipped_count = 0
     failed_count = 0
+    tm_exact_hits_total = 0
+    tm_new_segments_total = 0
+    termbase_hits_total = 0
 
     for idx, event in enumerate(events, start=1):
         event_id = int(event.get("event_id", 0) or 0)
@@ -194,6 +275,9 @@ def main() -> int:
         translated_event["target_language"] = target_language
         translated_event["translated_text"] = ""
         translated_event["translation_status"] = "pending"
+        translated_event["tm_exact_hits"] = 0
+        translated_event["tm_new_segments"] = 0
+        translated_event["termbase_hits"] = 0
         print(f"@@STEP DETAIL text-translate {bucket_id or f'event_{event_id:03d}'}", flush=True)
 
         if not source_text:
@@ -203,19 +287,65 @@ def main() -> int:
             print(f"[TextTranslate] Skip event {event_id}: empty text.", flush=True)
             continue
 
-        try:
-            translated_text = translate_text(client, str(args.model), prompt, source_text)
-        except Exception as exc:  # noqa: BLE001
-            translated_event["translation_status"] = "error"
-            translated_events.append(translated_event)
-            failed_count += 1
-            print(f"[TextTranslate] ERROR event {event_id}: {exc}", flush=True)
+        units = split_translation_units(source_text)
+        event_tm_exact_hits = 0
+        event_tm_new_segments = 0
+        event_termbase_hits = 0
+        failed_event = False
+        rendered_parts: list[str] = []
+
+        for unit in units:
+            if unit.get("type") != "segment" or not str(unit.get("text", "")).strip():
+                rendered_parts.append(str(unit.get("text", "") or ""))
+                continue
+
+            try:
+                translated_segment, segment_status, term_hits = translate_segment(
+                    client,
+                    model=str(args.model),
+                    prompt=prompt,
+                    source_segment=str(unit.get("text", "") or ""),
+                    target_language=target_language,
+                    termbase_entries=termbase_entries,
+                    tm_conn=tm_conn,
+                    origin_run_id=str(args.origin_run_id or ""),
+                )
+            except Exception as exc:  # noqa: BLE001
+                translated_event["translation_status"] = "error"
+                translated_events.append(translated_event)
+                failed_count += 1
+                failed_event = True
+                print(f"[TextTranslate] ERROR event {event_id}: {exc}", flush=True)
+                break
+
+            rendered_parts.append(translated_segment)
+            if segment_status == "tm_exact":
+                event_tm_exact_hits += 1
+            else:
+                event_tm_new_segments += 1
+            event_termbase_hits += term_hits
+
+        if failed_event:
             continue
 
+        translated_text = "".join(rendered_parts).strip()
         translated_event["translated_text"] = translated_text
-        translated_event["translation_status"] = "translated"
+        translated_event["tm_exact_hits"] = event_tm_exact_hits
+        translated_event["tm_new_segments"] = event_tm_new_segments
+        translated_event["termbase_hits"] = event_termbase_hits
+        if event_tm_exact_hits > 0 and event_tm_new_segments == 0:
+            translated_event["translation_status"] = "tm_exact"
+        elif event_tm_exact_hits > 0:
+            translated_event["translation_status"] = "translated_with_tm"
+        elif event_termbase_hits > 0:
+            translated_event["translation_status"] = "translated_with_termbase"
+        else:
+            translated_event["translation_status"] = "translated"
         translated_events.append(translated_event)
         translated_count += 1
+        tm_exact_hits_total += event_tm_exact_hits
+        tm_new_segments_total += event_tm_new_segments
+        termbase_hits_total += event_termbase_hits
         print(f"[TextTranslate] Translated event {event_id}", flush=True)
 
     out_payload = dict(payload)
@@ -223,19 +353,30 @@ def main() -> int:
         "model": str(args.model),
         "prompt_file": str(prompt_file),
         "target_language": target_language,
+        "termbase_file": str(termbase_file),
+        "translation_memory_db": str(tm_db_path),
         "translated_count": translated_count,
         "skipped_empty_count": skipped_count,
         "failed_count": failed_count,
+        "tm_exact_hits": tm_exact_hits_total,
+        "tm_new_segments": tm_new_segments_total,
+        "termbase_hits": termbase_hits_total,
     }
     out_payload["events"] = translated_events
     out_json.write_text(json.dumps(out_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     write_csv(out_csv, translated_events)
+    tm_conn.close()
 
     print(f"[TextTranslate] Events processed: {len(events)}", flush=True)
     print(f"[TextTranslate] Translated: {translated_count}", flush=True)
     print(f"[TextTranslate] Skipped empty: {skipped_count}", flush=True)
     print(f"[TextTranslate] Failed: {failed_count}", flush=True)
+    print(f"[TextTranslate] TM exact hits: {tm_exact_hits_total}", flush=True)
+    print(f"[TextTranslate] TM new segments: {tm_new_segments_total}", flush=True)
+    print(f"[TextTranslate] Termbase hits: {termbase_hits_total}", flush=True)
     print(f"[TextTranslate] Target language: {target_language}", flush=True)
+    print(f"[TextTranslate] Termbase file: {termbase_file}", flush=True)
+    print(f"[TextTranslate] Translation memory DB: {tm_db_path}", flush=True)
     print(f"[TextTranslate] Output JSON: {out_json}", flush=True)
     print(f"[TextTranslate] Output CSV: {out_csv}", flush=True)
     return 1 if failed_count > 0 else 0
