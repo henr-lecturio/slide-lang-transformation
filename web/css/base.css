@@ -1,0 +1,103 @@
+:root {
+  color-scheme: dark;
+  --bg: #050506;
+  --bg-soft: #08090b;
+  --surface: #0a0b0d;
+  --surface-alt: #0f1013;
+  --surface-muted: #13151a;
+  --surface-strong: #151923;
+  --text: #f5f3ef;
+  --text-muted: #b5b8c2;
+  --text-soft: #8b909d;
+  --border: #24272d;
+  --border-strong: #3a3f48;
+  --line: rgba(255, 255, 255, 0.08);
+  --white-button: #f5f2ed;
+  --white-button-hover: #ffffff;
+  --white-button-text: #0b0b0c;
+  --accent: #7e8cff;
+  --accent-soft: rgba(126, 140, 255, 0.22);
+  --success: #18b26b;
+  --danger: #ec5f3f;
+  --warning: #f2b15f;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --focus-ring: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 0 4px rgba(126, 140, 255, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, "Segoe UI Variable", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.45;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.035), transparent 28%),
+    radial-gradient(circle at 100% 0%, rgba(126, 140, 255, 0.05), transparent 24%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 32px),
+    linear-gradient(180deg, #070708 0%, var(--bg) 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 16%);
+  opacity: 0.8;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+input,
+select,
+textarea,
+.tab-btn,
+.video-file,
+.mode-toggle-btn {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.tab-btn:focus-visible,
+.video-file:focus-visible,
+.mode-toggle-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.hidden {
+  display: none;
+}
+
+::selection {
+  background: rgba(126, 140, 255, 0.32);
+  color: #ffffff;
+}

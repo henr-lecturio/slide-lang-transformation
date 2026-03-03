@@ -1,0 +1,258 @@
+.settings-note {
+  margin-bottom: 8px;
+  padding: 16px 18px;
+  border: 1px solid rgba(85, 120, 255, 0.45);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(43, 61, 120, 0.55), rgba(22, 31, 64, 0.75));
+  line-height: 1.6;
+}
+
+.step-sections {
+  display: grid;
+  gap: 16px;
+}
+
+.step-section {
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.step-section.is-disabled {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.step-section.is-disabled .step-section-head {
+  opacity: 0.76;
+}
+
+.step-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+.step-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-section-title-wrap {
+  min-width: 0;
+}
+
+.step-section-title-wrap h3 {
+  margin: 0;
+}
+
+.step-section-subtitle {
+  margin-top: 6px;
+}
+
+.step-section-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.step-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font-size: 0.86rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.step-switch-icononly {
+  min-height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  gap: 0;
+}
+
+.step-switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.step-switch.is-static {
+  opacity: 0.78;
+}
+
+.step-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  min-width: 24px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.step-section-toggle:hover:not(:disabled) {
+  color: var(--text);
+  background: transparent;
+}
+
+.step-section-toggle:disabled {
+  color: rgba(255, 255, 255, 0.22);
+  cursor: not-allowed;
+}
+
+.step-section-chevron {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+.step-section.is-open .step-section-chevron {
+  transform: rotate(225deg);
+}
+
+.step-section-body {
+  padding: 0 20px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-list {
+  display: grid;
+  gap: 10px;
+  padding-top: 18px;
+}
+
+.settings-subhead {
+  margin-top: 6px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-static {
+  padding-top: 18px;
+  line-height: 1.6;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.settings-row-textarea {
+  align-items: flex-start;
+}
+
+.settings-row-inline .settings-value {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.health-check-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.health-check-status.is-pending {
+  border-color: rgba(242, 177, 95, 0.55);
+  color: #ffd79a;
+}
+
+.health-check-status.is-ok {
+  border-color: rgba(24, 178, 107, 0.6);
+  color: #9bf0c4;
+}
+
+.health-check-status.is-error {
+  border-color: rgba(236, 95, 63, 0.6);
+  color: #ffb9aa;
+}
+
+.health-check-meta {
+  min-height: 1.2em;
+  font-size: 0.84rem;
+}
+
+.tts-language-hint {
+  min-height: 1.2em;
+  margin-top: 8px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.tts-language-hint.is-warning {
+  color: #ffd79a;
+}
+
+.tts-language-hint.is-ok {
+  color: #9bf0c4;
+}
+
+.tts-language-hint.is-note {
+  color: var(--text-soft);
+}
+
+.settings-key {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.settings-value {
+  min-width: 0;
+}
+
+.settings-value > input,
+.settings-value > select,
+.settings-value > textarea {
+  width: 100%;
+}

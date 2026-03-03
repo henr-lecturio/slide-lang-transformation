@@ -1,0 +1,195 @@
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+  color: var(--text);
+  font-size: 0.94rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.wide-field {
+  margin-top: 16px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: #07080a;
+  color: var(--text);
+  padding: 12px 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+input,
+select {
+  min-height: 48px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-soft);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: #585f6b;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+textarea {
+  min-height: 176px;
+  resize: vertical;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  line-height: 1.55;
+}
+
+button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#start-run,
+#save-roi,
+#save-settings,
+#regen-overlay,
+#transcription-health-check,
+#slide-edit-health-check,
+#slide-translate-health-check,
+#slide-upscale-health-check,
+#text-translate-health-check,
+#tts-health-check,
+#lab-run-edit,
+#lab-run-translate,
+#lab-run-upscale {
+  background: var(--white-button);
+  border-color: var(--white-button);
+  color: var(--white-button-text);
+}
+
+#start-run:hover:not(:disabled),
+#save-roi:hover:not(:disabled),
+#save-settings:hover:not(:disabled),
+#regen-overlay:hover:not(:disabled),
+#transcription-health-check:hover:not(:disabled),
+#slide-edit-health-check:hover:not(:disabled),
+#slide-translate-health-check:hover:not(:disabled),
+#slide-upscale-health-check:hover:not(:disabled),
+#text-translate-health-check:hover:not(:disabled),
+#tts-health-check:hover:not(:disabled),
+#lab-run-edit:hover:not(:disabled),
+#lab-run-translate:hover:not(:disabled),
+#lab-run-upscale:hover:not(:disabled) {
+  background: var(--white-button-hover);
+  border-color: var(--white-button-hover);
+  color: #000000;
+}
+
+#stop-run {
+  border-color: rgba(236, 95, 63, 0.55);
+  color: #ffad99;
+}
+
+#save-settings {
+  flex: 0 0 auto;
+}
+
+#stop-run:hover:not(:disabled) {
+  background: rgba(236, 95, 63, 0.12);
+  border-color: rgba(236, 95, 63, 0.75);
+  color: #ffd5ca;
+}
+
+button.is-success,
+button.is-success:disabled {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgb(255, 255, 255, 0.1);
+  border-color: #00ae0c;
+  color: #cbcbcb;
+  opacity: 1;
+}
+
+button.is-success::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background:
+    rgb(0, 174, 12)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M3.5 8.25 6.4 11.15 12.5 5.05' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 10px 10px no-repeat;
+  animation: success-pop 180ms ease-out;
+}
+
+@keyframes success-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.toggle-field {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 50px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface-alt);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.toggle-field:hover {
+  border-color: var(--border-strong);
+}
+
+.toggle-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #ffffff;
+}

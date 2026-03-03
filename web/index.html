@@ -4,7 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Slide Detection Runner</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/layout.css" />
+    <link rel="stylesheet" href="/css/forms.css" />
+    <link rel="stylesheet" href="/css/settings.css" />
+    <link rel="stylesheet" href="/css/components.css" />
+    <link rel="stylesheet" href="/css/runs.css" />
+    <link rel="stylesheet" href="/css/modals.css" />
+    <link rel="stylesheet" href="/css/responsive.css" />
   </head>
   <body>
     <header class="topbar">
@@ -29,20 +36,20 @@
     <main>
       <section id="panel-home" class="panel active">
         <div class="home-top">
-          <section class="card">
+          <section class="card home-top-card run-control-card">
             <h2>Run Control</h2>
             <div class="row wrap">
               <button id="start-run">Start New Run</button>
               <button id="refresh-runs">Refresh Runs</button>
               <button id="pick-video">Video wählen</button>
             </div>
-            <div id="selected-video-path" class="muted"></div>
             <div class="video-preview-wrap">
               <img id="selected-video-thumb" alt="Selected video thumbnail" />
             </div>
+            <div id="selected-video-path" class="muted"></div>
           </section>
 
-          <section class="card">
+          <section class="card home-top-card status-panel-card">
             <div class="status-card-head">
               <h2>Status</h2>
               <div class="status-actions">
@@ -760,6 +767,6 @@
       </div>
     </div>
 
-    <script src="/app.js"></script>
-  </body>
+    <script type="module" src="/app.js"></script>
+</body>
 </html>

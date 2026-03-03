@@ -2118,6 +2118,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_static("styles.css")
             if path == "/app.js":
                 return self._serve_static("app.js")
+            if path.startswith("/js/"):
+                return self._serve_static(path.lstrip("/"))
+            if path.startswith("/css/"):
+                return self._serve_static(path.lstrip("/"))
 
             if path == "/api/config":
                 env = parse_env(CONFIG_PATH)

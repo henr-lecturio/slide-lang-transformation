@@ -1,0 +1,122 @@
+.slides-list {
+  margin-top: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.slide-row {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) minmax(0, 1fr);
+  gap: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.slide-media {
+  display: grid;
+  align-content: start;
+}
+
+.slide-media img,
+.thumb img,
+.image-modal-dialog img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: #050506;
+  cursor: zoom-in;
+}
+
+.slide-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.slide-compare-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.slide-compare-label,
+.slide-meta,
+.slide-controls-label,
+.thumb .name {
+  font-size: 0.8rem;
+}
+
+.slide-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #060709;
+}
+
+.mode-toggle-btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.mode-toggle-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.mode-toggle-btn.active {
+  background: var(--white-button);
+  color: var(--white-button-text);
+}
+
+.mode-toggle-btn:disabled {
+  opacity: 0.38;
+}
+
+.slide-text {
+  min-height: 100%;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.slide-missing {
+  min-height: 190px;
+  display: grid;
+  place-items: center;
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  border-style: dashed;
+}
+
+.thumbs {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.thumb {
+  padding: 10px;
+}

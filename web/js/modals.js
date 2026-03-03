@@ -1,0 +1,129 @@
+import { el } from "./dom.js";
+import { state } from "./state.js";
+import { apiGet } from "./api.js";
+import { showButtonSuccess } from "./ui-core.js";
+
+export function openStatusModal() {
+  el.statusModal.classList.add("open");
+  el.statusModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeStatusModal() {
+  el.statusModal.classList.remove("open");
+  el.statusModal.setAttribute("aria-hidden", "true");
+}
+
+export function openImageModal(url, name) {
+  const sep = url.includes("?") ? "&" : "?";
+  el.imageModalImg.src = `${url}${sep}v=${Date.now()}`;
+  el.imageModalCaption.textContent = name || "";
+  el.imageModal.classList.add("open");
+  el.imageModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeImageModal() {
+  el.imageModal.classList.remove("open");
+  el.imageModal.setAttribute("aria-hidden", "true");
+  el.imageModalImg.removeAttribute("src");
+  el.imageModalCaption.textContent = "";
+}
+
+export function closeVideoPicker() {
+  el.videoPickerModal.classList.remove("open");
+  el.videoPickerModal.setAttribute("aria-hidden", "true");
+}
+
+export function closeLabImagePicker() {
+  el.labImagePickerModal.classList.remove("open");
+  el.labImagePickerModal.setAttribute("aria-hidden", "true");
+}
+
+function renderVideoPickerList({ runTask, saveConfig }) {
+  const items = state.videoItems || [];
+  el.videoPickerList.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Keine Videos unter videos/ gefunden.";
+    el.videoPickerList.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    if (item.type === "dir") {
+      const dir = document.createElement("div");
+      dir.className = "video-item video-dir";
+      dir.style.paddingLeft = `${item.depth * 18}px`;
+      dir.textContent = `[dir] ${item.path}`;
+      el.videoPickerList.appendChild(dir);
+      continue;
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "video-item video-file";
+    btn.style.paddingLeft = `${item.depth * 18 + 8}px`;
+    btn.textContent = item.path;
+    if (item.path === state.selectedVideoPath) {
+      btn.classList.add("selected");
+    }
+    btn.addEventListener("click", () => runTask(async () => {
+      state.selectedVideoPath = item.path;
+      await saveConfig();
+      closeVideoPicker();
+      showButtonSuccess(el.pickVideo, "Selected");
+    }));
+    el.videoPickerList.appendChild(btn);
+  }
+}
+
+export async function openVideoPicker({ runTask, saveConfig }) {
+  const data = await apiGet("/api/videos");
+  state.videoItems = data.items || [];
+  if (data.selected_video) {
+    state.selectedVideoPath = data.selected_video;
+  }
+  renderVideoPickerList({ runTask, saveConfig });
+  el.videoPickerModal.classList.add("open");
+  el.videoPickerModal.setAttribute("aria-hidden", "false");
+}
+
+function renderLabImagePickerList({ runTask, renderLabSelection }) {
+  const items = state.labImages || [];
+  el.labImagePickerList.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "Keine final_slide_images im neuesten Run gefunden.";
+    el.labImagePickerList.appendChild(empty);
+    return;
+  }
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "video-item video-file";
+    btn.textContent = `event ${item.event_id} | ${Number(item.slide_start || 0).toFixed(2)}s - ${Number(item.slide_end || 0).toFixed(2)}s | ${item.name}`;
+    if (state.labSelectedImage && state.labSelectedImage.run_id === item.run_id && state.labSelectedImage.event_id === item.event_id) {
+      btn.classList.add("selected");
+    }
+    btn.addEventListener("click", () => runTask(async () => {
+      state.labSelectedImage = item;
+      renderLabSelection();
+      closeLabImagePicker();
+      showButtonSuccess(el.labPickImage, "Selected");
+    }));
+    el.labImagePickerList.appendChild(btn);
+  }
+}
+
+export async function openLabImagePicker({ runTask, renderLabSelection }) {
+  const data = await apiGet("/api/lab/images");
+  state.labImages = data.items || [];
+  if (!state.labSelectedImage && state.labImages.length > 0) {
+    state.labSelectedImage = state.labImages[0];
+    renderLabSelection();
+  }
+  renderLabImagePickerList({ runTask, renderLabSelection });
+  el.labImagePickerModal.classList.add("open");
+  el.labImagePickerModal.setAttribute("aria-hidden", "false");
+}

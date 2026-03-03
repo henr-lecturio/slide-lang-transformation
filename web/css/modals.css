@@ -1,0 +1,144 @@
+.image-modal,
+.status-modal,
+.video-picker-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+}
+
+.image-modal { z-index: 90; }
+.status-modal { z-index: 92; }
+.video-picker-modal { z-index: 95; }
+
+.image-modal.open,
+.status-modal.open,
+.video-picker-modal.open {
+  display: block;
+}
+
+.image-modal-backdrop,
+.status-modal-backdrop,
+.video-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.image-modal-dialog,
+.status-modal-dialog,
+.video-picker-dialog {
+  position: relative;
+  box-shadow: var(--shadow);
+}
+
+.image-modal-dialog {
+  max-width: min(95vw, 1520px);
+  max-height: 94vh;
+  margin: 3vh auto;
+  padding: 46px 14px 14px;
+  background: #090a0c;
+}
+
+.image-modal-dialog img {
+  max-height: calc(94vh - 110px);
+  width: auto;
+  margin: 0 auto;
+}
+
+.image-modal-caption {
+  margin-top: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 0.88rem;
+  word-break: break-word;
+}
+
+.image-modal-close,
+.video-picker-close {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  min-height: 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  line-height: 1;
+  font-size: 1rem;
+  aspect-ratio: 1 / 1;
+}
+
+.image-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.video-picker-dialog {
+  width: min(920px, 94vw);
+  max-height: 90vh;
+  margin: 5vh auto;
+  background: #0a0b0d;
+}
+
+.status-modal-dialog {
+  width: min(1080px, 94vw);
+  max-height: 90vh;
+  margin: 5vh auto;
+  background: #0a0b0d;
+}
+
+.status-modal-body {
+  padding: 16px;
+}
+
+.status-modal-log {
+  min-height: 360px;
+  height: 52vh;
+  margin-top: 0;
+}
+
+.video-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #0d0f12;
+}
+
+.video-picker-list {
+  max-height: 70vh;
+  overflow: auto;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.video-item {
+  border-radius: var(--radius-xs);
+}
+
+.video-dir {
+  padding: 12px 8px 6px;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.video-file {
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+  border-radius: var(--radius-xs);
+}
+
+.video-file.selected {
+  border-color: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
