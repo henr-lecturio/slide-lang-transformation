@@ -15,7 +15,7 @@ from typing import Iterable
 
 import cv2
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 
 

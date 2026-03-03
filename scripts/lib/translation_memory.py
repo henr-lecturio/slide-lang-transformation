@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_TERMBASE_PATH = ROOT_DIR / "config" / "translation_termbase.csv"
+ROOT_DIR = Path(__file__).resolve().parents[2]
+DEFAULT_TERMBASE_PATH = ROOT_DIR / "config" / "language" / "translation_termbase.csv"
 DEFAULT_TM_DB_PATH = ROOT_DIR / "output" / "translation_memory" / "translation_memory.sqlite"
 TM_SCHEMA = """
 CREATE TABLE IF NOT EXISTS tm_entries (

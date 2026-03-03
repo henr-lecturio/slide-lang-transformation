@@ -13,7 +13,7 @@ from pathlib import Path
 import requests
 
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_NIGHTMARE_REALESRGAN_MODEL_REF = "nightmareai/real-esrgan"
 DEFAULT_NIGHTMARE_REALESRGAN_VERSION_ID = "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa"

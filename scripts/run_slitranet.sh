@@ -3,11 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
-GEMINI_PROMPT_FILE="$ROOT_DIR/config/gemini_edit_prompt.txt"
-GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_translate_prompt.txt"
-GEMINI_TEXT_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_text_translate_prompt.txt"
-GEMINI_TTS_PROMPT_FILE="$ROOT_DIR/config/gemini_tts_prompt.txt"
-TRANSLATION_TERMBASE_FILE="$ROOT_DIR/config/translation_termbase.csv"
+GEMINI_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_edit_prompt.txt"
+GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_translate_prompt.txt"
+GEMINI_TEXT_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_text_translate_prompt.txt"
+GEMINI_TTS_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_tts_prompt.txt"
+TRANSLATION_TERMBASE_FILE="$ROOT_DIR/config/language/translation_termbase.csv"
 TRANSLATION_MEMORY_DB="$ROOT_DIR/output/translation_memory/translation_memory.sqlite"
 LOCAL_ENV_FILE="$ROOT_DIR/.env.local"
 VENV_DIR="$ROOT_DIR/.venv"
@@ -185,9 +185,9 @@ fi
 
 step_start slide-detection
 step_detail slide-detection "prepare-dataset"
-DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/prepare_dataset.sh"
+DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/pipeline/prepare_dataset.sh"
 step_detail slide-detection "check-weights"
-bash "$ROOT_DIR/scripts/check_weights.sh"
+bash "$ROOT_DIR/scripts/pipeline/check_weights.sh"
 
 step_detail slide-detection "cuda-check"
 if ! "$PYTHON_BIN" - <<'PY'
@@ -226,7 +226,7 @@ else
 fi
 
 step_detail slide-detection "postprocess"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/postprocess_slitranet.py" \
+"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/postprocess_slitranet.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --roi-file "$ROI_FILE" \
   --transitions-file "$TRANSITIONS_FILE" \
@@ -258,7 +258,7 @@ case "${TRANSCRIPTION_PROVIDER:-whisper}" in
       TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
     fi
     step_detail transcription "faster-whisper"
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
     ;;
   google_chirp_3)
     if [ -z "${GOOGLE_SPEECH_PROJECT_ID:-}" ]; then
@@ -277,7 +277,7 @@ case "${TRANSCRIPTION_PROVIDER:-whisper}" in
       --chunk-overlap-sec "${GOOGLE_SPEECH_CHUNK_OVERLAP_SEC:-0.75}"
     )
     step_detail transcription "google-chirp-3"
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}"
     ;;
   *)
     echo "ERROR: TRANSCRIPTION_PROVIDER must be one of: whisper, google_chirp_3" >&2
@@ -293,7 +293,7 @@ echo "[ASR] Mapping transcript to slide windows ..."
 echo "[Step] transcript-mapping: run"
 step_start transcript-mapping
 step_detail transcript-mapping "map-transcript-to-slides"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/map_transcript_to_slides.py" \
+"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/map_transcript_to_slides.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --slide-csv "$OUT_BASE/slide_changes.csv" \
   --transcript-json "$TRANSCRIPT_JSON" \
@@ -393,7 +393,7 @@ fi
 echo "[ASR] Filtering speaker-only slides and merging transcript ..."
 step_start finalize-slides
 step_detail finalize-slides "speaker-filter-and-final-export"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
+"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
 step_done finalize-slides
 if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "local" ]; then
   step_done edit "local cleanup applied within finalize-slides"
@@ -409,7 +409,7 @@ if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ];
   echo "[Gemini] Editing raw final slides with model $GEMINI_EDIT_MODEL ..."
   step_start edit
   step_detail edit "gemini-image-edit"
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/edit_final_slides_gemini.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/edit_final_slides_gemini.py" \
     --input-dir "$FINAL_SLIDE_RAW_DIR" \
     --output-dir "$FINAL_SLIDE_DIR" \
     --model "$GEMINI_EDIT_MODEL" \
@@ -443,7 +443,7 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
       echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
       step_start translate
       step_detail translate "$FINAL_SLIDE_TARGET_LANGUAGE"
-      "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_final_slides_gemini.py" \
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/translate_final_slides_gemini.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
         --model "$GEMINI_TRANSLATE_MODEL" \
@@ -472,7 +472,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
       step_start upscale
       step_detail upscale "processed-final-slides"
-      "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_swin2sr.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
         --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
@@ -482,7 +482,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
         echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
         step_detail upscale "translated-final-slides"
-        "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_swin2sr.py" \
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_swin2sr.py" \
           --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
           --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
           --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
@@ -509,7 +509,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       echo "[Upscale] Upscaling processed final slides with Replicate provider $REPLICATE_PROVIDER ..."
       step_start upscale
       step_detail upscale "processed-final-slides:$REPLICATE_PROVIDER"
-      "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_replicate.py" \
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_replicate.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
         --provider "$REPLICATE_PROVIDER" \
@@ -519,7 +519,7 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
         echo "[Upscale] Upscaling translated final slides with Replicate provider $REPLICATE_PROVIDER ..."
         step_detail upscale "translated-final-slides:$REPLICATE_PROVIDER"
-        "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_replicate.py" \
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_replicate.py" \
           --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
           --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
           --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
@@ -555,7 +555,7 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
   echo "[TextTranslate] Translating mapped slide text to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TEXT_TRANSLATE_MODEL ..."
   step_start text-translate
   step_detail text-translate "$FINAL_SLIDE_TARGET_LANGUAGE"
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_slide_text.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/translate_slide_text.py" \
     --input-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
     --out-json "$TEXT_TRANSLATED_JSON" \
     --out-csv "$TEXT_TRANSLATED_CSV" \
@@ -591,7 +591,7 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
   echo "[TTS] Generating voiceover with model $GEMINI_TTS_MODEL and voice $GEMINI_TTS_VOICE ..."
   step_start tts
   step_detail tts "$GEMINI_TTS_VOICE"
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/generate_slide_tts.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/generate_slide_tts.py" \
     --input-json "$TTS_INPUT_JSON" \
     --output-dir "$TTS_AUDIO_DIR" \
     --out-manifest-json "$TTS_MANIFEST_JSON" \
@@ -634,7 +634,7 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
   if [ -f "$TTS_MANIFEST_JSON" ]; then
     TTS_MANIFEST_ARG+=(--tts-manifest-json "$TTS_MANIFEST_JSON")
   fi
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/export_slide_video.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/export_slide_video.py" \
     --slide-map-json "$TTS_INPUT_JSON" \
     --image-dir "$EXPORT_IMAGE_DIR" \
     "${TTS_MANIFEST_ARG[@]}" \

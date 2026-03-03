@@ -13,14 +13,14 @@ import cv2
 import numpy as np
 from PIL import Image
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.translation_memory import DEFAULT_TERMBASE_PATH, append_glossary_to_prompt, load_termbase_entries
+from scripts.lib.translation_memory import DEFAULT_TERMBASE_PATH, append_glossary_to_prompt, load_termbase_entries
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
-DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.txt"
+DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
 
 
 def parse_args() -> argparse.Namespace:

@@ -45,19 +45,19 @@ ROI direkt in `config/slitranet.env` setzen:
 - `SPEAKER_FILTER_MAX_DURATION_SEC`
 - `FINAL_SLIDE_POSTPROCESS_MODE` (`none`, `local`, `gemini`)
 - `GEMINI_EDIT_MODEL` (wenn `FINAL_SLIDE_POSTPROCESS_MODE=gemini`)
-- `config/gemini_edit_prompt.txt` (Gemini-Edit-Prompt; auch über die Web-UI bearbeitbar)
+- `config/prompts/gemini_edit_prompt.txt` (Gemini-Edit-Prompt; auch über die Web-UI bearbeitbar)
 - `FINAL_SLIDE_TRANSLATION_MODE` (`none`, `gemini`)
 - `FINAL_SLIDE_TARGET_LANGUAGE`
 - `GEMINI_TRANSLATE_MODEL` (wenn `FINAL_SLIDE_TRANSLATION_MODE=gemini`)
-- `config/gemini_translate_prompt.txt` (Gemini-Übersetzungsprompt; auch über die Web-UI bearbeitbar)
+- `config/prompts/gemini_translate_prompt.txt` (Gemini-Übersetzungsprompt; auch über die Web-UI bearbeitbar)
 - `RUN_STEP_TEXT_TRANSLATE`, `RUN_STEP_TTS`, `RUN_STEP_VIDEO_EXPORT`
 - `GEMINI_TEXT_TRANSLATE_MODEL`
-- `config/gemini_text_translate_prompt.txt` (1:1-Übersetzung des gemappten Textes)
+- `config/prompts/gemini_text_translate_prompt.txt` (1:1-Übersetzung des gemappten Textes)
 - `GEMINI_TTS_MODEL`
 - `GEMINI_TTS_VOICE`
 - `GOOGLE_TTS_PROJECT_ID`
 - `GOOGLE_TTS_LANGUAGE_CODE`
-- `config/gemini_tts_prompt.txt` (TTS-Stilprompt)
+- `config/prompts/gemini_tts_prompt.txt` (TTS-Stilprompt)
 - `FINAL_SLIDE_UPSCALE_MODE` (`none`, `swin2sr`, `replicate_nightmare_realesrgan`)
 - `FINAL_SLIDE_UPSCALE_MODEL` (standardmäßig `caidas/swin2SR-classical-sr-x4-64`)
 - `FINAL_SLIDE_UPSCALE_DEVICE` (`auto`, `cuda`, `cpu`)
@@ -84,7 +84,7 @@ REPLICATE_API_TOKEN="..."
 ```
 
 `.env.local` ist gitignoriert und wird von `scripts/run_slitranet.sh`,
-`scripts/edit_final_slides_gemini.py`, `scripts/upscale_final_slides_replicate.py`,
+`scripts/providers/edit_final_slides_gemini.py`, `scripts/providers/upscale_final_slides_replicate.py`,
 und `web/server.py` automatisch geladen.
 
 Wenn `TRANSCRIPTION_PROVIDER=google_chirp_3` oder `RUN_STEP_TTS=1` genutzt wird,
@@ -108,7 +108,7 @@ Overlay zur Kontrolle erzeugen:
 
 ```bash
 source .venv/bin/activate
-python scripts/export_roi_overlay.py --video "videos/example.mp4" --time-sec 30
+python scripts/tools/export_roi_overlay.py --video "videos/example.mp4" --time-sec 30
 ```
 
 Output:

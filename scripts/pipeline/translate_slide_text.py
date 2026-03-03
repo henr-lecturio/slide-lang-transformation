@@ -9,11 +9,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.translation_memory import (
+from scripts.lib.translation_memory import (
     DEFAULT_TERMBASE_PATH,
     DEFAULT_TM_DB_PATH,
     apply_termbase_placeholders,
@@ -27,7 +27,7 @@ from scripts.translation_memory import (
 )
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
-DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_text_translate_prompt.txt"
+DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
 
 
 def parse_args() -> argparse.Namespace:

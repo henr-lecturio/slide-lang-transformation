@@ -9,14 +9,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.cloud_tts import ensure_cloud_tts_client, synthesize_cloud_tts_audio, write_wave_bytes
+from scripts.lib.cloud_tts import ensure_cloud_tts_client, synthesize_cloud_tts_audio, write_wave_bytes
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
-DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
+DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_tts_prompt.txt"
 
 
 def parse_args() -> argparse.Namespace:

@@ -26,8 +26,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
-from scripts.translation_memory import (
+from scripts.lib.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
+from scripts.lib.translation_memory import (
     append_glossary_to_prompt,
     apply_termbase_placeholders,
     load_termbase_entries,
@@ -36,12 +36,12 @@ from scripts.translation_memory import (
 
 WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
-GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "gemini_edit_prompt.txt"
-GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.txt"
-GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_text_translate_prompt.txt"
-GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
-GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "gemini_tts_languages.json"
-TRANSLATION_TERMBASE_PATH = ROOT_DIR / "config" / "translation_termbase.csv"
+GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
+GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
+GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
+GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_tts_prompt.txt"
+GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "language" / "gemini_tts_languages.json"
+TRANSLATION_TERMBASE_PATH = ROOT_DIR / "config" / "language" / "translation_termbase.csv"
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
@@ -1054,7 +1054,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
     if action == "edit":
         cmd = [
             PYTHON_BIN,
-            "scripts/edit_final_slides_gemini.py",
+            "scripts/providers/edit_final_slides_gemini.py",
             "--input-dir",
             str(input_dir),
             "--output-dir",
@@ -1070,7 +1070,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
     elif action == "translate":
         cmd = [
             PYTHON_BIN,
-            "scripts/translate_final_slides_gemini.py",
+            "scripts/providers/translate_final_slides_gemini.py",
             "--input-dir",
             str(input_dir),
             "--output-dir",
@@ -1087,7 +1087,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
         if mode == "swin2sr":
             cmd = [
                 PYTHON_BIN,
-                "scripts/upscale_final_slides_swin2sr.py",
+                "scripts/providers/upscale_final_slides_swin2sr.py",
                 "--input-dir",
                 str(input_dir),
                 "--output-dir",
@@ -1106,7 +1106,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
             replicate_provider = "nightmare_realesrgan"
             cmd = [
                 PYTHON_BIN,
-                "scripts/upscale_final_slides_replicate.py",
+                "scripts/providers/upscale_final_slides_replicate.py",
                 "--input-dir",
                 str(input_dir),
                 "--output-dir",
@@ -1554,7 +1554,7 @@ def run_overlay(time_sec: float) -> tuple[int, str]:
 
     cmd = [
         PYTHON_BIN,
-        "scripts/export_roi_overlay.py",
+        "scripts/tools/export_roi_overlay.py",
         "--time-sec",
         f"{time_sec}",
     ]

@@ -8,18 +8,21 @@ import io
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from filter_and_merge_speaker_only import build_final_corner_cleanup_mask
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.pipeline.filter_and_merge_speaker_only import build_final_corner_cleanup_mask
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
-DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_edit_prompt.txt"
+DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
 SLIDE_INDEX_RE = re.compile(r"^slide_(\d{3})_")
 
 
