@@ -576,12 +576,19 @@ h3 {
 
 .settings-key {
   display: block;
+  max-width: 100%;
   min-width: 0;
   margin: 0;
   color: var(--text-muted);
   font-size: 0.86rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .settings-value {
@@ -685,6 +692,7 @@ button:disabled {
 #transcription-health-check,
 #slide-edit-health-check,
 #slide-translate-health-check,
+#slide-upscale-health-check,
 #text-translate-health-check,
 #tts-health-check,
 #lab-run-edit,
@@ -702,6 +710,7 @@ button:disabled {
 #transcription-health-check:hover:not(:disabled),
 #slide-edit-health-check:hover:not(:disabled),
 #slide-translate-health-check:hover:not(:disabled),
+#slide-upscale-health-check:hover:not(:disabled),
 #text-translate-health-check:hover:not(:disabled),
 #tts-health-check:hover:not(:disabled),
 #lab-run-edit:hover:not(:disabled),
@@ -1358,11 +1367,14 @@ button.is-success::before {
   .settings-row {
     grid-template-columns: 1fr;
     gap: 8px;
-    align-items: flex-start;
   }
 
   .settings-key {
+    max-width: none;
+    min-width: 0;
     font-size: 0.8rem;
+    overflow: visible;
+    text-overflow: clip;
   }
 }
 

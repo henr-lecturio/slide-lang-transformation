@@ -566,6 +566,16 @@
                     <label class="settings-key" for="replicate_upscale_concurrency">REPLICATE_UPSCALE_CONCURRENCY</label>
                     <div class="settings-value"><input id="replicate_upscale_concurrency" type="number" min="1" step="1" /></div>
                   </div>
+                  <div class="settings-row settings-row-inline">
+                    <div class="settings-key">Slide Upscale API Test</div>
+                    <div class="settings-value">
+                      <div class="settings-inline-actions">
+                        <button id="slide-upscale-health-check" type="button">Test Slide Upscale API</button>
+                        <span id="slide-upscale-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                      </div>
+                      <div id="slide-upscale-health-meta" class="health-check-meta muted"></div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>

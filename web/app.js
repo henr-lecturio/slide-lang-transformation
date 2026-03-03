@@ -83,6 +83,9 @@ const el = {
   finalSlideUpscaleDevice: document.getElementById("final_slide_upscale_device"),
   finalSlideUpscaleTileSize: document.getElementById("final_slide_upscale_tile_size"),
   finalSlideUpscaleTileOverlap: document.getElementById("final_slide_upscale_tile_overlap"),
+  slideUpscaleHealthCheck: document.getElementById("slide-upscale-health-check"),
+  slideUpscaleHealthStatus: document.getElementById("slide-upscale-health-status"),
+  slideUpscaleHealthMeta: document.getElementById("slide-upscale-health-meta"),
   replicateNightmareRealesrganModelRef: document.getElementById("replicate_nightmare_realesrgan_model_ref"),
   replicateNightmareRealesrganVersionId: document.getElementById("replicate_nightmare_realesrgan_version_id"),
   replicateNightmareRealesrganPricePerSecond: document.getElementById("replicate_nightmare_realesrgan_price_per_second"),
@@ -417,6 +420,17 @@ function closeStatusModal() {
   el.statusModal.setAttribute("aria-hidden", "true");
 }
 
+function syncSettingsKeyTooltips() {
+  document.querySelectorAll(".settings-key").forEach((node) => {
+    const text = (node.textContent || "").trim();
+    if (text) {
+      node.setAttribute("title", text);
+    } else {
+      node.removeAttribute("title");
+    }
+  });
+}
+
 function renderSelectedVideo() {
   const path = state.selectedVideoPath || "";
   el.selectedVideoPath.textContent = path ? `VIDEO_PATH: ${path}` : "VIDEO_PATH: (nicht gesetzt)";
@@ -501,6 +515,7 @@ function setConfig(cfg) {
   clearHealthStatus("transcription");
   clearHealthStatus("slideEdit");
   clearHealthStatus("slideTranslate");
+  clearHealthStatus("slideUpscale");
   clearHealthStatus("textTranslate");
   clearHealthStatus("tts");
   el.labUpscaleProvider.value = ["swin2sr", "replicate_nightmare_realesrgan"].includes(cfg.FINAL_SLIDE_UPSCALE_MODE)
@@ -669,6 +684,11 @@ const healthUi = {
     button: () => el.textTranslateHealthCheck,
     status: () => el.textTranslateHealthStatus,
     meta: () => el.textTranslateHealthMeta,
+  },
+  slideUpscale: {
+    button: () => el.slideUpscaleHealthCheck,
+    status: () => el.slideUpscaleHealthStatus,
+    meta: () => el.slideUpscaleHealthMeta,
   },
   tts: {
     button: () => el.ttsHealthCheck,
@@ -848,6 +868,19 @@ function collectTextTranslateHealthPayload() {
   };
 }
 
+function collectSlideUpscaleHealthPayload() {
+  return {
+    FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
+    FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
+    FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
+    FINAL_SLIDE_UPSCALE_TILE_SIZE: Number(el.finalSlideUpscaleTileSize.value),
+    FINAL_SLIDE_UPSCALE_TILE_OVERLAP: Number(el.finalSlideUpscaleTileOverlap.value),
+    REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF: el.replicateNightmareRealesrganModelRef.value.trim(),
+    REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID: el.replicateNightmareRealesrganVersionId.value.trim(),
+    REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND: Number(el.replicateNightmareRealesrganPricePerSecond.value),
+  };
+}
+
 async function testTranscriptionHealth() {
   setHealthStatus("transcription", "pending", "Testing...", "");
   const result = await apiPost("/api/transcription/health", collectTranscriptionHealthPayload());
@@ -933,6 +966,31 @@ async function testTextTranslateHealth() {
   setHealthStatus("textTranslate", "error", "Failed", meta);
 }
 
+async function testSlideUpscaleHealth() {
+  setHealthStatus("slideUpscale", "pending", "Testing...", "");
+  const result = await apiPost("/api/slide-upscale/health", collectSlideUpscaleHealthPayload());
+  if (result.ok) {
+    const metaParts = [
+      `mode=${result.mode || "-"}`,
+      `model=${result.model || "-"}`,
+      result.version_id ? `version=${result.version_id}` : "",
+      result.device ? `device=${result.device}` : "",
+      result.scale ? `x${result.scale}` : "",
+      `${result.latency_ms || 0} ms`,
+      `${result.image_width || 0}x${result.image_height || 0}`,
+      result.predict_time_sec != null ? `predict=${Number(result.predict_time_sec).toFixed(3)}s` : "",
+      result.estimated_cost_usd != null && result.estimated_cost_usd > 0 ? `est_cost=${formatUsd(result.estimated_cost_usd)}` : "",
+    ].filter(Boolean);
+    setHealthStatus("slideUpscale", "ok", "Reachable", metaParts.join(" | "));
+    showButtonSuccess(el.slideUpscaleHealthCheck, "OK");
+    return;
+  }
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Slide Upscale API check failed."]
+    .filter(Boolean)
+    .join(" | ");
+  setHealthStatus("slideUpscale", "error", "Failed", meta);
+}
+
 async function testTtsHealth() {
   setHealthStatus("tts", "pending", "Testing...", "");
   const result = await apiPost("/api/tts/health", collectTtsHealthPayload());
@@ -968,6 +1026,7 @@ function syncSettingsFieldState() {
   const localUpscale = upscaleMode === "swin2sr";
   const replicateUpscale = upscaleMode === "replicate_nightmare_realesrgan";
   const replicateNightmareUpscale = upscaleMode === "replicate_nightmare_realesrgan";
+  const slideUpscaleApiEnabled = upscaleEnabled && upscaleMode !== "none";
   const googleTranscription = transcriptionProvider === "google_chirp_3";
 
   el.whisperModel.disabled = googleTranscription;
@@ -1061,6 +1120,17 @@ function syncSettingsFieldState() {
   el.replicateNightmareRealesrganVersionId.disabled = !upscaleEnabled || !replicateNightmareUpscale;
   el.replicateNightmareRealesrganPricePerSecond.disabled = !upscaleEnabled || !replicateNightmareUpscale;
   el.replicateUpscaleConcurrency.disabled = !upscaleEnabled || !replicateUpscale;
+  if (el.slideUpscaleHealthCheck) {
+    el.slideUpscaleHealthCheck.disabled = !slideUpscaleApiEnabled;
+  }
+  if (!slideUpscaleApiEnabled) {
+    setHealthStatus("slideUpscale", "idle", upscaleEnabled ? "Select an upscale mode." : "Step disabled.", "");
+  } else if (
+    el.slideUpscaleHealthStatus?.textContent === "Select an upscale mode."
+    || el.slideUpscaleHealthStatus?.textContent === "Step disabled."
+  ) {
+    clearHealthStatus("slideUpscale");
+  }
 
   el.videoExportMinSlideSec.disabled = !videoExportEnabled;
   el.videoExportTailPadSec.disabled = !videoExportEnabled;
@@ -1980,6 +2050,11 @@ function bindEvents() {
       await testSlideTranslateHealth();
     }));
   }
+  if (el.slideUpscaleHealthCheck) {
+    el.slideUpscaleHealthCheck.addEventListener("click", () => runTask(async () => {
+      await testSlideUpscaleHealth();
+    }));
+  }
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.addEventListener("click", () => runTask(async () => {
       await testTextTranslateHealth();
@@ -2061,6 +2136,21 @@ function bindEvents() {
   ]) {
     input.addEventListener("input", () => clearHealthStatus("slideTranslate"));
     input.addEventListener("change", () => clearHealthStatus("slideTranslate"));
+  }
+
+  for (const input of [
+    el.runStepUpscale,
+    el.finalSlideUpscaleMode,
+    el.finalSlideUpscaleModel,
+    el.finalSlideUpscaleDevice,
+    el.finalSlideUpscaleTileSize,
+    el.finalSlideUpscaleTileOverlap,
+    el.replicateNightmareRealesrganModelRef,
+    el.replicateNightmareRealesrganVersionId,
+    el.replicateNightmareRealesrganPricePerSecond,
+  ]) {
+    input.addEventListener("input", () => clearHealthStatus("slideUpscale"));
+    input.addEventListener("change", () => clearHealthStatus("slideUpscale"));
   }
 
   for (const input of [
@@ -2198,6 +2288,7 @@ async function runTaskImmediate(fn) {
 
 async function init() {
   bindEvents();
+  syncSettingsKeyTooltips();
   state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
   state.latestFinalSourceMode = ["raw", "translated"].includes(el.latestFinalSourceMode.value)
     ? el.latestFinalSourceMode.value

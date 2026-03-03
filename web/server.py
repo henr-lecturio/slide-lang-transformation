@@ -19,6 +19,7 @@ import wave
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -1928,6 +1929,117 @@ def run_text_translate_health_check(payload: dict) -> dict:
         }
 
 
+def run_slide_upscale_health_check(payload: dict) -> dict:
+    mode = str(payload.get("FINAL_SLIDE_UPSCALE_MODE", "") or "").strip().lower()
+    if mode == "none":
+        return {
+            "ok": False,
+            "error_type": "NotApplicable",
+            "error_message": "Slide Upscale API test is only available when an upscale mode is selected.",
+        }
+
+    cv2, _np = ensure_cv2_numpy()
+    sample_bgr = make_health_slide_image()
+
+    if mode == "swin2sr":
+        model_id = str(payload.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "").strip()
+        device_name = str(payload.get("FINAL_SLIDE_UPSCALE_DEVICE", "") or "auto").strip() or "auto"
+        tile_size = int(payload.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", 0) or 0)
+        tile_overlap = int(payload.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", 0) or 0)
+        if not model_id:
+            raise ValueError("FINAL_SLIDE_UPSCALE_MODEL must not be empty")
+        start = time.perf_counter()
+        try:
+            from scripts.upscale_final_slides_swin2sr import load_model, resolve_device, upscale_tiled
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("Local Swin2SR dependencies are not installed.") from exc
+        try:
+            device = resolve_device(device_name)
+            processor, model = load_model(model_id, device)
+            scale = int(getattr(model.config, "upscale", 4) or 4)
+            sample_rgb = cv2.cvtColor(sample_bgr, cv2.COLOR_BGR2RGB)
+            upscaled_rgb = upscale_tiled(sample_rgb, processor, model, device, scale, tile_size, tile_overlap)
+            latency_ms = int(round((time.perf_counter() - start) * 1000))
+            return {
+                "ok": True,
+                "mode": mode,
+                "model": model_id,
+                "device": device.type,
+                "scale": scale,
+                "latency_ms": latency_ms,
+                "image_width": int(upscaled_rgb.shape[1]),
+                "image_height": int(upscaled_rgb.shape[0]),
+                "message": "Slide Upscale API reachable.",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error_type": exc.__class__.__name__,
+                "error_message": str(exc),
+            }
+
+    if mode == "replicate_nightmare_realesrgan":
+        model_ref = str(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF", "") or "").strip()
+        version_id = str(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID", "") or "").strip()
+        price_per_second = float(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", 0.0) or 0.0)
+        if not model_ref:
+            raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF must not be empty")
+        if not version_id:
+            raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID must not be empty")
+        try:
+            from scripts.upscale_final_slides_replicate import download_output_bytes, ensure_client, run_provider
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("Replicate upscale dependencies are not installed.") from exc
+
+        import tempfile
+
+        start = time.perf_counter()
+        try:
+            with tempfile.TemporaryDirectory(prefix="upscale_health_") as tmp_dir:
+                input_path = Path(tmp_dir) / "health.png"
+                ok = cv2.imwrite(str(input_path), sample_bgr)
+                if not ok:
+                    raise RuntimeError("Failed to write test image.")
+                client = ensure_client()
+                args = SimpleNamespace(
+                    provider="nightmare_realesrgan",
+                    nightmare_realesrgan_model_ref=model_ref,
+                    nightmare_realesrgan_version_id=version_id,
+                    nightmare_realesrgan_scale=4,
+                    nightmare_realesrgan_face_enhance="false",
+                    nightmare_realesrgan_price_per_second=price_per_second,
+                )
+                output, provider_meta = run_provider(client, args, input_path)
+                data = download_output_bytes(output)
+                upscaled_bgr = decode_gemini_image_bytes(data)
+                latency_ms = int(round((time.perf_counter() - start) * 1000))
+                return {
+                    "ok": True,
+                    "mode": mode,
+                    "model": model_ref,
+                    "version_id": version_id,
+                    "latency_ms": latency_ms,
+                    "predict_time_sec": float(provider_meta.get("predict_time_sec", 0.0) or 0.0),
+                    "estimated_cost_usd": float(provider_meta.get("estimated_cost_usd", 0.0) or 0.0),
+                    "image_width": int(upscaled_bgr.shape[1]),
+                    "image_height": int(upscaled_bgr.shape[0]),
+                    "prediction_id": str(provider_meta.get("prediction_id", "") or ""),
+                    "message": "Slide Upscale API reachable.",
+                }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error_type": exc.__class__.__name__,
+                "error_message": str(exc),
+            }
+
+    return {
+        "ok": False,
+        "error_type": "NotApplicable",
+        "error_message": "Unsupported slide upscale mode.",
+    }
+
+
 def run_tts_health_check(payload: dict) -> dict:
     project_id = str(payload.get("GOOGLE_TTS_PROJECT_ID", "") or "").strip()
     language_code = str(payload.get("GOOGLE_TTS_LANGUAGE_CODE", "") or "").strip()
@@ -2493,6 +2605,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/text-translate/health":
                 data = self._read_json_body()
                 return self._send_json(200, run_text_translate_health_check(data))
+
+            if path == "/api/slide-upscale/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_slide_upscale_health_check(data))
 
             if path == "/api/tts/health":
                 data = self._read_json_body()
