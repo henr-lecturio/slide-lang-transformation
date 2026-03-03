@@ -1,6 +1,6 @@
 import { el } from "./dom.js";
 import { state } from "./state.js";
-import { getInitialActiveTab, setActiveTab, showButtonSuccess, syncSettingsKeyTooltips } from "./ui-core.js";
+import { formatRunIdLabel, getInitialActiveTab, setActiveTab, showButtonSuccess, syncSettingsKeyTooltips } from "./ui-core.js";
 import {
   clearHealthStatus,
   testSlideEditHealth,
@@ -54,14 +54,13 @@ import {
   startRun,
   stopRun,
   syncFinalViewControls,
-  toggleLatestCsvTable,
 } from "./runs.js";
 
 function setStatus(current) {
   const status = current.status || "idle";
   state.currentRunStatus = status;
   state.currentRunId = current.run_id || null;
-  const runId = current.run_id ? `, run ${current.run_id}` : "";
+  const runId = current.run_id ? `, run ${formatRunIdLabel(current.run_id)}` : "";
   if (el.statusSummary) {
     el.statusSummary.textContent = `status: ${status}${runId}`;
   }
@@ -358,9 +357,17 @@ function bindEvents() {
     runTaskImmediate(loadLatestSlides);
   });
 
-  el.toggleLatestCsvTable.addEventListener("click", toggleLatestCsvTable);
+  el.latestInfoToggle.addEventListener("click", () => {
+    state.latestInfoExpanded = !state.latestInfoExpanded;
+    el.latestInfoWrap.classList.toggle("is-open", state.latestInfoExpanded);
+    el.latestInfoPanel.hidden = !state.latestInfoExpanded;
+    el.latestInfoToggle.setAttribute("aria-expanded", state.latestInfoExpanded ? "true" : "false");
+  });
 
-  el.runSelect.addEventListener("change", () => runTask(loadRunDetails));
+  el.runViewMode.addEventListener("change", () => {
+    state.runSlidesMode = el.runViewMode.value === "base" ? "base" : "final";
+    runTaskImmediate(loadRunSlides);
+  });
   el.runFinalSourceMode.addEventListener("change", () => {
     state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
       ? el.runFinalSourceMode.value
@@ -444,6 +451,7 @@ async function init() {
     : "processed";
   state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
   state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
+  state.runSlidesMode = el.runViewMode.value === "base" ? "base" : "final";
   state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
     ? el.runFinalSourceMode.value
     : "processed";

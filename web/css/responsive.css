@@ -5,6 +5,7 @@
   }
 
   .home-top,
+  .all-runs-layout,
   .slide-row,
   .settings-grid {
     grid-template-columns: 1fr;

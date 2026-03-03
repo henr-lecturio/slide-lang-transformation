@@ -120,6 +120,27 @@ main {
   min-height: 440px;
 }
 
+.all-runs-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.all-runs-sidebar-card,
+.all-runs-detail-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.all-runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 h1,
 h2,
 h3 {
@@ -165,8 +186,6 @@ h3 {
 }
 
 #status-summary,
-#latest-summary,
-#run-summary,
 #selected-video-path,
 #config-meta,
 .slide-meta,

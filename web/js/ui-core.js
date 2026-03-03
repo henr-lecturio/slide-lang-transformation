@@ -13,6 +13,30 @@ export function formatUsd(value) {
   return `$${num.toFixed(4)}`;
 }
 
+export function formatRunIdLabel(runId) {
+  const raw = String(runId || "").trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:-(\d{2}))?$/);
+  if (!match) return raw || "-";
+
+  const [, year, month, day, hour, minute] = match;
+  const monthNames = {
+    "01": "Jan",
+    "02": "Feb",
+    "03": "Mar",
+    "04": "Apr",
+    "05": "May",
+    "06": "Jun",
+    "07": "Jul",
+    "08": "Aug",
+    "09": "Sep",
+    "10": "Oct",
+    "11": "Nov",
+    "12": "Dec",
+  };
+  const monthLabel = monthNames[month] || month;
+  return `${day}-${monthLabel}-${year}, ${hour}:${minute}`;
+}
+
 export function syncSettingsKeyTooltips() {
   document.querySelectorAll(".settings-key").forEach((node) => {
     const text = (node.textContent || "").trim();

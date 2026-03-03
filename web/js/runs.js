@@ -1,7 +1,7 @@
 import { el } from "./dom.js";
 import { state } from "./state.js";
 import { apiGet, apiPost } from "./api.js";
-import { formatUsd } from "./ui-core.js";
+import { formatRunIdLabel, formatUsd } from "./ui-core.js";
 import { openImageModal } from "./modals.js";
 
 let runTaskImmediateHandler = async (fn) => { await fn(); };
@@ -21,39 +21,29 @@ function preferredLatestRunId(runs, current) {
   return runs.length > 0 ? runs[0].id : null;
 }
 
-function buildRunSummary(detail, label = "run") {
+function getDownloadLinks(detail, { includeVideo = true, includeNonVideo = true } = {}) {
+  if (!detail) return [];
   return [
-    `${label}=${detail.id}`,
-    `run_status=${detail.run_status || "-"}`,
-    `available=${detail.highest_available_label || "no output yet"}`,
-    `upscale_mode=${detail.upscale_mode_used || "-"}`,
-    `upscale_cost=${formatUsd(detail.upscale_estimated_cost_usd)}`,
-    `base_events=${detail.event_count}`,
-    `final_events=${detail.final_event_count}`,
-    `final_slide_images=${detail.final_slide_images}`,
-    `translated_slide_images=${detail.translated_slide_images || 0}`,
-    `upscaled_slide_images=${detail.upscaled_slide_images || 0}`,
-    `translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`,
-    `translated_text_events=${detail.translated_text_events || 0}`,
-    `tts_segments=${detail.tts_segments || 0}`,
-    `video_export=${detail.exported_video_name || "-"}`,
-  ].join(" | ");
+    ...(includeNonVideo ? [
+      { label: "Translated Text JSON", url: detail.translated_text_json_url, name: "slide_text_map_final_translated.json" },
+      { label: "Translated Text CSV", url: detail.translated_text_csv_url, name: "slide_text_map_final_translated.csv" },
+      { label: "TTS Manifest", url: detail.tts_manifest_url, name: "tts_manifest.json" },
+      { label: "Timeline JSON", url: detail.video_timeline_json_url, name: "timeline.json" },
+      { label: "Timeline CSV", url: detail.video_timeline_csv_url, name: "timeline.csv" },
+    ] : []),
+    ...(includeVideo ? [
+      { label: "Subtitles", url: detail.exported_srt_url, name: detail.exported_video_name ? detail.exported_video_name.replace(/\.mp4$/i, ".srt") : "final.srt" },
+      { label: "Exported MP4", url: detail.exported_video_url, name: detail.exported_video_name || "final.mp4" },
+    ] : []),
+  ].filter((item) => item.url);
 }
 
-function renderDownloadLinks(target, detail) {
+function renderDownloadLinks(target, detail, options = {}) {
   if (!target) return;
   target.innerHTML = "";
   if (!detail) return;
 
-  const links = [
-    { label: "Translated Text JSON", url: detail.translated_text_json_url, name: "slide_text_map_final_translated.json" },
-    { label: "Translated Text CSV", url: detail.translated_text_csv_url, name: "slide_text_map_final_translated.csv" },
-    { label: "TTS Manifest", url: detail.tts_manifest_url, name: "tts_manifest.json" },
-    { label: "Timeline JSON", url: detail.video_timeline_json_url, name: "timeline.json" },
-    { label: "Timeline CSV", url: detail.video_timeline_csv_url, name: "timeline.csv" },
-    { label: "Subtitles", url: detail.exported_srt_url, name: detail.exported_video_name ? detail.exported_video_name.replace(/\.mp4$/i, ".srt") : "final.srt" },
-    { label: "Exported MP4", url: detail.exported_video_url, name: detail.exported_video_name || "final.mp4" },
-  ].filter((item) => item.url);
+  const links = getDownloadLinks(detail, options);
 
   if (links.length === 0) {
     const empty = document.createElement("span");
@@ -70,6 +60,48 @@ function renderDownloadLinks(target, detail) {
     a.download = link.name || "";
     a.textContent = link.label;
     target.appendChild(a);
+  }
+}
+
+function renderLatestInfo(detail) {
+  if (!el.latestInfoGrid) return;
+  el.latestInfoGrid.innerHTML = "";
+  if (!detail) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No run details available.";
+    el.latestInfoGrid.appendChild(empty);
+    return;
+  }
+
+  const facts = [
+    ["Run", formatRunIdLabel(detail.id)],
+    ["Run Status", detail.run_status || "-"],
+    ["Available", detail.highest_available_label || "no output yet"],
+    ["Upscale Mode", detail.upscale_mode_used || "-"],
+    ["Upscale Cost", formatUsd(detail.upscale_estimated_cost_usd)],
+    ["Base Events", String(detail.event_count ?? 0)],
+    ["Final Events", String(detail.final_event_count ?? 0)],
+    ["Final Slide Images", String(detail.final_slide_images ?? 0)],
+    ["Translated Slide Images", String(detail.translated_slide_images ?? 0)],
+    ["Upscaled Slide Images", String(detail.upscaled_slide_images ?? 0)],
+    ["Translated x4 Slides", String(detail.translated_upscaled_slide_images ?? 0)],
+    ["Translated Text Events", String(detail.translated_text_events ?? 0)],
+    ["TTS Segments", String(detail.tts_segments ?? 0)],
+  ];
+
+  for (const [labelText, valueText] of facts) {
+    const item = document.createElement("div");
+    item.className = "output-info-item";
+    const label = document.createElement("div");
+    label.className = "output-info-label";
+    label.textContent = labelText;
+    const value = document.createElement("div");
+    value.className = "output-info-value";
+    value.textContent = valueText;
+    item.appendChild(label);
+    item.appendChild(value);
+    el.latestInfoGrid.appendChild(item);
   }
 }
 
@@ -91,105 +123,59 @@ export async function regenerateOverlay() {
 }
 
 function clearLatestOutput() {
-  el.latestSummary.textContent = "No runs yet";
-  renderDownloadLinks(el.latestDownloads, null);
-  state.latestCsvLines = [];
-  state.latestCsvExpanded = false;
-  el.latestCsvTable.innerHTML = "";
-  el.latestCsvTableWrap.classList.add("hidden");
-  el.toggleLatestCsvTable.disabled = true;
-  el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
+  renderLatestInfo(null);
+  renderDownloadLinks(el.latestDownloads, null, { includeVideo: false, includeNonVideo: true });
+  renderDownloadLinks(el.latestExports, null, { includeVideo: true, includeNonVideo: false });
   el.latestSlidesList.innerHTML = "";
 }
 
 function clearSelectedRunOutput() {
-  el.runSummary.textContent = "No runs yet";
   renderDownloadLinks(el.runDownloads, null);
-  el.csvPreview.textContent = "";
   el.runSlidesList.innerHTML = "";
 }
 
-function renderRunSelect(runs) {
-  el.runSelect.innerHTML = "";
-  for (const run of runs) {
-    const opt = document.createElement("option");
-    opt.value = run.id;
-    opt.textContent = `${run.id} | status ${run.run_status || "-"} | available ${run.highest_available_label || "no output yet"} | upscale ${run.upscale_mode_used || "-"} | cost ${formatUsd(run.upscale_estimated_cost_usd)} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images} | translated ${run.translated_slide_images || 0} | x4 ${run.upscaled_slide_images || 0} | translated_x4 ${run.translated_upscaled_slide_images || 0} | text_tx ${run.translated_text_events || 0} | tts ${run.tts_segments || 0} | video ${run.exported_video_name ? "yes" : "no"}`;
-    el.runSelect.appendChild(opt);
-  }
-}
-
-function parseCsvLine(line) {
-  const cells = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === "," && !inQuotes) {
-      cells.push(cur);
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  cells.push(cur);
-  return cells;
-}
-
-function buildLatestCsvTable() {
-  const lines = state.latestCsvLines || [];
-  el.latestCsvTable.innerHTML = "";
-  if (lines.length === 0) return;
-
-  const rows = lines.map((line) => parseCsvLine(line));
-  const colCount = rows.reduce((max, row) => Math.max(max, row.length), 0);
-  if (colCount === 0) return;
-
-  const thead = document.createElement("thead");
-  const headerRow = document.createElement("tr");
-  const headers = rows[0] || [];
-  for (let i = 0; i < colCount; i += 1) {
-    const th = document.createElement("th");
-    th.textContent = headers[i] || `column_${i + 1}`;
-    headerRow.appendChild(th);
-  }
-  thead.appendChild(headerRow);
-  el.latestCsvTable.appendChild(thead);
-
-  const tbody = document.createElement("tbody");
-  for (const row of rows.slice(1)) {
-    const tr = document.createElement("tr");
-    for (let i = 0; i < colCount; i += 1) {
-      const td = document.createElement("td");
-      td.textContent = row[i] || "";
-      tr.appendChild(td);
-    }
-    tbody.appendChild(tr);
-  }
-  el.latestCsvTable.appendChild(tbody);
-}
-
-export function toggleLatestCsvTable() {
-  if (state.latestCsvExpanded) {
-    state.latestCsvExpanded = false;
-    el.latestCsvTableWrap.classList.add("hidden");
-    el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
+function renderRunsList(runs) {
+  if (!el.runsList) return;
+  el.runsList.innerHTML = "";
+  if (!runs.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No runs yet.";
+    el.runsList.appendChild(empty);
     return;
   }
-  if ((state.latestCsvLines || []).length === 0) return;
-  buildLatestCsvTable();
-  state.latestCsvExpanded = true;
-  el.latestCsvTableWrap.classList.remove("hidden");
-  el.toggleLatestCsvTable.textContent = "CSV-Tabelle ausblenden";
+
+  for (const run of runs) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "run-card";
+    button.classList.toggle("active", run.id === state.selectedRunId);
+
+    const head = document.createElement("div");
+    head.className = "run-card-head";
+
+    const title = document.createElement("div");
+    title.className = "run-card-title";
+    title.textContent = formatRunIdLabel(run.id);
+    title.title = run.id;
+    head.appendChild(title);
+
+    const badge = document.createElement("span");
+    badge.className = `run-card-badge is-${run.run_status || "idle"}`;
+    badge.textContent = run.run_status || "idle";
+    head.appendChild(badge);
+
+    button.appendChild(head);
+
+    button.addEventListener("click", () => {
+      if (state.selectedRunId === run.id) return;
+      state.selectedRunId = run.id;
+      renderRunsList(runs);
+      runTaskImmediateHandler(loadRunDetails);
+    });
+
+    el.runsList.appendChild(button);
+  }
 }
 
 export function syncFinalViewControls() {
@@ -306,7 +292,7 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
     if (resolutionMode === "native" && item.raw_slide_image_url) {
       return { url: item.raw_slide_image_url, name: item.raw_slide_image_name || item.image_name || "", slideSourceLabel: "raw", resolutionLabel: "native" };
     }
-    return { url: "", name: "", slideSourceLabel: "raw", resolutionLabel };
+    return { url: "", name: "", slideSourceLabel: "raw", resolutionLabel: resolutionMode };
   }
   if (sourceLabel === "translated") {
     if (resolutionMode === "native" && item.translated_slide_image_url) {
@@ -318,7 +304,7 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
     if (resolutionMode === "x4" && item.translated_upscaled_slide_image_url) {
       return { url: item.translated_upscaled_slide_image_url, name: item.translated_upscaled_slide_image_name || item.image_name || "", slideSourceLabel: "translated", resolutionLabel: "x4" };
     }
-    return { url: "", name: "", slideSourceLabel: "translated", resolutionLabel };
+    return { url: "", name: "", slideSourceLabel: "translated", resolutionLabel: resolutionMode };
   }
   if (resolutionMode === "native" && item.processed_slide_image_url) {
     return { url: item.processed_slide_image_url, name: item.processed_slide_image_name || item.image_name || "", slideSourceLabel: "processed", resolutionLabel: "native" };
@@ -329,7 +315,7 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
   if (resolutionMode === "x4" && item.processed_upscaled_slide_image_url) {
     return { url: item.processed_upscaled_slide_image_url, name: item.processed_upscaled_slide_image_name || item.image_name || "", slideSourceLabel: "processed", resolutionLabel: "x4" };
   }
-  return { url: "", name: "", slideSourceLabel: "processed", resolutionLabel };
+  return { url: "", name: "", slideSourceLabel: "processed", resolutionLabel: resolutionMode };
 }
 
 function resolveCompareRenderedImages(item, slideSourceMode) {
@@ -510,23 +496,26 @@ export async function loadLatestSlides() {
 }
 
 export async function loadRunSlides() {
-  const runId = el.runSelect.value;
+  const runId = state.selectedRunId;
   if (!runId) {
     el.runSlidesList.innerHTML = "";
     applyResolutionAvailability(el.runFinalResolutionMode, [], state.runFinalSourceMode, "runFinalResolutionMode", true);
+    return;
+  }
+  if (state.runSlidesMode === "base") {
+    applyResolutionAvailability(el.runFinalResolutionMode, [], state.runFinalSourceMode, "runFinalResolutionMode", true);
+    await renderBaseEvents(runId, el.runSlidesList);
     return;
   }
   await renderFinalSlides(runId, el.runSlidesList, state.runFinalSourceMode, state.runFinalResolutionMode, state.runFinalDisplayMode, el.runFinalResolutionMode, "runFinalResolutionMode");
 }
 
 export async function loadRunDetails() {
-  const runId = el.runSelect.value;
+  const runId = state.selectedRunId;
   if (!runId) return;
   state.selectedRunId = runId;
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.runSummary.textContent = buildRunSummary(detail, "run");
   renderDownloadLinks(el.runDownloads, detail);
-  el.csvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
   await loadRunSlides();
 }
 
@@ -539,27 +528,9 @@ export async function loadLatestRunDetails() {
   }
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
   state.latestRunDetail = detail;
-  el.latestSummary.textContent = buildRunSummary(detail, "latest");
-  renderDownloadLinks(el.latestDownloads, detail);
-  state.latestCsvLines = detail.final_csv_preview || detail.csv_preview || [];
-  const hasCsv = state.latestCsvLines.length > 0;
-  el.toggleLatestCsvTable.disabled = !hasCsv;
-  if (!hasCsv) {
-    state.latestCsvExpanded = false;
-    el.latestCsvTable.innerHTML = "";
-    el.latestCsvTableWrap.classList.add("hidden");
-    el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
-    return;
-  }
-  if (state.latestCsvExpanded) {
-    buildLatestCsvTable();
-    el.latestCsvTableWrap.classList.remove("hidden");
-    el.toggleLatestCsvTable.textContent = "CSV-Tabelle ausblenden";
-  } else {
-    el.latestCsvTable.innerHTML = "";
-    el.latestCsvTableWrap.classList.add("hidden");
-    el.toggleLatestCsvTable.textContent = "CSV-Tabelle anzeigen";
-  }
+  renderLatestInfo(detail);
+  renderDownloadLinks(el.latestDownloads, detail, { includeVideo: false, includeNonVideo: true });
+  renderDownloadLinks(el.latestExports, detail, { includeVideo: true, includeNonVideo: false });
 }
 
 export async function loadRuns() {
@@ -573,7 +544,6 @@ export async function loadRuns() {
   const runs = data.runs || [];
   state.latestRunId = preferredLatestRunId(runs, current);
   const prev = state.selectedRunId;
-  renderRunSelect(runs);
   if (runs.length === 0) {
     state.selectedRunId = null;
     state.latestRunDetail = null;
@@ -583,7 +553,7 @@ export async function loadRuns() {
   }
   const fallback = runs[0].id;
   state.selectedRunId = runs.some((r) => r.id === prev) ? prev : fallback;
-  el.runSelect.value = state.selectedRunId;
+  renderRunsList(runs);
   await loadLatestRunDetails();
   await loadLatestSlides();
   await loadRunDetails();

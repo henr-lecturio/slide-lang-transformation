@@ -58,8 +58,23 @@
 
         <section class="card home-main">
           <h2>Latest Output</h2>
-          <div id="latest-summary" class="muted"></div>
-          <div id="latest-downloads" class="summary-links row wrap"></div>
+          <section id="latest-info-wrap" class="output-info-panel">
+            <button id="latest-info-toggle" class="output-info-toggle" type="button" aria-expanded="false" aria-controls="latest-info-panel">
+              <span>Run Details</span>
+              <span class="step-section-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="latest-info-panel" class="output-info-body" hidden>
+              <div id="latest-info-grid" class="output-info-grid"></div>
+            </div>
+          </section>
+          <section class="output-link-section">
+            <div class="output-link-heading">Artifacts</div>
+            <div id="latest-downloads" class="summary-links row wrap"></div>
+          </section>
+          <section class="output-link-section">
+            <div class="output-link-heading">Video Export</div>
+            <div id="latest-exports" class="summary-links row wrap"></div>
+          </section>
           <div class="row wrap">
             <label>Ansicht
               <select id="latest-view-mode">
@@ -86,48 +101,56 @@
                 <option value="x4">x4</option>
               </select>
             </label>
-            <button id="toggle-latest-csv-table" type="button">CSV-Tabelle anzeigen</button>
-          </div>
-          <div id="latest-csv-table-wrap" class="table-wrap hidden">
-            <table id="latest-csv-table" class="csv-table"></table>
           </div>
           <div id="latest-slides-list" class="slides-list"></div>
         </section>
       </section>
 
       <section id="panel-all-runs" class="panel">
-        <section class="card">
-          <h2>All Runs</h2>
-          <div class="row wrap">
-            <label>Run
-              <select id="run-select"></select>
-            </label>
-            <label>ROI Quelle
-              <select id="run-final-source-mode">
-                <option value="processed">processed</option>
-                <option value="raw">raw</option>
-                <option value="translated">translated</option>
-              </select>
-            </label>
-            <label>Anzeige
-              <select id="run-final-display-mode">
-                <option value="single">single</option>
-                <option value="compare">compare</option>
-              </select>
-            </label>
-            <label>Auflösung
-              <select id="run-final-resolution-mode">
-                <option value="native">native</option>
-                <option value="x4">x4</option>
-              </select>
-            </label>
-          </div>
+        <div class="all-runs-layout">
+          <section class="card all-runs-sidebar-card">
+            <div class="all-runs-head">
+              <h2>All Runs</h2>
+            </div>
+            <div id="runs-list" class="runs-list"></div>
+          </section>
 
-          <div id="run-summary" class="muted"></div>
-          <div id="run-downloads" class="summary-links row wrap"></div>
-          <pre id="csv-preview" class="log"></pre>
-          <div id="run-slides-list" class="slides-list"></div>
-        </section>
+          <section class="card all-runs-detail-card">
+            <div class="all-runs-head">
+              <h2>Run Details</h2>
+            </div>
+            <div class="row wrap">
+              <label>Ansicht
+                <select id="run-view-mode">
+                  <option value="final">final_slide_images</option>
+                  <option value="base">base_events</option>
+                </select>
+              </label>
+              <label>ROI Quelle
+                <select id="run-final-source-mode">
+                  <option value="processed">processed</option>
+                  <option value="raw">raw</option>
+                  <option value="translated">translated</option>
+                </select>
+              </label>
+              <label>Anzeige
+                <select id="run-final-display-mode">
+                  <option value="single">single</option>
+                  <option value="compare">compare</option>
+                </select>
+              </label>
+              <label>Auflösung
+                <select id="run-final-resolution-mode">
+                  <option value="native">native</option>
+                  <option value="x4">x4</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="run-downloads" class="summary-links row wrap"></div>
+            <div id="run-slides-list" class="slides-list"></div>
+          </section>
+        </div>
       </section>
 
       <section id="panel-image-lab" class="panel">
