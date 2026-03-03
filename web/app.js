@@ -58,7 +58,13 @@ const el = {
   geminiTextTranslatePrompt: document.getElementById("gemini_text_translate_prompt"),
   geminiTtsModel: document.getElementById("gemini_tts_model"),
   geminiTtsVoice: document.getElementById("gemini_tts_voice"),
+  googleTtsProjectId: document.getElementById("google_tts_project_id"),
+  googleTtsLanguageCode: document.getElementById("google_tts_language_code"),
+  ttsLanguageHint: document.getElementById("tts-language-hint"),
   geminiTtsPrompt: document.getElementById("gemini_tts_prompt"),
+  ttsHealthCheck: document.getElementById("tts-health-check"),
+  ttsHealthStatus: document.getElementById("tts-health-status"),
+  ttsHealthMeta: document.getElementById("tts-health-meta"),
   finalSlideUpscaleMode: document.getElementById("final_slide_upscale_mode"),
   finalSlideUpscaleModel: document.getElementById("final_slide_upscale_model"),
   finalSlideUpscaleDevice: document.getElementById("final_slide_upscale_device"),
@@ -154,6 +160,34 @@ const state = {
   labStatus: "idle",
   stepSectionExpanded: {},
 };
+
+const ACTIVE_TAB_STORAGE_KEY = "slide-transform-active-tab";
+const TARGET_LANGUAGE_PREFIX_RULES = [
+  { prefixes: ["de"], names: ["german", "deutsch"] },
+  { prefixes: ["en"], names: ["english", "englisch"] },
+  { prefixes: ["fr"], names: ["french", "francais", "français"] },
+  { prefixes: ["es"], names: ["spanish", "espanol", "español"] },
+  { prefixes: ["it"], names: ["italian", "italiano"] },
+  { prefixes: ["pt"], names: ["portuguese", "portugues", "português"] },
+  { prefixes: ["nl"], names: ["dutch", "nederlands"] },
+  { prefixes: ["pl"], names: ["polish", "polski"] },
+  { prefixes: ["sv"], names: ["swedish", "svenska"] },
+  { prefixes: ["da"], names: ["danish", "dansk"] },
+  { prefixes: ["nb", "no"], names: ["norwegian", "norsk"] },
+  { prefixes: ["fi"], names: ["finnish", "suomi"] },
+  { prefixes: ["cs"], names: ["czech", "čeština", "cestina"] },
+  { prefixes: ["sk"], names: ["slovak", "slovencina", "slovenčina"] },
+  { prefixes: ["ro"], names: ["romanian", "romana", "română", "romana"] },
+  { prefixes: ["hu"], names: ["hungarian", "magyar"] },
+  { prefixes: ["tr"], names: ["turkish", "turkce", "türkçe"] },
+  { prefixes: ["ru"], names: ["russian", "russkiy", "русский"] },
+  { prefixes: ["uk"], names: ["ukrainian", "українська", "ukrainska"] },
+  { prefixes: ["ja"], names: ["japanese", "nihongo", "日本語"] },
+  { prefixes: ["ko"], names: ["korean", "한국어"] },
+  { prefixes: ["zh"], names: ["chinese", "mandarin", "中文"] },
+  { prefixes: ["ar"], names: ["arabic", "العربية"] },
+  { prefixes: ["hi"], names: ["hindi", "हिन्दी", "हिंदी"] },
+];
 
 const buttonFeedbackTimers = new WeakMap();
 
@@ -453,8 +487,10 @@ function setConfig(cfg) {
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
   el.geminiTextTranslateModel.value = cfg.GEMINI_TEXT_TRANSLATE_MODEL || "gemini-2.5-flash";
   el.geminiTextTranslatePrompt.value = cfg.GEMINI_TEXT_TRANSLATE_PROMPT || "";
-  el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-pro-preview-tts";
+  el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
+  el.googleTtsProjectId.value = cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.googleTtsLanguageCode.value = cfg.GOOGLE_TTS_LANGUAGE_CODE || "en-US";
   el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
@@ -471,6 +507,7 @@ function setConfig(cfg) {
   el.videoExportHeight.value = cfg.VIDEO_EXPORT_HEIGHT ?? 1080;
   el.videoExportFps.value = cfg.VIDEO_EXPORT_FPS ?? 30;
   el.videoExportBgColor.value = cfg.VIDEO_EXPORT_BG_COLOR || "white";
+  clearTtsHealthStatus();
   el.labUpscaleProvider.value = ["swin2sr", "replicate_nightmare_realesrgan"].includes(cfg.FINAL_SLIDE_UPSCALE_MODE)
     ? cfg.FINAL_SLIDE_UPSCALE_MODE
     : "swin2sr";
@@ -483,18 +520,37 @@ function setConfig(cfg) {
 }
 
 function setActiveTab(tabName) {
+  const allowedTabs = new Set(["home", "all-runs", "image-lab", "roi", "settings"]);
+  const nextTab = allowedTabs.has(tabName) ? tabName : "home";
   for (const btn of el.tabButtons) {
-    const active = btn.dataset.tab === tabName;
+    const active = btn.dataset.tab === nextTab;
     btn.classList.toggle("active", active);
   }
-  el.panelHome.classList.toggle("active", tabName === "home");
-  el.panelAllRuns.classList.toggle("active", tabName === "all-runs");
-  el.panelImageLab.classList.toggle("active", tabName === "image-lab");
-  el.panelRoi.classList.toggle("active", tabName === "roi");
-  el.panelSettings.classList.toggle("active", tabName === "settings");
+  el.panelHome.classList.toggle("active", nextTab === "home");
+  el.panelAllRuns.classList.toggle("active", nextTab === "all-runs");
+  el.panelImageLab.classList.toggle("active", nextTab === "image-lab");
+  el.panelRoi.classList.toggle("active", nextTab === "roi");
+  el.panelSettings.classList.toggle("active", nextTab === "settings");
   if (el.saveSettings) {
-    el.saveSettings.classList.toggle("hidden", tabName !== "settings");
+    el.saveSettings.classList.toggle("hidden", nextTab !== "settings");
   }
+  try {
+    window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, nextTab);
+  } catch {
+    // Ignore storage failures and keep runtime behavior intact.
+  }
+}
+
+function getInitialActiveTab() {
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY) || "";
+    if (["home", "all-runs", "image-lab", "roi", "settings"].includes(stored)) {
+      return stored;
+    }
+  } catch {
+    // Ignore storage failures and fall back to home.
+  }
+  return "home";
 }
 
 async function loadConfig() {
@@ -552,6 +608,8 @@ async function saveConfig() {
     GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
+    GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
+    GOOGLE_TTS_LANGUAGE_CODE: el.googleTtsLanguageCode.value.trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
     FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
@@ -596,6 +654,114 @@ function showButtonSuccess(button, successLabel, message = "") {
   buttonFeedbackTimers.set(button, timer);
 }
 
+function setTtsHealthStatus(kind, text, meta = "") {
+  if (el.ttsHealthStatus) {
+    el.ttsHealthStatus.className = `health-check-status is-${kind}`;
+    el.ttsHealthStatus.textContent = text;
+  }
+  if (el.ttsHealthMeta) {
+    el.ttsHealthMeta.textContent = meta;
+  }
+}
+
+function clearTtsHealthStatus() {
+  setTtsHealthStatus("idle", "Not tested.", "");
+}
+
+function normalizeLanguageLabel(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function expectedTtsLanguagePrefixes(targetLanguage) {
+  const normalized = normalizeLanguageLabel(targetLanguage);
+  if (!normalized) return [];
+  for (const rule of TARGET_LANGUAGE_PREFIX_RULES) {
+    if (rule.names.some((name) => normalized.includes(normalizeLanguageLabel(name)))) {
+      return rule.prefixes;
+    }
+  }
+  return [];
+}
+
+function ttsLanguagePrefix(languageCode) {
+  return String(languageCode || "").trim().toLowerCase().split(/[-_]/)[0] || "";
+}
+
+function setTtsLanguageHint(kind, text = "") {
+  if (!el.ttsLanguageHint) return;
+  el.ttsLanguageHint.className = `tts-language-hint muted is-${kind}`;
+  el.ttsLanguageHint.textContent = text;
+}
+
+function updateTtsLanguageHint() {
+  if (!el.ttsLanguageHint) return;
+  if (!el.runStepTts.checked) {
+    setTtsLanguageHint("idle", "");
+    return;
+  }
+  if (!el.runStepTextTranslate.checked) {
+    setTtsLanguageHint("note", "TTS currently speaks the source mapped text because Text Translate is disabled.");
+    return;
+  }
+  const targetLanguage = el.finalSlideTargetLanguage.value.trim();
+  const languageCode = el.googleTtsLanguageCode.value.trim();
+  if (!targetLanguage || !languageCode) {
+    setTtsLanguageHint("idle", "");
+    return;
+  }
+  const expectedPrefixes = expectedTtsLanguagePrefixes(targetLanguage);
+  if (expectedPrefixes.length === 0) {
+    setTtsLanguageHint("note", `Target language "${targetLanguage}" is free-form. Verify GOOGLE_TTS_LANGUAGE_CODE manually.`);
+    return;
+  }
+  const actualPrefix = ttsLanguagePrefix(languageCode);
+  if (!expectedPrefixes.includes(actualPrefix)) {
+    setTtsLanguageHint(
+      "warning",
+      `Target language "${targetLanguage}" usually expects GOOGLE_TTS_LANGUAGE_CODE starting with "${expectedPrefixes[0]}-". Current value: "${languageCode}".`,
+    );
+    return;
+  }
+  setTtsLanguageHint("ok", `TTS language code matches the configured target language "${targetLanguage}".`);
+}
+
+function collectTtsHealthPayload() {
+  return {
+    GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
+    GOOGLE_TTS_LANGUAGE_CODE: el.googleTtsLanguageCode.value.trim(),
+    GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
+    GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
+    GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
+  };
+}
+
+async function testTtsHealth() {
+  setTtsHealthStatus("pending", "Testing...", "");
+  const result = await apiPost("/api/tts/health", collectTtsHealthPayload());
+  if (result.ok) {
+    const meta = [
+      `project=${result.project_id_used || "-"}`,
+      `voice=${result.voice || "-"}`,
+      `model=${result.model || "-"}`,
+      `${result.latency_ms || 0} ms`,
+      `${result.audio_bytes || 0} bytes`,
+      `${result.duration_sec || 0}s`,
+    ].join(" | ");
+    setTtsHealthStatus("ok", "Reachable", meta);
+    showButtonSuccess(el.ttsHealthCheck, "OK");
+    return;
+  }
+  const meta = [
+    result.error_type || "Error",
+    result.error_message || result.message || "TTS API check failed.",
+  ].filter(Boolean).join(" | ");
+  setTtsHealthStatus("error", "Failed", meta);
+}
+
 function syncSettingsFieldState() {
   const editEnabled = el.runStepEdit.checked;
   const translateEnabled = el.runStepTranslate.checked;
@@ -635,7 +801,16 @@ function syncSettingsFieldState() {
 
   el.geminiTtsModel.disabled = !ttsEnabled;
   el.geminiTtsVoice.disabled = !ttsEnabled;
+  el.googleTtsProjectId.disabled = !ttsEnabled;
+  el.googleTtsLanguageCode.disabled = !ttsEnabled;
   el.geminiTtsPrompt.disabled = !ttsEnabled;
+  if (el.ttsHealthCheck) {
+    el.ttsHealthCheck.disabled = !ttsEnabled;
+  }
+  if (!ttsEnabled) {
+    clearTtsHealthStatus();
+  }
+  updateTtsLanguageHint();
 
   el.finalSlideUpscaleMode.disabled = !upscaleEnabled;
   el.finalSlideUpscaleModel.disabled = !upscaleEnabled || !localUpscale;
@@ -1547,6 +1722,9 @@ function bindEvents() {
     await saveConfig();
     showButtonSuccess(el.saveSettings, "Saved", "Settings saved.");
   }));
+  el.ttsHealthCheck.addEventListener("click", () => runTask(async () => {
+    await testTtsHealth();
+  }));
   el.regenOverlay.addEventListener("click", () => runTask(async () => {
     await regenerateOverlay();
     showButtonSuccess(el.regenOverlay, "Generated");
@@ -1595,6 +1773,27 @@ function bindEvents() {
     input.addEventListener("change", () => {
       syncSettingsFieldState();
     });
+  }
+
+  for (const input of [
+    el.googleTtsProjectId,
+    el.googleTtsLanguageCode,
+    el.geminiTtsModel,
+    el.geminiTtsVoice,
+    el.geminiTtsPrompt,
+  ]) {
+    input.addEventListener("input", clearTtsHealthStatus);
+    input.addEventListener("change", clearTtsHealthStatus);
+  }
+
+  for (const input of [
+    el.finalSlideTargetLanguage,
+    el.googleTtsLanguageCode,
+    el.runStepTts,
+    el.runStepTextTranslate,
+  ]) {
+    input.addEventListener("input", updateTtsLanguageHint);
+    input.addEventListener("change", updateTtsLanguageHint);
   }
 
   document.querySelectorAll(".step-section-toggle").forEach((button) => {
@@ -1702,7 +1901,7 @@ async function init() {
   syncFinalViewControls();
   syncSettingsFieldState();
   syncLabActionState();
-  setActiveTab("home");
+  setActiveTab(getInitialActiveTab());
   await runTask(loadConfig);
   await runTask(loadOverlay);
   await runTask(loadRuns);

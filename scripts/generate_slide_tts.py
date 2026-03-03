@@ -5,16 +5,18 @@ import argparse
 import csv
 import json
 import os
-import wave
+import sys
 from pathlib import Path
 from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from cloud_tts import ensure_cloud_tts_client, synthesize_cloud_tts_audio, write_wave_bytes
+
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
-DEFAULT_SAMPLE_RATE = 24000
-DEFAULT_SAMPLE_WIDTH = 2
-DEFAULT_CHANNELS = 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,8 +25,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Directory for generated WAV files.")
     parser.add_argument("--out-manifest-json", required=True, help="Output JSON manifest path.")
     parser.add_argument("--out-manifest-csv", required=True, help="Output CSV manifest path.")
-    parser.add_argument("--model", default="gemini-2.5-pro-preview-tts", help="Gemini TTS model.")
+    parser.add_argument("--model", default="gemini-2.5-flash-tts", help="Google Cloud Gemini TTS model.")
     parser.add_argument("--voice", default="Kore", help="Gemini prebuilt voice name.")
+    parser.add_argument("--project-id", default="", help="Google Cloud project id used for quota/billing.")
+    parser.add_argument("--language-code", default="en-US", help="Language code for Cloud TTS, e.g. en-US.")
     parser.add_argument(
         "--prompt-file",
         default=str(DEFAULT_PROMPT_PATH),
@@ -58,63 +62,6 @@ def load_prompt(path: Path, language_label: str, voice_name: str) -> str:
     prompt = template.replace("{{TARGET_LANGUAGE}}", language_label.strip())
     prompt = prompt.replace("{{VOICE_NAME}}", voice_name.strip())
     return prompt
-
-
-def ensure_client():
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
-            "google-genai is not installed in this environment. "
-            "Run: source .venv/bin/activate && pip install google-genai"
-        ) from exc
-
-    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-    return genai.Client(api_key=api_key), types
-
-
-def extract_audio_bytes(response: Any) -> bytes:
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            inline_data = getattr(part, "inline_data", None)
-            data = getattr(inline_data, "data", None)
-            if isinstance(data, bytes) and data:
-                return data
-            if isinstance(data, str) and data:
-                import base64
-
-                return base64.b64decode(data)
-    raise RuntimeError("Gemini response did not contain audio bytes.")
-
-
-def write_wav(path: Path, pcm_bytes: bytes, sample_rate: int = DEFAULT_SAMPLE_RATE) -> float:
-    with wave.open(str(path), "wb") as wav:
-        wav.setnchannels(DEFAULT_CHANNELS)
-        wav.setsampwidth(DEFAULT_SAMPLE_WIDTH)
-        wav.setframerate(sample_rate)
-        wav.writeframes(pcm_bytes)
-    frame_count = len(pcm_bytes) / (DEFAULT_CHANNELS * DEFAULT_SAMPLE_WIDTH)
-    return round(frame_count / float(sample_rate), 3)
-
-
-def generate_tts_audio(client, types, model: str, voice_name: str, prompt: str, text: str) -> bytes:
-    response = client.models.generate_content(
-        model=model,
-        contents=[f"{prompt}\n\nSpeak this text exactly as written:\n{text}"],
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
-                )
-            ),
-        ),
-    )
-    return extract_audio_bytes(response)
 
 
 def write_csv(path: Path, items: list[dict[str, Any]]) -> None:
@@ -162,7 +109,9 @@ def main() -> int:
     language_label = str(args.language_label).strip() or str(
         payload.get("text_translation", {}).get("target_language", "source language of the text")
     )
-    client, types = ensure_client()
+    if not str(args.language_code).strip():
+        raise RuntimeError("--language-code must not be empty.")
+    client, texttospeech, _resolved_project, _default_project = ensure_cloud_tts_client(str(args.project_id))
     prompt = load_prompt(prompt_file, language_label, str(args.voice).strip())
 
     manifest_items: list[dict[str, Any]] = []
@@ -203,8 +152,16 @@ def main() -> int:
             continue
 
         try:
-            pcm_audio = generate_tts_audio(client, types, str(args.model), str(args.voice).strip(), prompt, tts_text)
-            item["duration_sec"] = write_wav(audio_path, pcm_audio)
+            audio_bytes = synthesize_cloud_tts_audio(
+                client,
+                texttospeech,
+                model=str(args.model),
+                voice_name=str(args.voice).strip(),
+                language_code=str(args.language_code).strip(),
+                prompt=prompt,
+                text=tts_text,
+            )
+            item["duration_sec"] = write_wave_bytes(audio_path, audio_bytes)
         except Exception as exc:  # noqa: BLE001
             item["status"] = "error"
             manifest_items.append(item)
@@ -221,6 +178,8 @@ def main() -> int:
         "source_json": str(input_json),
         "model": str(args.model),
         "voice_name": str(args.voice).strip(),
+        "project_id": str(args.project_id).strip(),
+        "language_code": str(args.language_code).strip(),
         "language_label": language_label,
         "prompt_file": str(prompt_file),
         "generated_count": generated_count,
@@ -235,6 +194,8 @@ def main() -> int:
     print(f"[TTS] Generated: {generated_count}", flush=True)
     print(f"[TTS] Skipped empty: {skipped_count}", flush=True)
     print(f"[TTS] Failed: {failed_count}", flush=True)
+    print(f"[TTS] Project: {args.project_id}", flush=True)
+    print(f"[TTS] Language code: {args.language_code}", flush=True)
     print(f"[TTS] Voice: {args.voice}", flush=True)
     print(f"[TTS] Language: {language_label}", flush=True)
     print(f"[TTS] Output dir: {output_dir}", flush=True)

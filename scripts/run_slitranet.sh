@@ -71,8 +71,10 @@ FINAL_SLIDE_TRANSLATION_MODE="${FINAL_SLIDE_TRANSLATION_MODE:-none}"
 FINAL_SLIDE_TARGET_LANGUAGE="${FINAL_SLIDE_TARGET_LANGUAGE:-German}"
 GEMINI_TRANSLATE_MODEL="${GEMINI_TRANSLATE_MODEL:-gemini-3-pro-image-preview}"
 GEMINI_TEXT_TRANSLATE_MODEL="${GEMINI_TEXT_TRANSLATE_MODEL:-gemini-2.5-flash}"
-GEMINI_TTS_MODEL="${GEMINI_TTS_MODEL:-gemini-2.5-pro-preview-tts}"
+GEMINI_TTS_MODEL="${GEMINI_TTS_MODEL:-gemini-2.5-flash-tts}"
 GEMINI_TTS_VOICE="${GEMINI_TTS_VOICE:-Kore}"
+GOOGLE_TTS_PROJECT_ID="${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}"
+GOOGLE_TTS_LANGUAGE_CODE="${GOOGLE_TTS_LANGUAGE_CODE:-en-US}"
 FINAL_SLIDE_UPSCALE_MODE="${FINAL_SLIDE_UPSCALE_MODE:-none}"
 FINAL_SLIDE_UPSCALE_MODEL="${FINAL_SLIDE_UPSCALE_MODEL:-caidas/swin2SR-classical-sr-x4-64}"
 FINAL_SLIDE_UPSCALE_DEVICE="${FINAL_SLIDE_UPSCALE_DEVICE:-auto}"
@@ -572,8 +574,12 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "0" ]; then
 fi
 
 if [ "$RUN_STEP_TTS" = "1" ]; then
-  if [ -z "${GEMINI_API_KEY:-}" ]; then
-    echo "ERROR: TTS requires GEMINI_API_KEY in the environment." >&2
+  if [ -z "${GOOGLE_TTS_PROJECT_ID:-}" ]; then
+    echo "ERROR: TTS requires GOOGLE_TTS_PROJECT_ID (or GOOGLE_SPEECH_PROJECT_ID) in the environment/config." >&2
+    exit 1
+  fi
+  if [ -z "${GOOGLE_TTS_LANGUAGE_CODE:-}" ]; then
+    echo "ERROR: TTS requires GOOGLE_TTS_LANGUAGE_CODE in the environment/config." >&2
     exit 1
   fi
   echo "[TTS] Generating voiceover with model $GEMINI_TTS_MODEL and voice $GEMINI_TTS_VOICE ..."
@@ -586,6 +592,8 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
     --out-manifest-csv "$TTS_MANIFEST_CSV" \
     --model "$GEMINI_TTS_MODEL" \
     --voice "$GEMINI_TTS_VOICE" \
+    --project-id "$GOOGLE_TTS_PROJECT_ID" \
+    --language-code "$GOOGLE_TTS_LANGUAGE_CODE" \
     --prompt-file "$GEMINI_TTS_PROMPT_FILE" \
     --language-label "$TTS_LANGUAGE_LABEL"
   step_done tts

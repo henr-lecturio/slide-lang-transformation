@@ -20,6 +20,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
+
 WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "gemini_edit_prompt.txt"
@@ -1456,11 +1461,14 @@ def start_run() -> tuple[bool, str]:
         (run_step_edit and final_slide_mode == "gemini")
         or (run_step_translate and translation_mode == "gemini")
         or run_step_text_translate
-        or run_step_tts
     ) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
         return False, "GEMINI_API_KEY is not set in the server environment"
     if transcription_provider == "google_chirp_3" and not (env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip():
         return False, "GOOGLE_SPEECH_PROJECT_ID must be set when TRANSCRIPTION_PROVIDER=google_chirp_3"
+    if run_step_tts and not (
+        (env.get("GOOGLE_TTS_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
+    ):
+        return False, "GOOGLE_TTS_PROJECT_ID must be set when TTS is enabled"
 
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
@@ -1517,6 +1525,80 @@ def run_overlay(time_sec: float) -> tuple[int, str]:
         text=True,
     )
     return result.returncode, result.stdout
+
+
+def tts_health_sample_text(language_code: str) -> str:
+    prefix = (language_code or "").split("-", 1)[0].strip().lower()
+    samples = {
+        "de": "Dies ist ein kurzer Stimmtest.",
+        "en": "This is a short voice test.",
+        "es": "Esta es una breve prueba de voz.",
+        "fr": "Ceci est un court test vocal.",
+        "it": "Questo e un breve test vocale.",
+        "pt": "Este e um breve teste de voz.",
+        "nl": "Dit is een korte stemtest.",
+    }
+    return samples.get(prefix, "This is a short voice test.")
+
+
+def run_tts_health_check(payload: dict) -> dict:
+    project_id = str(payload.get("GOOGLE_TTS_PROJECT_ID", "") or "").strip()
+    language_code = str(payload.get("GOOGLE_TTS_LANGUAGE_CODE", "") or "").strip()
+    model = str(payload.get("GEMINI_TTS_MODEL", "") or "").strip()
+    voice = str(payload.get("GEMINI_TTS_VOICE", "") or "").strip()
+    prompt = str(payload.get("GEMINI_TTS_PROMPT", "") or "").strip()
+
+    if not model:
+        raise ValueError("GEMINI_TTS_MODEL must not be empty")
+    if not voice:
+        raise ValueError("GEMINI_TTS_VOICE must not be empty")
+    if not language_code:
+        raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must not be empty")
+    if not prompt:
+        raise ValueError("GEMINI_TTS_PROMPT must not be empty")
+
+    resolved_project = project_id
+    default_project = ""
+    start = time.perf_counter()
+    try:
+        client, texttospeech, resolved_project, default_project = ensure_cloud_tts_client(project_id)
+        audio_bytes = synthesize_cloud_tts_audio(
+            client,
+            texttospeech,
+            model=model,
+            voice_name=voice,
+            language_code=language_code,
+            prompt=prompt,
+            text=tts_health_sample_text(language_code),
+        )
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        duration_sec = measure_wave_or_pcm_duration(audio_bytes)
+        return {
+            "ok": True,
+            "project_id_used": resolved_project,
+            "default_project": default_project or "",
+            "language_code": language_code,
+            "model": model,
+            "voice": voice,
+            "latency_ms": latency_ms,
+            "audio_bytes": len(audio_bytes),
+            "duration_sec": duration_sec,
+            "message": "TTS API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": False,
+            "project_id_used": resolved_project,
+            "default_project": default_project or "",
+            "language_code": language_code,
+            "model": model,
+            "voice": voice,
+            "latency_ms": latency_ms,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+            "message": "TTS API check failed.",
+        }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1584,8 +1666,10 @@ class Handler(BaseHTTPRequestHandler):
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
                     "GEMINI_TEXT_TRANSLATE_MODEL": env.get("GEMINI_TEXT_TRANSLATE_MODEL", "gemini-2.5-flash"),
                     "GEMINI_TEXT_TRANSLATE_PROMPT": read_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH).rstrip("\n"),
-                    "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts"),
+                    "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
+                    "GOOGLE_TTS_PROJECT_ID": env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+                    "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "en-US"),
                     "GEMINI_TTS_PROMPT": read_text_file(GEMINI_TTS_PROMPT_PATH).rstrip("\n"),
                     "FINAL_SLIDE_UPSCALE_MODE": env.get("FINAL_SLIDE_UPSCALE_MODE", "none"),
                     "FINAL_SLIDE_UPSCALE_MODEL": env.get(
@@ -1797,6 +1881,8 @@ class Handler(BaseHTTPRequestHandler):
                     "GEMINI_TEXT_TRANSLATE_MODEL": str(data["GEMINI_TEXT_TRANSLATE_MODEL"]).strip(),
                     "GEMINI_TTS_MODEL": str(data["GEMINI_TTS_MODEL"]).strip(),
                     "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
+                    "GOOGLE_TTS_PROJECT_ID": str(data["GOOGLE_TTS_PROJECT_ID"]).strip(),
+                    "GOOGLE_TTS_LANGUAGE_CODE": str(data["GOOGLE_TTS_LANGUAGE_CODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODE": str(data["FINAL_SLIDE_UPSCALE_MODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODEL": str(data["FINAL_SLIDE_UPSCALE_MODEL"]).strip(),
                     "FINAL_SLIDE_UPSCALE_DEVICE": str(data["FINAL_SLIDE_UPSCALE_DEVICE"]).strip(),
@@ -1911,6 +1997,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("GEMINI_TTS_MODEL must not be empty")
                 if not cfg["GEMINI_TTS_VOICE"]:
                     raise ValueError("GEMINI_TTS_VOICE must not be empty")
+                if cfg["RUN_STEP_TTS"] == 1 and not (
+                    cfg["GOOGLE_TTS_PROJECT_ID"] or cfg["GOOGLE_SPEECH_PROJECT_ID"]
+                ):
+                    raise ValueError("GOOGLE_TTS_PROJECT_ID must not be empty when TTS is enabled")
+                if cfg["RUN_STEP_TTS"] == 1 and not cfg["GOOGLE_TTS_LANGUAGE_CODE"]:
+                    raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must not be empty when TTS is enabled")
                 if not gemini_tts_prompt.strip():
                     raise ValueError("GEMINI_TTS_PROMPT must not be empty")
                 if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {
@@ -1984,6 +2076,10 @@ class Handler(BaseHTTPRequestHandler):
                     "mtime": int(OVERLAY_PATH.stat().st_mtime) if OVERLAY_PATH.exists() else None,
                 }
                 return self._send_json(200, payload)
+
+            if path == "/api/tts/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_tts_health_check(data))
 
             if path == "/api/runs":
                 ok, msg = start_run()

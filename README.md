@@ -55,6 +55,8 @@ ROI direkt in `config/slitranet.env` setzen:
 - `config/gemini_text_translate_prompt.txt` (1:1-Übersetzung des gemappten Textes)
 - `GEMINI_TTS_MODEL`
 - `GEMINI_TTS_VOICE`
+- `GOOGLE_TTS_PROJECT_ID`
+- `GOOGLE_TTS_LANGUAGE_CODE`
 - `config/gemini_tts_prompt.txt` (TTS-Stilprompt)
 - `FINAL_SLIDE_UPSCALE_MODE` (`none`, `swin2sr`, `replicate_nightmare_realesrgan`)
 - `FINAL_SLIDE_UPSCALE_MODEL` (standardmäßig `caidas/swin2SR-classical-sr-x4-64`)
@@ -72,12 +74,12 @@ ROI direkt in `config/slitranet.env` setzen:
 - `VIDEO_EXPORT_FPS`
 - `VIDEO_EXPORT_BG_COLOR`
 
-Für Gemini liegt der API-Key lokal in `.env.local` im Projektroot:
+Für Gemini / Replicate liegen API-Keys lokal in `.env.local` im Projektroot:
 
 ```bash
 GEMINI_API_KEY="..."
 REPLICATE_API_TOKEN="..."
-# Optional for Google Cloud Speech-to-Text via ADC:
+# Optional for Google Cloud Speech / Cloud TTS via ADC:
 # GOOGLE_APPLICATION_CREDENTIALS="/abs/path/to/service-account.json"
 ```
 
@@ -85,14 +87,22 @@ REPLICATE_API_TOKEN="..."
 `scripts/edit_final_slides_gemini.py`, `scripts/upscale_final_slides_replicate.py`,
 und `web/server.py` automatisch geladen.
 
-Wenn `TRANSCRIPTION_PROVIDER=google_chirp_3` genutzt wird, braucht der Prozess
-zusätzlich gültige Google Cloud Application Default Credentials, z. B. über:
+Wenn `TRANSCRIPTION_PROVIDER=google_chirp_3` oder `RUN_STEP_TTS=1` genutzt wird,
+braucht der Prozess zusätzlich gültige Google Cloud Application Default Credentials,
+z. B. über:
 
 ```bash
 gcloud auth application-default login
 ```
 
 oder über `GOOGLE_APPLICATION_CREDENTIALS` in `.env.local`.
+
+TTS läuft über Google Cloud Text-to-Speech mit Gemini-TTS-Modellen.
+Der Standardpfad nutzt:
+
+- `GEMINI_TTS_MODEL=gemini-2.5-flash-tts`
+- `GOOGLE_TTS_PROJECT_ID`
+- `GOOGLE_TTS_LANGUAGE_CODE` (z. B. `en-US`, `fr-FR`, `de-DE`)
 
 Overlay zur Kontrolle erzeugen:
 

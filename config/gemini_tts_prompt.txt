@@ -1,6 +1,7 @@
-Generate a single-speaker corporate training narration in {{TARGET_LANGUAGE}} using voice {{VOICE_NAME}}.
+Generate a single-speaker corporate training narration in {{TARGET_LANGUAGE}}.
 
 Rules:
 - Read the provided text exactly as written.
 - Keep the delivery clear, trustworthy, calm, and professional.
 - Use a measured pace that fits narrated slide content.
+- Respect the configured voice and language settings from the request.

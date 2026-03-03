@@ -577,6 +577,17 @@
               <div id="step-section-body-tts" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
+                    <label class="settings-key" for="google_tts_project_id">GOOGLE_TTS_PROJECT_ID</label>
+                    <div class="settings-value"><input id="google_tts_project_id" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_tts_language_code">GOOGLE_TTS_LANGUAGE_CODE</label>
+                    <div class="settings-value">
+                      <input id="google_tts_language_code" type="text" />
+                      <div id="tts-language-hint" class="tts-language-hint muted" aria-live="polite"></div>
+                    </div>
+                  </div>
+                  <div class="settings-row">
                     <label class="settings-key" for="gemini_tts_model">GEMINI_TTS_MODEL</label>
                     <div class="settings-value"><input id="gemini_tts_model" type="text" /></div>
                   </div>
@@ -587,6 +598,16 @@
                   <div class="settings-row settings-row-textarea">
                     <label class="settings-key" for="gemini_tts_prompt">GEMINI_TTS_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_tts_prompt" rows="8"></textarea></div>
+                  </div>
+                  <div class="settings-row settings-row-inline">
+                    <div class="settings-key">TTS API Test</div>
+                    <div class="settings-value">
+                      <div class="settings-inline-actions">
+                        <button id="tts-health-check" type="button">Test TTS API</button>
+                        <span id="tts-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                      </div>
+                      <div id="tts-health-meta" class="health-check-meta muted"></div>
+                    </div>
                   </div>
                 </div>
               </div>
