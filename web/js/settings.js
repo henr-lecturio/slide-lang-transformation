@@ -137,9 +137,6 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   clearHealthStatus("slideUpscale");
   clearHealthStatus("textTranslate");
   clearHealthStatus("tts");
-  el.labUpscaleProvider.value = ["swin2sr", "replicate_nightmare_realesrgan"].includes(cfg.FINAL_SLIDE_UPSCALE_MODE)
-    ? cfg.FINAL_SLIDE_UPSCALE_MODE
-    : "swin2sr";
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
   const replicateState = cfg.REPLICATE_API_TOKEN_SET ? "set" : "missing";

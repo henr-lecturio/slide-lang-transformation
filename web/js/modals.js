@@ -13,6 +13,16 @@ export function closeStatusModal() {
   el.statusModal.setAttribute("aria-hidden", "true");
 }
 
+export function openLabStatusModal() {
+  el.labStatusModal.classList.add("open");
+  el.labStatusModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeLabStatusModal() {
+  el.labStatusModal.classList.remove("open");
+  el.labStatusModal.setAttribute("aria-hidden", "true");
+}
+
 export function openImageModal(url, name) {
   const sep = url.includes("?") ? "&" : "?";
   el.imageModalImg.src = `${url}${sep}v=${Date.now()}`;
@@ -36,6 +46,16 @@ export function closeVideoPicker() {
 export function closeLabImagePicker() {
   el.labImagePickerModal.classList.remove("open");
   el.labImagePickerModal.setAttribute("aria-hidden", "true");
+}
+
+export function openLabSettingsModal() {
+  el.labSettingsModal.classList.add("open");
+  el.labSettingsModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeLabSettingsModal() {
+  el.labSettingsModal.classList.remove("open");
+  el.labSettingsModal.setAttribute("aria-hidden", "true");
 }
 
 function renderVideoPickerList({ runTask, saveConfig }) {

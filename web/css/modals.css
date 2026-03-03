@@ -55,17 +55,18 @@
 }
 
 .image-modal-close,
-.video-picker-close {
-  display: inline-grid;
-  place-items: center;
+.modal-close {
+  display: flex; 
+  align-items: center;
+  justify-content: center;
   min-width: 34px;
   min-height: 34px;
-  width: 34px;
-  height: 34px;
-  padding: 0;
+  width: 36px;
+  height: 36px;
+  padding-top: 7px;
   border-radius: 999px;
   line-height: 1;
-  font-size: 1rem;
+  font-size: 1.5rem;
   aspect-ratio: 1 / 1;
 }
 
@@ -80,6 +81,35 @@
   max-height: 90vh;
   margin: 5vh auto;
   background: #0a0b0d;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lab-settings-dialog {
+  width: min(1080px, 94vw);
+}
+
+.lab-settings-head {
+  padding: 12px 18px;
+}
+
+.lab-settings-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lab-settings-body {
+  display: grid;
+  gap: 16px;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.lab-settings-list {
+  margin-top: 0;
 }
 
 .status-modal-dialog {
@@ -99,7 +129,7 @@
   margin-top: 0;
 }
 
-.video-picker-head {
+.modal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;

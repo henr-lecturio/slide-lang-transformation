@@ -7,6 +7,8 @@ export const state = {
   videoItems: [],
   labImages: [],
   labSelectedImage: null,
+  labTestSettings: null,
+  labStepSectionExpanded: {},
   latestCsvLines: [],
   latestCsvExpanded: false,
   latestSlidesMode: "final",

@@ -116,6 +116,8 @@ LAB_STATE = {
     "message": "",
     "log_tail": deque(maxlen=400),
     "process": None,
+    "stop_requested": False,
+    "stopping": False,
 }
 
 
@@ -991,7 +993,7 @@ def _lab_job_id(action: str) -> str:
     return f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_{action}_{int(time.time() * 1000) % 1000:03d}"
 
 
-def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -> tuple[bool, str]:
+def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | None = None) -> tuple[bool, str]:
     if action not in {"edit", "translate", "upscale"}:
         return False, "Invalid lab action"
     if not RUN_ID_PATTERN.match(run_id):
@@ -1013,24 +1015,45 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
 
     source_path = ensure_within(run_dir, run_dir / source_rel)
     env = parse_env(CONFIG_PATH)
-    provider = provider.strip().lower()
+    overrides = overrides if isinstance(overrides, dict) else {}
+
+    def override_str(key: str, default: str = "") -> str:
+        value = overrides.get(key, default)
+        return str(value if value is not None else default).strip()
+
+    def override_int(key: str, default: int) -> int:
+        value = overrides.get(key, default)
+        return int(value if value is not None and str(value).strip() != "" else default)
+
+    def override_float(key: str, default: float) -> float:
+        value = overrides.get(key, default)
+        return float(value if value is not None and str(value).strip() != "" else default)
 
     if action == "edit":
-        mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
-        if mode != "gemini":
-            return False, "Image Lab edit currently requires FINAL_SLIDE_POSTPROCESS_MODE=gemini"
+        mode = "gemini"
         if not (os.environ.get("GEMINI_API_KEY") or "").strip():
             return False, "GEMINI_API_KEY is not set in the server environment"
+        edit_model = override_str("slide_edit_model", env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview")
+        edit_prompt = override_str("slide_edit_prompt", GEMINI_PROMPT_PATH.read_text(encoding="utf-8"))
+        if not edit_model:
+            return False, "Image Lab Slide Edit model must not be empty"
+        if not edit_prompt:
+            return False, "Image Lab Slide Edit prompt must not be empty"
     elif action == "translate":
-        mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
-        if mode != "gemini":
-            return False, "Image Lab translate currently requires FINAL_SLIDE_TRANSLATION_MODE=gemini"
+        mode = "gemini"
         if not (os.environ.get("GEMINI_API_KEY") or "").strip():
             return False, "GEMINI_API_KEY is not set in the server environment"
-        if not (env.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip():
-            return False, "FINAL_SLIDE_TARGET_LANGUAGE must not be empty"
+        translate_target_language = override_str("target_language", env.get("FINAL_SLIDE_TARGET_LANGUAGE", ""))
+        translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview")
+        translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
+        if not translate_target_language:
+            return False, "Image Lab target language must not be empty"
+        if not translate_model:
+            return False, "Image Lab Slide Translate model must not be empty"
+        if not translate_prompt:
+            return False, "Image Lab Slide Translate prompt must not be empty"
     else:
-        mode = provider or (env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").strip().lower()
+        mode = override_str("slide_upscale_mode", env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").lower()
         if mode not in {"swin2sr", "replicate_nightmare_realesrgan"}:
             return False, "Image Lab upscale requires one of: swin2sr, replicate_nightmare_realesrgan"
         if mode == "replicate_nightmare_realesrgan" and not (os.environ.get("REPLICATE_API_TOKEN") or "").strip():
@@ -1052,6 +1075,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
     result_path = output_dir / source_path.name
 
     if action == "edit":
+        edit_prompt_path = job_dir / "slide_edit_prompt.txt"
+        edit_prompt_path.write_text(edit_prompt, encoding="utf-8")
         cmd = [
             PYTHON_BIN,
             "scripts/providers/edit_final_slides_gemini.py",
@@ -1060,14 +1085,16 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
             "--output-dir",
             str(output_dir),
             "--model",
-            (env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview").strip(),
+            edit_model,
             "--prompt-file",
-            str(GEMINI_PROMPT_PATH),
+            str(edit_prompt_path),
             "--skip-first-slide",
             "0",
         ]
         message = "Running Gemini edit on selected final slide."
     elif action == "translate":
+        translate_prompt_path = job_dir / "slide_translate_prompt.txt"
+        translate_prompt_path.write_text(translate_prompt, encoding="utf-8")
         cmd = [
             PYTHON_BIN,
             "scripts/providers/translate_final_slides_gemini.py",
@@ -1076,11 +1103,11 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
             "--output-dir",
             str(output_dir),
             "--model",
-            (env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview").strip(),
+            translate_model,
             "--prompt-file",
-            str(GEMINI_TRANSLATE_PROMPT_PATH),
+            str(translate_prompt_path),
             "--target-language",
-            (env.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip(),
+            translate_target_language,
         ]
         message = "Running Gemini translate on selected final slide."
     else:
@@ -1093,13 +1120,13 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
                 "--output-dir",
                 str(output_dir),
                 "--model-id",
-                (env.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "caidas/swin2SR-classical-sr-x4-64").strip(),
+                override_str("slide_upscale_model", env.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "caidas/swin2SR-classical-sr-x4-64"),
                 "--device",
-                (env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto") or "auto").strip(),
+                override_str("slide_upscale_device", env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto") or "auto"),
                 "--tile-size",
-                str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256") or "256")),
+                str(override_int("slide_upscale_tile_size", int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256") or "256"))),
                 "--tile-overlap",
-                str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24") or "24")),
+                str(override_int("slide_upscale_tile_overlap", int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24") or "24"))),
             ]
             message = "Running local Swin2SR upscale on selected final slide."
         else:
@@ -1118,29 +1145,25 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
                 "--manifest-path",
                 str(job_dir / "replicate_manifest.json"),
                 "--nightmare-realesrgan-model-ref",
-                (
-                    env.get("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF", "nightmareai/real-esrgan")
-                    or "nightmareai/real-esrgan"
-                ).strip(),
+                override_str(
+                    "replicate_model_ref",
+                    env.get("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF", "nightmareai/real-esrgan") or "nightmareai/real-esrgan",
+                ),
                 "--nightmare-realesrgan-version-id",
-                (
+                override_str(
+                    "replicate_version_id",
                     env.get(
                         "REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID",
                         "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
                     )
-                    or "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa"
-                ).strip(),
+                    or "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
+                ),
                 "--nightmare-realesrgan-scale",
                 "4",
                 "--nightmare-realesrgan-face-enhance",
                 "false",
                 "--nightmare-realesrgan-price-per-second",
-                str(
-                    float(
-                        env.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", "0.000225")
-                        or "0.000225"
-                    )
-                ),
+                str(override_float("replicate_price_per_second", float(env.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", "0.000225") or "0.000225"))),
             ]
             message = "Running Replicate nightmareai/real-esrgan upscale on selected final slide."
 
@@ -1167,6 +1190,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -
             if action == "upscale" and mode == "replicate_nightmare_realesrgan"
             else ""
         )
+        LAB_STATE["stop_requested"] = False
+        LAB_STATE["stopping"] = False
         LAB_STATE["message"] = message
         LAB_STATE["log_tail"].clear()
         LAB_STATE["log_tail"].append(f"[Lab] action={action}")
@@ -1342,20 +1367,27 @@ def snapshot_lab_state() -> dict:
             "estimated_cost_usd": LAB_STATE["estimated_cost_usd"],
             "message": LAB_STATE["message"],
             "log_tail": list(LAB_STATE["log_tail"]),
+            "stop_requested": bool(LAB_STATE["stop_requested"]),
+            "stopping": bool(LAB_STATE["stopping"]),
         }
 
 
 def finalize_lab_state(code: int) -> None:
     with LAB_LOCK:
         manifest_path = Path(LAB_STATE["manifest_path"]) if LAB_STATE.get("manifest_path") else None
+        stopped = bool(LAB_STATE.get("stop_requested"))
         LAB_STATE["finished_at"] = _now()
-        LAB_STATE["status"] = "done" if code == 0 else "error"
+        LAB_STATE["status"] = "stopped" if stopped else ("done" if code == 0 else "error")
         LAB_STATE["process"] = None
+        LAB_STATE["stopping"] = False
+        LAB_STATE["stop_requested"] = False
         LAB_STATE["estimated_cost_usd"] = 0.0
         if manifest_path and manifest_path.exists():
             summary = summarize_upscale_manifest(manifest_path)
             LAB_STATE["estimated_cost_usd"] = float(summary["total_estimated_cost_usd"] or 0.0)
-        if code != 0 and not LAB_STATE["message"]:
+        if stopped:
+            LAB_STATE["message"] = "Image Lab execution stopped."
+        elif code != 0 and not LAB_STATE["message"]:
             LAB_STATE["message"] = "Lab job failed."
 
 
@@ -1382,6 +1414,31 @@ def _lab_worker(process: subprocess.Popen) -> None:
     finally:
         code = process.wait()
         finalize_lab_state(code)
+
+
+def stop_lab_job() -> tuple[bool, str]:
+    with LAB_LOCK:
+        proc = LAB_STATE.get("process")
+        if proc is None or proc.poll() is not None:
+            return False, "No Image Lab execution is currently running"
+        if LAB_STATE.get("stopping"):
+            return True, "stopping"
+        LAB_STATE["stop_requested"] = True
+        LAB_STATE["stopping"] = True
+        LAB_STATE["status"] = "stopping"
+        LAB_STATE["message"] = "Stopping Image Lab execution..."
+        LAB_STATE["log_tail"].append("[Lab] stop requested")
+        pid = int(proc.pid)
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    return True, "stopping"
 
 
 def snapshot_run_state() -> dict:
@@ -2652,8 +2709,14 @@ class Handler(BaseHTTPRequestHandler):
                     action,
                     str(data["run_id"]).strip(),
                     int(data["event_id"]),
-                    str(data.get("provider", "")).strip(),
+                    data.get("settings") if isinstance(data.get("settings"), dict) else {},
                 )
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_lab_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_lab_state()})
+
+            if path == "/api/lab/stop":
+                ok, msg = stop_lab_job()
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_lab_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_lab_state()})

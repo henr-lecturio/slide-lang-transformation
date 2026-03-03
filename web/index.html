@@ -133,23 +133,19 @@
       <section id="panel-image-lab" class="panel">
         <section class="card">
           <h2>Image Lab</h2>
-          <div class="settings-note muted">Einzelbild-Test auf Basis des neuesten `final_slide_images`-Satzes. Die Aktionen verwenden die aktuellen Werte aus `Settings`.</div>
-          <div class="row wrap">
-            <button id="lab-pick-image" type="button">Bild wählen</button>
-            <button id="lab-run-edit" type="button">Test Slide Edit</button>
-            <button id="lab-run-translate" type="button">Test Slide Translate</button>
-            <label>Slide Upscale Provider
-              <select id="lab_upscale_provider">
-                <option value="swin2sr">Local Swin2SR</option>
-                <option value="replicate_nightmare_realesrgan">Replicate nightmareai/real-esrgan</option>
-              </select>
-            </label>
-            <button id="lab-run-upscale" type="button">Test Slide Upscale</button>
+          <div class="lab-toolbar">
+            <div class="lab-toolbar-main">
+              <button id="lab-pick-image" type="button">Bild wählen</button>
+              <button id="lab-open-settings" type="button">Test Settings</button>
+              <button id="lab-run-edit" type="button">Test Slide Edit</button>
+              <button id="lab-run-translate" type="button">Test Slide Translate</button>
+              <button id="lab-run-upscale" type="button">Test Slide Upscale</button>
+            </div>
+            <div class="lab-toolbar-side">
+              <button id="lab-open-terminal" type="button">Open Terminal</button>
+              <button id="lab-stop-run" type="button" disabled>Stop Execution</button>
+            </div>
           </div>
-          <div id="lab-selected-image" class="muted">Kein Bild gewählt.</div>
-          <div id="lab-job-status" class="muted">status: idle</div>
-          <div id="lab-job-meta" class="muted">Uses current Settings.</div>
-          <pre id="lab-log" class="log"></pre>
           <div class="lab-preview-grid">
             <section class="lab-preview-panel">
               <div class="slide-compare-label">Original</div>
@@ -729,9 +725,9 @@
     <div id="video-picker-modal" class="video-picker-modal" aria-hidden="true">
       <div id="video-picker-backdrop" class="video-picker-backdrop"></div>
       <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Video picker">
-        <div class="video-picker-head">
-          <strong>Video wählen</strong>
-          <button id="video-picker-close" class="video-picker-close" type="button" aria-label="Close video picker">×</button>
+        <div class="modal-head">
+          <h3>Video wählen</h3>
+          <button id="video-picker-close" class="modal-close" type="button" aria-label="Close video picker">&times;</button>
         </div>
         <div id="video-picker-list" class="video-picker-list"></div>
       </div>
@@ -740,23 +736,172 @@
     <div id="lab-image-picker-modal" class="video-picker-modal" aria-hidden="true">
       <div id="lab-image-picker-backdrop" class="video-picker-backdrop"></div>
       <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Image picker">
-        <div class="video-picker-head">
-          <strong>Final Slide wählen</strong>
-          <button id="lab-image-picker-close" class="video-picker-close" type="button" aria-label="Close image picker">×</button>
+        <div class="modal-head">
+          <h3>Bild wählen</h3>
+          <button id="lab-image-picker-close" class="modal-close" type="button" aria-label="Close image picker">×</button>
         </div>
         <div id="lab-image-picker-list" class="video-picker-list"></div>
+      </div>
+    </div>
+
+    <div id="lab-settings-modal" class="video-picker-modal" aria-hidden="true">
+      <div id="lab-settings-backdrop" class="video-picker-backdrop"></div>
+      <div class="video-picker-dialog lab-settings-dialog" role="dialog" aria-modal="true" aria-label="Image Lab test settings">
+        <div class="modal-head lab-settings-head">
+          <h3>Image Lab Test Settings</h3>
+          <div class="lab-settings-head-actions">
+            <button id="lab-settings-reset" type="button">Reset from Settings</button>
+            <button id="lab-settings-save" type="button">Save Test Settings</button>
+            <button id="lab-settings-close" class="modal-close" type="button" aria-label="Close test settings">×</button>
+          </div>
+        </div>
+        <div class="status-modal-body lab-settings-body">
+          <div class="muted">Diese Werte gelten nur für `Image Lab`-Tests und ändern nie die Hauptsettings.</div>
+          <div class="step-sections lab-step-sections">
+            <section class="step-section is-forced" data-lab-step-section="slide-edit">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Slide Edit test settings" /></label>
+                    <h3>Slide Edit</h3>
+                    <button type="button" class="step-section-toggle lab-step-section-toggle" data-lab-step-toggle="slide-edit" aria-expanded="false" aria-controls="lab-step-section-body-slide-edit" aria-label="Toggle Slide Edit test settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Isolierte Testwerte nur für `Image Lab` Slide Edit.</div>
+                </div>
+              </div>
+              <div id="lab-step-section-body-slide-edit" class="step-section-body" hidden>
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="lab_gemini_edit_model">LAB_SLIDE_EDIT_MODEL</label>
+                    <div class="settings-value"><input id="lab_gemini_edit_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="lab_gemini_edit_prompt">LAB_SLIDE_EDIT_PROMPT</label>
+                    <div class="settings-value"><textarea id="lab_gemini_edit_prompt" rows="5"></textarea></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section is-forced" data-lab-step-section="slide-translate">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Slide Translate test settings" /></label>
+                    <h3>Slide Translate</h3>
+                    <button type="button" class="step-section-toggle lab-step-section-toggle" data-lab-step-toggle="slide-translate" aria-expanded="false" aria-controls="lab-step-section-body-slide-translate" aria-label="Toggle Slide Translate test settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Isolierte Testwerte nur für `Image Lab` Slide Translate.</div>
+                </div>
+              </div>
+              <div id="lab-step-section-body-slide-translate" class="step-section-body" hidden>
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="lab_final_slide_target_language">LAB_TARGET_LANGUAGE</label>
+                    <div class="settings-value">
+                      <select id="lab_final_slide_target_language"></select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="lab_gemini_translate_model">LAB_SLIDE_TRANSLATE_MODEL</label>
+                    <div class="settings-value"><input id="lab_gemini_translate_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="lab_gemini_translate_prompt">LAB_SLIDE_TRANSLATE_PROMPT</label>
+                    <div class="settings-value"><textarea id="lab_gemini_translate_prompt" rows="5"></textarea></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section is-forced" data-lab-step-section="slide-upscale">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Slide Upscale test settings" /></label>
+                    <h3>Slide Upscale</h3>
+                    <button type="button" class="step-section-toggle lab-step-section-toggle" data-lab-step-toggle="slide-upscale" aria-expanded="false" aria-controls="lab-step-section-body-slide-upscale" aria-label="Toggle Slide Upscale test settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Isolierte Testwerte nur für `Image Lab` Slide Upscale.</div>
+                </div>
+              </div>
+              <div id="lab-step-section-body-slide-upscale" class="step-section-body" hidden>
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="lab_final_slide_upscale_mode">LAB_SLIDE_UPSCALE_MODE</label>
+                    <div class="settings-value">
+                      <select id="lab_final_slide_upscale_mode">
+                        <option value="swin2sr">Local Swin2SR</option>
+                        <option value="replicate_nightmare_realesrgan">Replicate nightmareai/real-esrgan</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row lab-upscale-local-row">
+                    <label class="settings-key" for="lab_final_slide_upscale_model">LAB_LOCAL_UPSCALE_MODEL</label>
+                    <div class="settings-value"><input id="lab_final_slide_upscale_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row lab-upscale-local-row">
+                    <label class="settings-key" for="lab_final_slide_upscale_device">LAB_LOCAL_UPSCALE_DEVICE</label>
+                    <div class="settings-value">
+                      <select id="lab_final_slide_upscale_device">
+                        <option value="auto">auto</option>
+                        <option value="cuda">cuda</option>
+                        <option value="cpu">cpu</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row lab-upscale-local-row">
+                    <label class="settings-key" for="lab_final_slide_upscale_tile_size">LAB_LOCAL_UPSCALE_TILE_SIZE</label>
+                    <div class="settings-value"><input id="lab_final_slide_upscale_tile_size" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row lab-upscale-local-row">
+                    <label class="settings-key" for="lab_final_slide_upscale_tile_overlap">LAB_LOCAL_UPSCALE_TILE_OVERLAP</label>
+                    <div class="settings-value"><input id="lab_final_slide_upscale_tile_overlap" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row lab-upscale-replicate-row">
+                    <label class="settings-key" for="lab_replicate_nightmare_realesrgan_model_ref">LAB_REPLICATE_MODEL_REF</label>
+                    <div class="settings-value"><input id="lab_replicate_nightmare_realesrgan_model_ref" type="text" /></div>
+                  </div>
+                  <div class="settings-row lab-upscale-replicate-row">
+                    <label class="settings-key" for="lab_replicate_nightmare_realesrgan_version_id">LAB_REPLICATE_VERSION_ID</label>
+                    <div class="settings-value"><input id="lab_replicate_nightmare_realesrgan_version_id" type="text" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
       </div>
     </div>
 
     <div id="status-modal" class="status-modal" aria-hidden="true">
       <div id="status-modal-backdrop" class="status-modal-backdrop"></div>
       <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="Run terminal log">
-        <div class="video-picker-head">
-          <h2>Run Terminal</h2>
-          <button id="status-modal-close" class="video-picker-close" type="button" aria-label="Close status">×</button>
+        <div class="modal-head">
+          <h3>Run Terminal</h3>
+          <button id="status-modal-close" class="modal-close" type="button" aria-label="Close status">×</button>
         </div>
         <div class="status-modal-body">
           <pre id="run-log" class="log log-status status-modal-log"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="lab-status-modal" class="status-modal" aria-hidden="true">
+      <div id="lab-status-modal-backdrop" class="status-modal-backdrop"></div>
+      <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="Image Lab terminal log">
+        <div class="modal-head">
+          <h3>Image Lab Terminal</h3>
+          <button id="lab-status-modal-close" class="modal-close" type="button" aria-label="Close image lab terminal">×</button>
+        </div>
+        <div class="status-modal-body">
+          <pre id="lab-log" class="log log-status status-modal-log"></pre>
         </div>
       </div>
     </div>

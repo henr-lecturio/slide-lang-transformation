@@ -105,12 +105,7 @@ main {
 .card {
   position: relative;
   padding: 22px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 30%),
-    linear-gradient(180deg, var(--surface) 0%, #090a0c 100%);
-  box-shadow: var(--shadow);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -119,7 +114,6 @@ main {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .home-main {
@@ -138,10 +132,10 @@ h2 {
   font-size: clamp(1.7rem, 1.15rem + 1vw, 2.35rem);
   line-height: 1.05;
   color: var(--text);
+  padding: 0 0 1rem 0;
 }
 
 h3 {
-  margin: 28px 0 14px;
   align-self: center;
   font-size: 1.2rem;
   color: var(--text-muted);
@@ -174,11 +168,7 @@ h3 {
 #latest-summary,
 #run-summary,
 #selected-video-path,
-#lab-selected-image,
-#lab-job-status,
-#lab-job-meta,
 #config-meta,
-.settings-note,
 .slide-meta,
 .slide-compare-label,
 .slide-controls-label,
@@ -209,4 +199,24 @@ h3 {
 
 .row.wrap {
   flex-wrap: wrap;
+}
+
+.lab-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.lab-toolbar-main,
+.lab-toolbar-side {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lab-toolbar-side {
+  margin-left: auto;
 }

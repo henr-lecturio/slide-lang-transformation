@@ -20,13 +20,27 @@ import { loadConfig, saveConfig, syncSettingsFieldState, syncStepSections } from
 import {
   closeImageModal,
   closeLabImagePicker,
+  closeLabStatusModal,
+  closeLabSettingsModal,
   closeStatusModal,
   closeVideoPicker,
   openLabImagePicker,
+  openLabStatusModal,
+  openLabSettingsModal,
   openStatusModal,
   openVideoPicker,
 } from "./modals.js";
-import { loadLabStatus, renderLabSelection, runLabAction, syncLabActionState } from "./lab.js";
+import {
+  initializeLabTestSettings,
+  loadLabStatus,
+  renderLabSelection,
+  resetLabTestSettingsFromCurrentSettings,
+  runLabAction,
+  saveLabTestSettings,
+  stopLabJob,
+  syncLabTestSections,
+  syncLabActionState,
+} from "./lab.js";
 import {
   configureRunsModule,
   loadLatestRunDetails,
@@ -176,6 +190,12 @@ function bindEvents() {
   })));
 
   el.labPickImage.addEventListener("click", () => runTask(() => openLabImagePicker({ runTask, renderLabSelection })));
+  el.labOpenSettings.addEventListener("click", () => runTask(async () => {
+    initializeLabTestSettings();
+    openLabSettingsModal();
+  }));
+  el.labOpenTerminal.addEventListener("click", openLabStatusModal);
+  el.labStopRun.addEventListener("click", () => runTask(stopLabJob));
   el.labRunEdit.addEventListener("click", () => runTask(async () => {
     await runLabAction("edit");
     showButtonSuccess(el.labRunEdit, "Started");
@@ -188,6 +208,24 @@ function bindEvents() {
     await runLabAction("upscale");
     showButtonSuccess(el.labRunUpscale, "Started");
   }));
+  el.labSettingsSave.addEventListener("click", () => runTask(async () => {
+    saveLabTestSettings();
+    showButtonSuccess(el.labSettingsSave, "Saved");
+  }));
+  el.labSettingsReset.addEventListener("click", () => runTask(async () => {
+    resetLabTestSettingsFromCurrentSettings();
+    showButtonSuccess(el.labSettingsReset, "Reset");
+  }));
+  el.labFinalSlideUpscaleMode.addEventListener("change", saveLabTestSettings);
+
+  document.querySelectorAll(".lab-step-section-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionId = button.dataset.labStepToggle;
+      if (!sectionId) return;
+      state.labStepSectionExpanded[sectionId] = !state.labStepSectionExpanded[sectionId];
+      syncLabTestSections();
+    });
+  });
 
   el.transcriptionProvider.addEventListener("change", syncSettingsFieldState);
   el.finalSlideUpscaleMode.addEventListener("change", syncSettingsFieldState);
@@ -343,8 +381,12 @@ function bindEvents() {
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
   el.statusModalClose.addEventListener("click", closeStatusModal);
   el.statusModalBackdrop.addEventListener("click", closeStatusModal);
+  el.labStatusModalClose.addEventListener("click", closeLabStatusModal);
+  el.labStatusModalBackdrop.addEventListener("click", closeLabStatusModal);
   el.labImagePickerClose.addEventListener("click", closeLabImagePicker);
   el.labImagePickerBackdrop.addEventListener("click", closeLabImagePicker);
+  el.labSettingsClose.addEventListener("click", closeLabSettingsModal);
+  el.labSettingsBackdrop.addEventListener("click", closeLabSettingsModal);
   el.videoPickerClose.addEventListener("click", closeVideoPicker);
   el.videoPickerBackdrop.addEventListener("click", closeVideoPicker);
 
@@ -355,8 +397,14 @@ function bindEvents() {
     if (e.key === "Escape" && el.statusModal.classList.contains("open")) {
       closeStatusModal();
     }
+    if (e.key === "Escape" && el.labStatusModal.classList.contains("open")) {
+      closeLabStatusModal();
+    }
     if (e.key === "Escape" && el.labImagePickerModal.classList.contains("open")) {
       closeLabImagePicker();
+    }
+    if (e.key === "Escape" && el.labSettingsModal.classList.contains("open")) {
+      closeLabSettingsModal();
     }
     if (e.key === "Escape" && el.videoPickerModal.classList.contains("open")) {
       closeVideoPicker();
@@ -408,6 +456,7 @@ async function init() {
   setActiveTab(getInitialActiveTab());
 
   await runTask(() => loadConfig({ syncActionState }));
+  initializeLabTestSettings();
   await runTask(loadOverlay);
   await runTask(loadRuns);
   await runTask(loadLabStatus);

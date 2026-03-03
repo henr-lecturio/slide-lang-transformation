@@ -189,7 +189,8 @@
 #lab-result-image {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
 }
 
 .lab-preview-grid {
@@ -201,12 +202,17 @@
 
 .lab-preview-panel {
   display: grid;
-  gap: 8px;
+  gap: 2px;
 }
 
 .lab-preview-wrap {
-  min-height: 260px;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0b0d;
 }
 
 .log {

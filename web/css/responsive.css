@@ -54,6 +54,16 @@
     gap: 8px;
   }
 
+  .lab-toolbar,
+  .lab-toolbar-main,
+  .lab-toolbar-side {
+    align-items: stretch;
+  }
+
+  .lab-toolbar-side {
+    margin-left: 0;
+  }
+
   .settings-key {
     max-width: none;
     min-width: 0;
