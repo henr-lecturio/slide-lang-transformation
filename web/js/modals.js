@@ -23,6 +23,16 @@ export function closeLabStatusModal() {
   el.labStatusModal.setAttribute("aria-hidden", "true");
 }
 
+export function openRoiStatusModal() {
+  el.roiStatusModal.classList.add("open");
+  el.roiStatusModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeRoiStatusModal() {
+  el.roiStatusModal.classList.remove("open");
+  el.roiStatusModal.setAttribute("aria-hidden", "true");
+}
+
 export function openImageModal(url, name) {
   const sep = url.includes("?") ? "&" : "?";
   el.imageModalImg.src = `${url}${sep}v=${Date.now()}`;
@@ -58,13 +68,13 @@ export function closeLabSettingsModal() {
   el.labSettingsModal.setAttribute("aria-hidden", "true");
 }
 
-function renderVideoPickerList({ runTask, saveConfig }) {
+function renderVideoPickerList({ runTask, saveConfig, successButton = null }) {
   const items = state.videoItems || [];
   el.videoPickerList.innerHTML = "";
   if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "muted";
-    empty.textContent = "Keine Videos unter videos/ gefunden.";
+    empty.textContent = "No videos found under videos/.";
     el.videoPickerList.appendChild(empty);
     return;
   }
@@ -91,19 +101,19 @@ function renderVideoPickerList({ runTask, saveConfig }) {
       state.selectedVideoPath = item.path;
       await saveConfig();
       closeVideoPicker();
-      showButtonSuccess(el.pickVideo, "Selected");
+      showButtonSuccess(successButton || el.pickVideo, "Selected");
     }));
     el.videoPickerList.appendChild(btn);
   }
 }
 
-export async function openVideoPicker({ runTask, saveConfig }) {
+export async function openVideoPicker({ runTask, saveConfig, successButton = null }) {
   const data = await apiGet("/api/videos");
   state.videoItems = data.items || [];
   if (data.selected_video) {
     state.selectedVideoPath = data.selected_video;
   }
-  renderVideoPickerList({ runTask, saveConfig });
+  renderVideoPickerList({ runTask, saveConfig, successButton });
   el.videoPickerModal.classList.add("open");
   el.videoPickerModal.setAttribute("aria-hidden", "false");
 }
@@ -114,7 +124,7 @@ function renderLabImagePickerList({ runTask, renderLabSelection }) {
   if (items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "muted";
-    empty.textContent = "Keine final_slide_images im neuesten Run gefunden.";
+    empty.textContent = "No final_slide_images found in the latest run.";
     el.labImagePickerList.appendChild(empty);
     return;
   }

@@ -22,11 +22,13 @@ import {
   closeLabImagePicker,
   closeLabStatusModal,
   closeLabSettingsModal,
+  closeRoiStatusModal,
   closeStatusModal,
   closeVideoPicker,
   openLabImagePicker,
   openLabStatusModal,
   openLabSettingsModal,
+  openRoiStatusModal,
   openStatusModal,
   openVideoPicker,
 } from "./modals.js";
@@ -53,7 +55,6 @@ import {
   regenerateOverlay,
   startRun,
   stopRun,
-  syncFinalViewControls,
 } from "./runs.js";
 
 function setStatus(current) {
@@ -135,7 +136,7 @@ function bindEvents() {
 
   el.saveRoi.addEventListener("click", () => runTask(async () => {
     await saveConfig({ syncActionState });
-    showButtonSuccess(el.saveRoi, "Saved", "ROI settings saved.");
+    showButtonSuccess(el.saveRoi, "Saved");
   }));
 
   el.saveSettings.addEventListener("click", () => runTask(async () => {
@@ -170,6 +171,8 @@ function bindEvents() {
     showButtonSuccess(el.refreshOverlay, "Refreshed");
   }));
 
+  el.openRoiStatus.addEventListener("click", openRoiStatusModal);
+
   el.startRun.addEventListener("click", () => runTask(async () => {
     await startRun();
     showButtonSuccess(el.startRun, "Started");
@@ -186,6 +189,13 @@ function bindEvents() {
   el.pickVideo.addEventListener("click", () => runTask(() => openVideoPicker({
     runTask,
     saveConfig: () => saveConfig({ syncActionState }),
+    successButton: el.pickVideo,
+  })));
+
+  el.pickVideoRoi.addEventListener("click", () => runTask(() => openVideoPicker({
+    runTask,
+    saveConfig: () => saveConfig({ syncActionState }),
+    successButton: el.pickVideoRoi,
   })));
 
   el.labPickImage.addEventListener("click", () => runTask(() => openLabImagePicker({ runTask, renderLabSelection })));
@@ -349,11 +359,6 @@ function bindEvents() {
   });
   el.latestFinalDisplayMode.addEventListener("change", () => {
     state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
-    syncFinalViewControls();
-    runTaskImmediate(loadLatestSlides);
-  });
-  el.latestFinalResolutionMode.addEventListener("change", () => {
-    state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
     runTaskImmediate(loadLatestSlides);
   });
 
@@ -376,11 +381,6 @@ function bindEvents() {
   });
   el.runFinalDisplayMode.addEventListener("change", () => {
     state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
-    syncFinalViewControls();
-    runTaskImmediate(loadRunSlides);
-  });
-  el.runFinalResolutionMode.addEventListener("change", () => {
-    state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
     runTaskImmediate(loadRunSlides);
   });
 
@@ -390,6 +390,8 @@ function bindEvents() {
   el.statusModalBackdrop.addEventListener("click", closeStatusModal);
   el.labStatusModalClose.addEventListener("click", closeLabStatusModal);
   el.labStatusModalBackdrop.addEventListener("click", closeLabStatusModal);
+  el.roiStatusModalClose.addEventListener("click", closeRoiStatusModal);
+  el.roiStatusModalBackdrop.addEventListener("click", closeRoiStatusModal);
   el.labImagePickerClose.addEventListener("click", closeLabImagePicker);
   el.labImagePickerBackdrop.addEventListener("click", closeLabImagePicker);
   el.labSettingsClose.addEventListener("click", closeLabSettingsModal);
@@ -406,6 +408,9 @@ function bindEvents() {
     }
     if (e.key === "Escape" && el.labStatusModal.classList.contains("open")) {
       closeLabStatusModal();
+    }
+    if (e.key === "Escape" && el.roiStatusModal.classList.contains("open")) {
+      closeRoiStatusModal();
     }
     if (e.key === "Escape" && el.labImagePickerModal.classList.contains("open")) {
       closeLabImagePicker();
@@ -450,15 +455,11 @@ async function init() {
     ? el.latestFinalSourceMode.value
     : "processed";
   state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
-  state.latestFinalResolutionMode = el.latestFinalResolutionMode.value === "x4" ? "x4" : "native";
   state.runSlidesMode = el.runViewMode.value === "base" ? "base" : "final";
   state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
     ? el.runFinalSourceMode.value
     : "processed";
   state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
-  state.runFinalResolutionMode = el.runFinalResolutionMode.value === "x4" ? "x4" : "native";
-
-  syncFinalViewControls();
   syncSettingsFieldState();
   syncLabActionState();
   setActiveTab(getInitialActiveTab());

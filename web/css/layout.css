@@ -127,8 +127,22 @@ main {
   align-items: start;
 }
 
+.roi-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
 .all-runs-sidebar-card,
+.roi-sidebar-card,
 .all-runs-detail-card {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.roi-detail-card {
   display: grid;
   align-content: start;
   gap: 14px;
@@ -188,7 +202,6 @@ h3 {
 #status-summary,
 #selected-video-path,
 #config-meta,
-.slide-meta,
 .slide-compare-label,
 .slide-controls-label,
 .thumb .name,
@@ -203,6 +216,26 @@ h3 {
 
 .roi-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.roi-settings-list {
+  padding-top: 0;
+}
+
+.roi-settings-list .settings-row {
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+
+.roi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  align-content: start;
+}
+
+.roi-actions > #config-meta {
+  width: 100%;
 }
 
 .settings-grid {

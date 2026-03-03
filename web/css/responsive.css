@@ -6,6 +6,7 @@
 
   .home-top,
   .all-runs-layout,
+  .roi-layout,
   .slide-row,
   .settings-grid {
     grid-template-columns: 1fr;

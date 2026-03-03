@@ -35,7 +35,7 @@
             <div class="row wrap">
               <button id="start-run">Start New Run</button>
               <button id="refresh-runs">Refresh Runs</button>
-              <button id="pick-video">Video wählen</button>
+              <button id="pick-video">Select Video</button>
             </div>
             <div class="video-preview-wrap">
               <img id="selected-video-thumb" alt="Selected video thumbnail" />
@@ -76,29 +76,23 @@
             <div id="latest-exports" class="summary-links row wrap"></div>
           </section>
           <div class="row wrap">
-            <label>Ansicht
+            <label>View
               <select id="latest-view-mode">
                 <option value="final">final_slide_images</option>
                 <option value="base">base_events</option>
               </select>
             </label>
-            <label>ROI Quelle
+            <label>ROI Source
               <select id="latest-final-source-mode">
                 <option value="processed">processed</option>
                 <option value="raw">raw</option>
                 <option value="translated">translated</option>
               </select>
             </label>
-            <label>Anzeige
+            <label>Display
               <select id="latest-final-display-mode">
                 <option value="single">single</option>
                 <option value="compare">compare</option>
-              </select>
-            </label>
-            <label>Auflösung
-              <select id="latest-final-resolution-mode">
-                <option value="native">native</option>
-                <option value="x4">x4</option>
               </select>
             </label>
           </div>
@@ -120,29 +114,23 @@
               <h2>Run Details</h2>
             </div>
             <div class="row wrap">
-              <label>Ansicht
+              <label>View
                 <select id="run-view-mode">
                   <option value="final">final_slide_images</option>
                   <option value="base">base_events</option>
                 </select>
               </label>
-              <label>ROI Quelle
+              <label>ROI Source
                 <select id="run-final-source-mode">
                   <option value="processed">processed</option>
                   <option value="raw">raw</option>
                   <option value="translated">translated</option>
                 </select>
               </label>
-              <label>Anzeige
+              <label>Display
                 <select id="run-final-display-mode">
                   <option value="single">single</option>
                   <option value="compare">compare</option>
-                </select>
-              </label>
-              <label>Auflösung
-                <select id="run-final-resolution-mode">
-                  <option value="native">native</option>
-                  <option value="x4">x4</option>
                 </select>
               </label>
             </div>
@@ -158,7 +146,7 @@
           <h2>Image Lab</h2>
           <div class="lab-toolbar">
             <div class="lab-toolbar-main">
-              <button id="lab-pick-image" type="button">Bild wählen</button>
+              <button id="lab-pick-image" type="button">Select Image</button>
               <button id="lab-open-settings" type="button">Test Settings</button>
               <button id="lab-run-edit" type="button">Test Slide Edit</button>
               <button id="lab-run-translate" type="button">Test Slide Translate</button>
@@ -187,34 +175,56 @@
       </section>
 
       <section id="panel-roi" class="panel">
-        <section class="card">
-          <h2>ROI</h2>
-          <div class="grid roi-grid">
-            <label>ROI_X0 <input id="roi_x0" type="number" /></label>
-            <label>ROI_Y0 <input id="roi_y0" type="number" /></label>
-            <label>ROI_X1 <input id="roi_x1" type="number" /></label>
-            <label>ROI_Y1 <input id="roi_y1" type="number" /></label>
-          </div>
-          <div class="row">
-            <button id="save-roi">Save ROI</button>
-            <span id="config-meta" class="muted" aria-live="polite"></span>
-          </div>
-        </section>
+        <div class="roi-layout">
+          <section class="card roi-sidebar-card">
+            <div class="all-runs-head">
+              <h2>ROI</h2>
+            </div>
+            <div class="settings-list roi-settings-list">
+              <div class="settings-row">
+                <label class="settings-key" for="roi_x0">ROI_X0</label>
+                <div class="settings-value"><input id="roi_x0" type="number" /></div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-key" for="roi_y0">ROI_Y0</label>
+                <div class="settings-value"><input id="roi_y0" type="number" /></div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-key" for="roi_x1">ROI_X1</label>
+                <div class="settings-value"><input id="roi_x1" type="number" /></div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-key" for="roi_y1">ROI_Y1</label>
+                <div class="settings-value"><input id="roi_y1" type="number" /></div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-key" for="overlay-time">Time (sec)</label>
+                <div class="settings-value"><input id="overlay-time" type="number" step="0.1" value="30" /></div>
+              </div>
+            </div>
+            <div class="roi-actions">
+              <button id="save-roi">Save ROI</button>
+              <button id="pick-video-roi" type="button">Select Video</button>
+              <span id="config-meta" class="muted" aria-live="polite"></span>
+            </div>
+          </section>
 
-        <section class="card">
-          <h2>ROI Overlay</h2>
-          <div class="row wrap">
-            <label>Time (sec)
-              <input id="overlay-time" type="number" step="0.1" value="30" />
-            </label>
-            <button id="regen-overlay">Generate Overlay</button>
-            <button id="refresh-overlay">Refresh Image</button>
-          </div>
-          <div class="image-wrap">
-            <img id="overlay-image" alt="ROI overlay preview" />
-          </div>
-          <pre id="overlay-log" class="log muted"></pre>
-        </section>
+          <section class="card roi-detail-card">
+            <div class="all-runs-head">
+              <h2>ROI Overlay</h2>
+              <div class="status-actions">
+                <button id="open-roi-status" type="button">Open Terminal</button>
+              </div>
+            </div>
+            <div class="row wrap">
+              <button id="regen-overlay">Generate Overlay</button>
+              <button id="refresh-overlay">Refresh Image</button>
+            </div>
+            <div class="image-wrap">
+              <img id="overlay-image" alt="ROI overlay preview" />
+            </div>
+          </section>
+        </div>
       </section>
 
       <section id="panel-settings" class="panel">
@@ -230,7 +240,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Dieser Pipeline-Step wird immer ausgeführt.</div>
+                  <div class="step-section-subtitle muted">This pipeline step always runs.</div>
                 </div>
               </div>
               <div id="step-section-body-slide-detection" class="step-section-body">
@@ -261,7 +271,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Dieser Pipeline-Step wird immer ausgeführt.</div>
+                  <div class="step-section-subtitle muted">This pipeline step always runs.</div>
                 </div>
               </div>
               <div id="step-section-body-transcription" class="step-section-body">
@@ -341,11 +351,11 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Dieser Pipeline-Step wird immer ausgeführt.</div>
+                  <div class="step-section-subtitle muted">This pipeline step always runs.</div>
                 </div>
               </div>
               <div id="step-section-body-transcript-mapping" class="step-section-body">
-                <div class="settings-static muted">Keine separaten Parameter. Der Step nutzt den aktuellen Transcript-Output und die aktuellen Slide-Wechsel des laufenden Runs.</div>
+                <div class="settings-static muted">No separate parameters. This step uses the current transcript output and the current slide changes of the active run.</div>
               </div>
             </section>
 
@@ -359,7 +369,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Speaker-Filter und automatische Quellenwahl werden immer ausgeführt.</div>
+                  <div class="step-section-subtitle muted">Speaker filtering and automatic source selection always run.</div>
                 </div>
               </div>
               <div id="step-section-body-finalize-slides" class="step-section-body">
@@ -430,7 +440,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Bereinigt den finalen Slide-Satz nach dem Speaker-Filter.</div>
+                  <div class="step-section-subtitle muted">Cleans up the final slide set after speaker filtering.</div>
                 </div>
               </div>
               <div id="step-section-body-edit" class="step-section-body">
@@ -477,7 +487,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Übersetzt die finalen Slide-Bilder per Image-to-Image.</div>
+                  <div class="step-section-subtitle muted">Translates the final slide images via image-to-image.</div>
                 </div>
               </div>
               <div id="step-section-body-translate" class="step-section-body">
@@ -533,7 +543,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Skaliert den finalen Slide-Satz lokal oder über Replicate auf x4.</div>
+                  <div class="step-section-subtitle muted">Upscales the final slide set locally or via Replicate to x4.</div>
                 </div>
               </div>
               <div id="step-section-body-upscale" class="step-section-body">
@@ -610,7 +620,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Übersetzt den gemappten finalen Slide-Text 1:1 in die Zielsprache.</div>
+                  <div class="step-section-subtitle muted">Translates the mapped final slide text 1:1 into the target language.</div>
                 </div>
               </div>
               <div id="step-section-body-text-translate" class="step-section-body">
@@ -647,7 +657,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Erzeugt pro finalem Slide ein Voiceover aus dem übersetzten Text.</div>
+                  <div class="step-section-subtitle muted">Generates one voiceover segment per final slide from the translated text.</div>
                 </div>
               </div>
               <div id="step-section-body-tts" class="step-section-body">
@@ -699,7 +709,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Baut aus finalen Slides und Voiceover ein neues MP4 mit SRT und Timeline.</div>
+                  <div class="step-section-subtitle muted">Builds a new MP4 with SRT and timeline from the final slides and voiceover.</div>
                 </div>
               </div>
               <div id="step-section-body-video-export" class="step-section-body">
@@ -749,7 +759,7 @@
       <div id="video-picker-backdrop" class="video-picker-backdrop"></div>
       <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Video picker">
         <div class="modal-head">
-          <h3>Video wählen</h3>
+          <h3>Select Video</h3>
           <button id="video-picker-close" class="modal-close" type="button" aria-label="Close video picker">&times;</button>
         </div>
         <div id="video-picker-list" class="video-picker-list"></div>
@@ -760,7 +770,7 @@
       <div id="lab-image-picker-backdrop" class="video-picker-backdrop"></div>
       <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Image picker">
         <div class="modal-head">
-          <h3>Bild wählen</h3>
+          <h3>Select Image</h3>
           <button id="lab-image-picker-close" class="modal-close" type="button" aria-label="Close image picker">×</button>
         </div>
         <div id="lab-image-picker-list" class="video-picker-list"></div>
@@ -779,7 +789,7 @@
           </div>
         </div>
         <div class="status-modal-body lab-settings-body">
-          <div class="muted">Diese Werte gelten nur für `Image Lab`-Tests und ändern nie die Hauptsettings.</div>
+          <div class="muted">These values apply only to <strong>Image Lab</strong> tests and never modify the main settings.</div>
           <div class="step-sections lab-step-sections">
             <section class="step-section is-forced" data-lab-step-section="slide-edit">
               <div class="step-section-head">
@@ -791,7 +801,7 @@
                       <span class="step-section-chevron" aria-hidden="true"></span>
                     </button>
                   </div>
-                  <div class="step-section-subtitle muted">Isolierte Testwerte nur für `Image Lab` Slide Edit.</div>
+                  <div class="step-section-subtitle muted">Isolated test values for <strong>Image Lab</strong> Slide Edit only.</div>
                 </div>
               </div>
               <div id="lab-step-section-body-slide-edit" class="step-section-body" hidden>
@@ -818,7 +828,7 @@
                       <span class="step-section-chevron" aria-hidden="true"></span>
                     </button>
                   </div>
-                  <div class="step-section-subtitle muted">Isolierte Testwerte nur für `Image Lab` Slide Translate.</div>
+                  <div class="step-section-subtitle muted">Isolated test values for <strong>Image Lab</strong> Slide Translate only.</div>
                 </div>
               </div>
               <div id="lab-step-section-body-slide-translate" class="step-section-body" hidden>
@@ -851,7 +861,7 @@
                       <span class="step-section-chevron" aria-hidden="true"></span>
                     </button>
                   </div>
-                  <div class="step-section-subtitle muted">Isolierte Testwerte nur für `Image Lab` Slide Upscale.</div>
+                  <div class="step-section-subtitle muted">Isolated test values for <strong>Image Lab</strong> Slide Upscale only.</div>
                 </div>
               </div>
               <div id="lab-step-section-body-slide-upscale" class="step-section-body" hidden>
@@ -925,6 +935,19 @@
         </div>
         <div class="status-modal-body">
           <pre id="lab-log" class="log log-status status-modal-log"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="roi-status-modal" class="status-modal" aria-hidden="true">
+      <div id="roi-status-modal-backdrop" class="status-modal-backdrop"></div>
+      <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="ROI terminal log">
+        <div class="modal-head">
+          <h3>ROI Terminal</h3>
+          <button id="roi-status-modal-close" class="modal-close" type="button" aria-label="Close ROI terminal">×</button>
+        </div>
+        <div class="status-modal-body">
+          <pre id="roi-log" class="log log-status status-modal-log"></pre>
         </div>
       </div>
     </div>

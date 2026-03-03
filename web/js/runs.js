@@ -118,7 +118,10 @@ export async function loadOverlay() {
 export async function regenerateOverlay() {
   const t = Number(el.overlayTime.value || 30);
   const result = await apiPost("/api/overlay", { time_sec: t });
-  el.overlayLog.textContent = (result.output || "").trim();
+  if (el.roiLog) {
+    el.roiLog.textContent = (result.output || "").trim();
+    el.roiLog.scrollTop = el.roiLog.scrollHeight;
+  }
   await loadOverlay();
 }
 
@@ -178,11 +181,6 @@ function renderRunsList(runs) {
   }
 }
 
-export function syncFinalViewControls() {
-  el.latestFinalResolutionMode.disabled = state.latestFinalDisplayMode === "compare";
-  el.runFinalResolutionMode.disabled = state.runFinalDisplayMode === "compare";
-}
-
 function shouldAutoPreviewLatest(detail) {
   const status = detail?.run_status || "";
   return ["running", "error", "stopped"].includes(status);
@@ -191,19 +189,19 @@ function shouldAutoPreviewLatest(detail) {
 function deriveLatestAutoPreview(detail) {
   if (!detail) return null;
   if (detail.translated_upscaled_slides_ready) {
-    return { slidesMode: "final", sourceMode: "translated", resolutionMode: "x4" };
+    return { slidesMode: "final", sourceMode: "translated" };
   }
   if (detail.upscaled_slides_ready) {
-    return { slidesMode: "final", sourceMode: "processed", resolutionMode: "x4" };
+    return { slidesMode: "final", sourceMode: "processed" };
   }
   if (detail.translated_slides_ready) {
-    return { slidesMode: "final", sourceMode: "translated", resolutionMode: "native" };
+    return { slidesMode: "final", sourceMode: "translated" };
   }
   if (detail.final_slides_ready) {
-    return { slidesMode: "final", sourceMode: "processed", resolutionMode: "native" };
+    return { slidesMode: "final", sourceMode: "processed" };
   }
   if (detail.base_events_ready) {
-    return { slidesMode: "base", sourceMode: "processed", resolutionMode: "native" };
+    return { slidesMode: "base", sourceMode: "processed" };
   }
   return null;
 }
@@ -216,30 +214,6 @@ function applyLatestAutoPreview(detail) {
   if (preview.slidesMode === "final") {
     state.latestFinalSourceMode = preview.sourceMode;
     el.latestFinalSourceMode.value = preview.sourceMode;
-    state.latestFinalResolutionMode = preview.resolutionMode;
-    el.latestFinalResolutionMode.value = preview.resolutionMode;
-  }
-  syncFinalViewControls();
-}
-
-function canUseX4ForSource(items, slideSourceMode) {
-  if (!Array.isArray(items) || items.length === 0) return false;
-  if (slideSourceMode === "raw") return false;
-  if (slideSourceMode === "translated") {
-    return items.every((item) => Boolean(item.translated_upscaled_slide_image_url));
-  }
-  return items.every((item) => Boolean(item.processed_upscaled_slide_image_url));
-}
-
-function applyResolutionAvailability(selectEl, items, slideSourceMode, stateKey, forceDisable = false) {
-  if (!selectEl) return;
-  const x4Option = selectEl.querySelector('option[value="x4"]');
-  if (!x4Option) return;
-  const allowX4 = !forceDisable && canUseX4ForSource(items, slideSourceMode);
-  x4Option.disabled = !allowX4;
-  if (!allowX4 && stateKey && state[stateKey] === "x4") {
-    state[stateKey] = "native";
-    selectEl.value = "native";
   }
 }
 
@@ -258,21 +232,20 @@ async function setFinalSlideImageMode(runId, eventId, mode) {
   await Promise.all(refreshes);
 }
 
-function resolveRenderedFinalImage(item, slideSourceMode, resolutionMode) {
+function resolveRenderedFinalImage(item, slideSourceMode) {
   const wantsRaw = slideSourceMode === "raw";
   const wantsTranslated = slideSourceMode === "translated";
-  const wantsX4 = resolutionMode === "x4";
 
   if (wantsRaw && item.raw_slide_image_url) {
     return { url: item.raw_slide_image_url, name: item.raw_slide_image_name || item.image_name || "", slideSourceLabel: "raw", resolutionLabel: "native" };
   }
-  if (wantsTranslated && wantsX4 && item.translated_upscaled_slide_image_url) {
+  if (wantsTranslated && item.translated_upscaled_slide_image_url) {
     return { url: item.translated_upscaled_slide_image_url, name: item.translated_upscaled_slide_image_name || item.image_name || "", slideSourceLabel: "translated", resolutionLabel: "x4" };
   }
   if (wantsTranslated && item.translated_slide_image_url) {
     return { url: item.translated_slide_image_url, name: item.translated_slide_image_name || item.image_name || "", slideSourceLabel: "translated", resolutionLabel: "native" };
   }
-  if (wantsX4 && item.processed_upscaled_slide_image_url) {
+  if (item.processed_upscaled_slide_image_url) {
     return { url: item.processed_upscaled_slide_image_url, name: item.processed_upscaled_slide_image_name || item.image_name || "", slideSourceLabel: "processed", resolutionLabel: "x4" };
   }
   if (item.image_mode === "full") {
@@ -319,13 +292,13 @@ function resolveRenderedFinalImageStrict(item, sourceLabel, resolutionMode) {
 }
 
 function resolveCompareRenderedImages(item, slideSourceMode) {
-  const left = resolveRenderedFinalImage(item, slideSourceMode, "native");
+  const left = resolveRenderedFinalImageStrict(item, slideSourceMode, "native");
   if (left.slideSourceLabel === "raw") {
-    return { left, right: { url: "", name: "", slideSourceLabel: "raw", resolutionLabel: "x4", missingReason: "x4 nicht verfügbar für raw" } };
+    return { left, right: { url: "", name: "", slideSourceLabel: "raw", resolutionLabel: "x4", missingReason: "x4 is not available for raw" } };
   }
   const right = resolveRenderedFinalImageStrict(item, left.slideSourceLabel, "x4");
   if (right.url) return { left, right };
-  return { left, right: { ...right, missingReason: `Kein x4-Bild für ${left.slideSourceLabel}` } };
+  return { left, right: { ...right, missingReason: `No x4 image available for ${left.slideSourceLabel}` } };
 }
 
 function createRenderedImageElement(renderedImage, fallbackName) {
@@ -361,11 +334,11 @@ function createImageModeToggle(runId, item) {
   wrap.className = "slide-controls";
   const label = document.createElement("span");
   label.className = "slide-controls-label";
-  label.textContent = "Bild:";
+  label.textContent = "Image:";
   wrap.appendChild(label);
   const toggle = document.createElement("div");
   toggle.className = "mode-toggle";
-  for (const mode of [{ key: "slide", label: "ROI" }, { key: "full", label: "Vollbild" }]) {
+  for (const mode of [{ key: "slide", label: "ROI" }, { key: "full", label: "Full" }]) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "mode-toggle-btn";
@@ -379,15 +352,57 @@ function createImageModeToggle(runId, item) {
   return wrap;
 }
 
-async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode, displayMode, resolutionSelect = null, resolutionStateKey = "") {
+function createSlideDetailsPanel(facts) {
+  const wrap = document.createElement("section");
+  wrap.className = "output-info-panel slide-details-panel";
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "output-info-toggle";
+  toggle.setAttribute("aria-expanded", "false");
+  const title = document.createElement("span");
+  title.textContent = "Slide Details";
+  const chevron = document.createElement("span");
+  chevron.className = "step-section-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  toggle.appendChild(title);
+  toggle.appendChild(chevron);
+  const body = document.createElement("div");
+  body.className = "output-info-body";
+  body.hidden = true;
+  const grid = document.createElement("div");
+  grid.className = "output-info-grid";
+  for (const [labelText, valueText] of facts) {
+    const item = document.createElement("div");
+    item.className = "output-info-item";
+    const label = document.createElement("div");
+    label.className = "output-info-label";
+    label.textContent = labelText;
+    const value = document.createElement("div");
+    value.className = "output-info-value";
+    value.textContent = valueText;
+    item.appendChild(label);
+    item.appendChild(value);
+    grid.appendChild(item);
+  }
+  body.appendChild(grid);
+  toggle.addEventListener("click", () => {
+    const expanded = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+    body.hidden = expanded;
+    wrap.classList.toggle("is-open", !expanded);
+  });
+  wrap.appendChild(toggle);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+async function renderFinalSlides(runId, target, slideSourceMode, displayMode) {
   if (!runId) {
     target.innerHTML = "";
-    applyResolutionAvailability(resolutionSelect, [], slideSourceMode, resolutionStateKey, true);
     return;
   }
   const data = await apiGet(`/api/runs/${encodeURIComponent(runId)}/final-slides`);
   const items = data.items || [];
-  applyResolutionAvailability(resolutionSelect, items, slideSourceMode, resolutionStateKey, false);
   target.innerHTML = "";
   if (items.length === 0) {
     const empty = document.createElement("div");
@@ -402,7 +417,7 @@ async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode,
     const media = document.createElement("div");
     media.className = "slide-media";
     const fallbackName = `event_${item.event_id}`;
-    let metaText = "";
+    let detailsFacts = [];
     if (displayMode === "compare") {
       const compare = resolveCompareRenderedImages(item, slideSourceMode);
       const compareGrid = document.createElement("div");
@@ -410,18 +425,31 @@ async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode,
       compareGrid.appendChild(createComparePanel(`${compare.left.slideSourceLabel} | native`, compare.left, fallbackName));
       compareGrid.appendChild(createComparePanel(`${compare.left.slideSourceLabel} | x4`, compare.right, fallbackName));
       media.appendChild(compareGrid);
-      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | final_quelle: ${item.source_mode_final || "-"} | roi_quelle: ${compare.left.slideSourceLabel} | anzeige: compare`;
+      detailsFacts = [
+        ["Event", String(item.event_id)],
+        ["Start", `${Number(item.slide_start).toFixed(2)}s`],
+        ["End", `${Number(item.slide_end).toFixed(2)}s`],
+        ["Image", item.image_mode || "-"],
+        ["Final Source", item.source_mode_final || "-"],
+        ["ROI Source", compare.left.slideSourceLabel],
+        ["Display", "compare"],
+      ];
     } else {
-      const renderedImage = resolveRenderedFinalImage(item, slideSourceMode, resolutionMode);
+      const renderedImage = resolveRenderedFinalImage(item, slideSourceMode);
       media.appendChild(createRenderedImageElement(renderedImage, fallbackName));
-      metaText = `event ${item.event_id} | ${Number(item.slide_start).toFixed(2)}s - ${Number(item.slide_end).toFixed(2)}s | bild: ${item.image_mode || "-"} | final_quelle: ${item.source_mode_final || "-"} | roi_quelle: ${renderedImage.slideSourceLabel} | auflösung: ${renderedImage.resolutionLabel}`;
+      detailsFacts = [
+        ["Event", String(item.event_id)],
+        ["Start", `${Number(item.slide_start).toFixed(2)}s`],
+        ["End", `${Number(item.slide_end).toFixed(2)}s`],
+        ["Image", item.image_mode || "-"],
+        ["Final Source", item.source_mode_final || "-"],
+        ["ROI Source", renderedImage.slideSourceLabel],
+        ["Resolution", renderedImage.resolutionLabel],
+      ];
     }
     const controls = createImageModeToggle(runId, item);
     if (controls) media.appendChild(controls);
-    const meta = document.createElement("div");
-    meta.className = "slide-meta";
-    meta.textContent = metaText;
-    media.appendChild(meta);
+    media.appendChild(createSlideDetailsPanel(detailsFacts));
     const textWrap = document.createElement("div");
     textWrap.className = "slide-text";
     textWrap.textContent = item.translated_text || item.text || "(no text)";
@@ -464,10 +492,11 @@ async function renderBaseEvents(runId, target) {
       missing.textContent = "No image";
       media.appendChild(missing);
     }
-    const meta = document.createElement("div");
-    meta.className = "slide-meta";
-    meta.textContent = `event ${item.event_id} | ${Number(item.time_sec).toFixed(2)}s | frame ${item.event_frame}`;
-    media.appendChild(meta);
+    media.appendChild(createSlideDetailsPanel([
+      ["Event", String(item.event_id)],
+      ["Time", `${Number(item.time_sec).toFixed(2)}s`],
+      ["Frame", String(item.event_frame)],
+    ]));
     const info = document.createElement("div");
     info.className = "slide-text";
     info.textContent = `timecode: ${item.timecode || ""}\ntransition_no: ${item.transition_no}\nframe_id_0: ${item.frame_id_0}\nframe_id_1: ${item.frame_id_1}`;
@@ -481,33 +510,29 @@ export async function loadLatestSlides() {
   const runId = state.latestRunId;
   if (!runId) {
     el.latestSlidesList.innerHTML = "";
-    applyResolutionAvailability(el.latestFinalResolutionMode, [], state.latestFinalSourceMode, "latestFinalResolutionMode", true);
     return;
   }
   if (shouldAutoPreviewLatest(state.latestRunDetail)) {
     applyLatestAutoPreview(state.latestRunDetail);
   }
   if (state.latestSlidesMode === "base") {
-    applyResolutionAvailability(el.latestFinalResolutionMode, [], state.latestFinalSourceMode, "latestFinalResolutionMode", true);
     await renderBaseEvents(runId, el.latestSlidesList);
     return;
   }
-  await renderFinalSlides(runId, el.latestSlidesList, state.latestFinalSourceMode, state.latestFinalResolutionMode, state.latestFinalDisplayMode, el.latestFinalResolutionMode, "latestFinalResolutionMode");
+  await renderFinalSlides(runId, el.latestSlidesList, state.latestFinalSourceMode, state.latestFinalDisplayMode);
 }
 
 export async function loadRunSlides() {
   const runId = state.selectedRunId;
   if (!runId) {
     el.runSlidesList.innerHTML = "";
-    applyResolutionAvailability(el.runFinalResolutionMode, [], state.runFinalSourceMode, "runFinalResolutionMode", true);
     return;
   }
   if (state.runSlidesMode === "base") {
-    applyResolutionAvailability(el.runFinalResolutionMode, [], state.runFinalSourceMode, "runFinalResolutionMode", true);
     await renderBaseEvents(runId, el.runSlidesList);
     return;
   }
-  await renderFinalSlides(runId, el.runSlidesList, state.runFinalSourceMode, state.runFinalResolutionMode, state.runFinalDisplayMode, el.runFinalResolutionMode, "runFinalResolutionMode");
+  await renderFinalSlides(runId, el.runSlidesList, state.runFinalSourceMode, state.runFinalDisplayMode);
 }
 
 export async function loadRunDetails() {

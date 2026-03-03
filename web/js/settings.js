@@ -138,9 +138,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   clearHealthStatus("textTranslate");
   clearHealthStatus("tts");
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
-  const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
-  const replicateState = cfg.REPLICATE_API_TOKEN_SET ? "set" : "missing";
-  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | transcription:${cfg.TRANSCRIPTION_PROVIDER} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | edit:${cfg.RUN_STEP_EDIT ? "on" : "off"} | image_translate:${cfg.RUN_STEP_TRANSLATE ? "on" : "off"} | upscale:${cfg.RUN_STEP_UPSCALE ? "on" : "off"} | text_translate:${cfg.RUN_STEP_TEXT_TRANSLATE ? "on" : "off"} | tts:${cfg.RUN_STEP_TTS ? "on" : "off"} | video_export:${cfg.RUN_STEP_VIDEO_EXPORT ? "on" : "off"} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | image_translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState} | replicate_key: ${replicateState}`;
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel}`;
   syncSettingsFieldState();
   renderSelectedVideo(syncActionState);
 }
