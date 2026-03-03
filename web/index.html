@@ -130,6 +130,12 @@
             <button id="lab-pick-image" type="button">Bild wählen</button>
             <button id="lab-run-edit" type="button">Test Edit</button>
             <button id="lab-run-translate" type="button">Test Translate</button>
+            <label>Upscale Provider
+              <select id="lab_upscale_provider">
+                <option value="swin2sr">Local Swin2SR</option>
+                <option value="replicate_nightmare_realesrgan">Replicate nightmareai/real-esrgan</option>
+              </select>
+            </label>
             <button id="lab-run-upscale" type="button">Test Upscale</button>
           </div>
           <div id="lab-selected-image" class="muted">Kein Bild gewählt.</div>
@@ -263,6 +269,7 @@
               <select id="final_slide_upscale_mode">
                 <option value="none">none</option>
                 <option value="swin2sr">swin2sr</option>
+                <option value="replicate_nightmare_realesrgan">replicate_nightmare_realesrgan</option>
               </select>
             </label>
             <label>FINAL_SLIDE_UPSCALE_MODEL <input id="final_slide_upscale_model" type="text" /></label>
@@ -275,6 +282,10 @@
             </label>
             <label>FINAL_SLIDE_UPSCALE_TILE_SIZE <input id="final_slide_upscale_tile_size" type="number" min="0" step="1" /></label>
             <label>FINAL_SLIDE_UPSCALE_TILE_OVERLAP <input id="final_slide_upscale_tile_overlap" type="number" min="0" step="1" /></label>
+            <label>REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF <input id="replicate_nightmare_realesrgan_model_ref" type="text" /></label>
+            <label>REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID <input id="replicate_nightmare_realesrgan_version_id" type="text" /></label>
+            <label>REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND <input id="replicate_nightmare_realesrgan_price_per_second" type="number" min="0" step="0.0001" /></label>
+            <label>REPLICATE_UPSCALE_CONCURRENCY <input id="replicate_upscale_concurrency" type="number" min="1" step="1" /></label>
           </div>
 
           <div class="row">

@@ -83,12 +83,15 @@ LAB_STATE = {
     "finished_at": None,
     "job_id": None,
     "action": "",
+    "provider": "",
     "run_id": None,
     "event_id": None,
     "input_name": "",
     "original_url": "",
     "result_url": "",
     "result_name": "",
+    "estimated_cost_usd": 0.0,
+    "manifest_path": "",
     "message": "",
     "log_tail": deque(maxlen=400),
     "process": None,
@@ -170,6 +173,15 @@ def write_text_file(path: Path, text: str) -> None:
     path.write_text(normalized.rstrip("\n") + "\n", encoding="utf-8")
 
 
+def read_json_file(path: Path) -> dict | list | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def ensure_within(base: Path, target: Path) -> Path:
     base_resolved = base.resolve()
     target_resolved = target.resolve()
@@ -189,6 +201,107 @@ def count_files(path: Path) -> int:
     if not path.exists():
         return 0
     return sum(1 for p in path.iterdir() if p.is_file())
+
+
+def summarize_upscale_manifest(path: Path) -> dict[str, float | int | str]:
+    raw = read_json_file(path)
+    if not isinstance(raw, dict):
+        return {
+            "provider": "",
+            "items_processed": 0,
+            "upscaled": 0,
+            "fallback": 0,
+            "total_estimated_cost_usd": 0.0,
+        }
+
+    summary = raw.get("summary")
+    items = raw.get("items")
+    items = items if isinstance(items, list) else []
+    if not isinstance(summary, dict):
+        upscaled = sum(
+            1
+            for item in items
+            if isinstance(item, dict) and item.get("status") in {"upscaled", "succeeded"}
+        )
+        fallback = len(items) - upscaled
+        total_cost = 0.0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                total_cost += float(item.get("estimated_cost_usd", 0.0) or 0.0)
+            except Exception:
+                continue
+        summary = {
+            "items_processed": len(items),
+            "upscaled": upscaled,
+            "fallback": fallback,
+            "total_estimated_cost_usd": round(total_cost, 6),
+        }
+    elif items:
+        # Prefer item-derived counts so older manifests with a bad summary can still render correctly.
+        upscaled = sum(
+            1
+            for item in items
+            if isinstance(item, dict) and item.get("status") in {"upscaled", "succeeded"}
+        )
+        fallback = len(items) - upscaled
+        total_cost = 0.0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                total_cost += float(item.get("estimated_cost_usd", 0.0) or 0.0)
+            except Exception:
+                continue
+        summary = {
+            **summary,
+            "items_processed": len(items),
+            "upscaled": upscaled,
+            "fallback": fallback,
+            "total_estimated_cost_usd": round(total_cost, 6),
+        }
+
+    def _num(key: str) -> float:
+        try:
+            return float(summary.get(key, 0.0) or 0.0)
+        except Exception:
+            return 0.0
+
+    def _int(key: str) -> int:
+        try:
+            return int(summary.get(key, 0) or 0)
+        except Exception:
+            return 0
+
+    return {
+        "provider": str(raw.get("provider", "") or ""),
+        "items_processed": _int("items_processed"),
+        "upscaled": _int("upscaled"),
+        "fallback": _int("fallback"),
+        "total_estimated_cost_usd": round(_num("total_estimated_cost_usd"), 6),
+    }
+
+
+def summarize_run_upscale_cost(run_dir: Path) -> dict[str, float | int | str]:
+    total_cost = 0.0
+    provider = ""
+    manifest_count = 0
+    for rel in (
+        "slitranet/keyframes/final/upscale_manifest.json",
+        "slitranet/keyframes/final/upscale_translated_manifest.json",
+    ):
+        summary = summarize_upscale_manifest(run_dir / rel)
+        if summary["items_processed"]:
+            manifest_count += 1
+        total_cost += float(summary["total_estimated_cost_usd"])
+        if not provider and summary["provider"]:
+            provider = str(summary["provider"])
+    return {
+        "provider": provider,
+        "manifest_count": manifest_count,
+        "upscale_estimated_cost_usd": round(total_cost, 6),
+    }
 
 
 def csv_event_count(path: Path) -> int:
@@ -318,6 +431,8 @@ def list_runs() -> list[dict]:
             entry / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
         )
         full_dir = entry / "slitranet" / "keyframes" / "full"
+        config_used = parse_env(entry / "config_used.env") if (entry / "config_used.env").exists() else {}
+        upscale_summary = summarize_run_upscale_cost(entry)
         runs.append(
             {
                 "id": entry.name,
@@ -331,6 +446,8 @@ def list_runs() -> list[dict]:
                 "upscaled_slide_images": count_files(upscaled_slide_dir),
                 "translated_upscaled_slide_images": count_files(translated_upscaled_slide_dir),
                 "full_images": count_files(full_dir),
+                "upscale_mode_used": config_used.get("FINAL_SLIDE_UPSCALE_MODE", ""),
+                "upscale_estimated_cost_usd": upscale_summary["upscale_estimated_cost_usd"],
                 "mtime": int(entry.stat().st_mtime),
             }
         )
@@ -354,6 +471,8 @@ def run_detail(run_id: str) -> dict:
     upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_upscaled"
     translated_upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
     full_dir = run_dir / "slitranet" / "keyframes" / "full"
+    config_used = parse_env(run_dir / "config_used.env") if (run_dir / "config_used.env").exists() else {}
+    upscale_summary = summarize_run_upscale_cost(run_dir)
 
     transition_files = []
     if transitions_dir.exists():
@@ -376,6 +495,8 @@ def run_detail(run_id: str) -> dict:
         "upscaled_slide_images": count_files(upscaled_slide_dir),
         "translated_upscaled_slide_images": count_files(translated_upscaled_slide_dir),
         "full_images": count_files(full_dir),
+        "upscale_mode_used": config_used.get("FINAL_SLIDE_UPSCALE_MODE", ""),
+        "upscale_estimated_cost_usd": upscale_summary["upscale_estimated_cost_usd"],
     }
 
 
@@ -625,7 +746,7 @@ def _lab_job_id(action: str) -> str:
     return f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_{action}_{int(time.time() * 1000) % 1000:03d}"
 
 
-def start_lab_job(action: str, run_id: str, event_id: int) -> tuple[bool, str]:
+def start_lab_job(action: str, run_id: str, event_id: int, provider: str = "") -> tuple[bool, str]:
     if action not in {"edit", "translate", "upscale"}:
         return False, "Invalid lab action"
     if not RUN_ID_PATTERN.match(run_id):
@@ -647,6 +768,7 @@ def start_lab_job(action: str, run_id: str, event_id: int) -> tuple[bool, str]:
 
     source_path = ensure_within(run_dir, run_dir / source_rel)
     env = parse_env(CONFIG_PATH)
+    provider = provider.strip().lower()
 
     if action == "edit":
         mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
@@ -663,9 +785,11 @@ def start_lab_job(action: str, run_id: str, event_id: int) -> tuple[bool, str]:
         if not (env.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip():
             return False, "FINAL_SLIDE_TARGET_LANGUAGE must not be empty"
     else:
-        mode = (env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").strip().lower()
-        if mode != "swin2sr":
-            return False, "Image Lab upscale currently requires FINAL_SLIDE_UPSCALE_MODE=swin2sr"
+        mode = provider or (env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").strip().lower()
+        if mode not in {"swin2sr", "replicate_nightmare_realesrgan"}:
+            return False, "Image Lab upscale requires one of: swin2sr, replicate_nightmare_realesrgan"
+        if mode == "replicate_nightmare_realesrgan" and not (os.environ.get("REPLICATE_API_TOKEN") or "").strip():
+            return False, "REPLICATE_API_TOKEN is not set in the server environment"
 
     job_id = _lab_job_id(action)
     job_dir = LAB_DIR / job_id
@@ -715,23 +839,65 @@ def start_lab_job(action: str, run_id: str, event_id: int) -> tuple[bool, str]:
         ]
         message = "Running Gemini translate on selected final slide."
     else:
-        cmd = [
-            PYTHON_BIN,
-            "scripts/upscale_final_slides_swin2sr.py",
-            "--input-dir",
-            str(input_dir),
-            "--output-dir",
-            str(output_dir),
-            "--model-id",
-            (env.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "caidas/swin2SR-classical-sr-x4-64").strip(),
-            "--device",
-            (env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto") or "auto").strip(),
-            "--tile-size",
-            str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256") or "256")),
-            "--tile-overlap",
-            str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24") or "24")),
-        ]
-        message = "Running Swin2SR upscale on selected final slide."
+        if mode == "swin2sr":
+            cmd = [
+                PYTHON_BIN,
+                "scripts/upscale_final_slides_swin2sr.py",
+                "--input-dir",
+                str(input_dir),
+                "--output-dir",
+                str(output_dir),
+                "--model-id",
+                (env.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "caidas/swin2SR-classical-sr-x4-64").strip(),
+                "--device",
+                (env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto") or "auto").strip(),
+                "--tile-size",
+                str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256") or "256")),
+                "--tile-overlap",
+                str(int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24") or "24")),
+            ]
+            message = "Running local Swin2SR upscale on selected final slide."
+        else:
+            replicate_provider = "nightmare_realesrgan"
+            cmd = [
+                PYTHON_BIN,
+                "scripts/upscale_final_slides_replicate.py",
+                "--input-dir",
+                str(input_dir),
+                "--output-dir",
+                str(output_dir),
+                "--provider",
+                replicate_provider,
+                "--concurrency",
+                "1",
+                "--manifest-path",
+                str(job_dir / "replicate_manifest.json"),
+                "--nightmare-realesrgan-model-ref",
+                (
+                    env.get("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF", "nightmareai/real-esrgan")
+                    or "nightmareai/real-esrgan"
+                ).strip(),
+                "--nightmare-realesrgan-version-id",
+                (
+                    env.get(
+                        "REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID",
+                        "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
+                    )
+                    or "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa"
+                ).strip(),
+                "--nightmare-realesrgan-scale",
+                "4",
+                "--nightmare-realesrgan-face-enhance",
+                "false",
+                "--nightmare-realesrgan-price-per-second",
+                str(
+                    float(
+                        env.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", "0.000225")
+                        or "0.000225"
+                    )
+                ),
+            ]
+            message = "Running Replicate nightmareai/real-esrgan upscale on selected final slide."
 
     with LAB_LOCK:
         proc = LAB_STATE.get("process")
@@ -743,15 +909,24 @@ def start_lab_job(action: str, run_id: str, event_id: int) -> tuple[bool, str]:
         LAB_STATE["finished_at"] = None
         LAB_STATE["job_id"] = job_id
         LAB_STATE["action"] = action
+        LAB_STATE["provider"] = mode if action == "upscale" else ""
         LAB_STATE["run_id"] = run_id
         LAB_STATE["event_id"] = event_id
         LAB_STATE["input_name"] = source_path.name
         LAB_STATE["original_url"] = api_file_url_for(original_copy)
         LAB_STATE["result_url"] = api_file_url_for(result_path)
         LAB_STATE["result_name"] = result_path.name
+        LAB_STATE["estimated_cost_usd"] = 0.0
+        LAB_STATE["manifest_path"] = (
+            str(job_dir / "replicate_manifest.json")
+            if action == "upscale" and mode == "replicate_nightmare_realesrgan"
+            else ""
+        )
         LAB_STATE["message"] = message
         LAB_STATE["log_tail"].clear()
         LAB_STATE["log_tail"].append(f"[Lab] action={action}")
+        if action == "upscale" and mode:
+            LAB_STATE["log_tail"].append(f"[Lab] provider={mode}")
         LAB_STATE["log_tail"].append(f"[Lab] input={source_path.name}")
 
         process = subprocess.Popen(
@@ -898,12 +1073,14 @@ def snapshot_lab_state() -> dict:
             "finished_at": LAB_STATE["finished_at"],
             "job_id": LAB_STATE["job_id"],
             "action": LAB_STATE["action"],
+            "provider": LAB_STATE["provider"],
             "run_id": LAB_STATE["run_id"],
             "event_id": LAB_STATE["event_id"],
             "input_name": LAB_STATE["input_name"],
             "original_url": LAB_STATE["original_url"],
             "result_url": LAB_STATE["result_url"],
             "result_name": LAB_STATE["result_name"],
+            "estimated_cost_usd": LAB_STATE["estimated_cost_usd"],
             "message": LAB_STATE["message"],
             "log_tail": list(LAB_STATE["log_tail"]),
         }
@@ -911,9 +1088,14 @@ def snapshot_lab_state() -> dict:
 
 def finalize_lab_state(code: int) -> None:
     with LAB_LOCK:
+        manifest_path = Path(LAB_STATE["manifest_path"]) if LAB_STATE.get("manifest_path") else None
         LAB_STATE["finished_at"] = _now()
         LAB_STATE["status"] = "done" if code == 0 else "error"
         LAB_STATE["process"] = None
+        LAB_STATE["estimated_cost_usd"] = 0.0
+        if manifest_path and manifest_path.exists():
+            summary = summarize_upscale_manifest(manifest_path)
+            LAB_STATE["estimated_cost_usd"] = float(summary["total_estimated_cost_usd"] or 0.0)
         if code != 0 and not LAB_STATE["message"]:
             LAB_STATE["message"] = "Lab job failed."
 
@@ -1159,7 +1341,20 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_UPSCALE_DEVICE": env.get("FINAL_SLIDE_UPSCALE_DEVICE", "auto"),
                     "FINAL_SLIDE_UPSCALE_TILE_SIZE": int(env.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", "256")),
                     "FINAL_SLIDE_UPSCALE_TILE_OVERLAP": int(env.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", "24")),
+                    "REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF": env.get(
+                        "REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF",
+                        "nightmareai/real-esrgan",
+                    ),
+                    "REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID": env.get(
+                        "REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID",
+                        "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa",
+                    ),
+                    "REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND": float(
+                        env.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", "0.000225")
+                    ),
+                    "REPLICATE_UPSCALE_CONCURRENCY": int(env.get("REPLICATE_UPSCALE_CONCURRENCY", "2")),
                     "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
+                    "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                 }
                 return self._send_json(200, payload)
 
@@ -1330,6 +1525,16 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_UPSCALE_DEVICE": str(data["FINAL_SLIDE_UPSCALE_DEVICE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_TILE_SIZE": int(data["FINAL_SLIDE_UPSCALE_TILE_SIZE"]),
                     "FINAL_SLIDE_UPSCALE_TILE_OVERLAP": int(data["FINAL_SLIDE_UPSCALE_TILE_OVERLAP"]),
+                    "REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF": str(
+                        data["REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF"]
+                    ).strip(),
+                    "REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID": str(
+                        data["REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID"]
+                    ).strip(),
+                    "REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND": float(
+                        data["REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND"]
+                    ),
+                    "REPLICATE_UPSCALE_CONCURRENCY": int(data["REPLICATE_UPSCALE_CONCURRENCY"]),
                 }
                 gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
@@ -1384,8 +1589,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
-                if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {"none", "swin2sr"}:
-                    raise ValueError("FINAL_SLIDE_UPSCALE_MODE must be none or swin2sr")
+                if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {
+                    "none",
+                    "swin2sr",
+                    "replicate_nightmare_realesrgan",
+                }:
+                    raise ValueError(
+                        "FINAL_SLIDE_UPSCALE_MODE must be none, swin2sr, or replicate_nightmare_realesrgan"
+                    )
                 if not cfg["FINAL_SLIDE_UPSCALE_MODEL"]:
                     raise ValueError("FINAL_SLIDE_UPSCALE_MODEL must not be empty")
                 if cfg["FINAL_SLIDE_UPSCALE_DEVICE"] not in {"auto", "cuda", "cpu"}:
@@ -1401,6 +1612,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError(
                         "FINAL_SLIDE_UPSCALE_TILE_OVERLAP must be smaller than FINAL_SLIDE_UPSCALE_TILE_SIZE"
                     )
+                if not cfg["REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF"]:
+                    raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF must not be empty")
+                if not cfg["REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID"]:
+                    raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID must not be empty")
+                if cfg["REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND"] < 0:
+                    raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND must be >= 0")
+                if cfg["REPLICATE_UPSCALE_CONCURRENCY"] < 1:
+                    raise ValueError("REPLICATE_UPSCALE_CONCURRENCY must be >= 1")
                 write_config_values(CONFIG_PATH, cfg)
                 write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
                 write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
@@ -1412,6 +1631,7 @@ class Handler(BaseHTTPRequestHandler):
                         "GEMINI_EDIT_PROMPT": gemini_edit_prompt.rstrip("\n"),
                         "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
                         "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
+                        "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                     },
                 )
 
@@ -1444,7 +1664,12 @@ class Handler(BaseHTTPRequestHandler):
             if path in {"/api/lab/edit", "/api/lab/translate", "/api/lab/upscale"}:
                 data = self._read_json_body()
                 action = path.rsplit("/", 1)[-1]
-                ok, msg = start_lab_job(action, str(data["run_id"]).strip(), int(data["event_id"]))
+                ok, msg = start_lab_job(
+                    action,
+                    str(data["run_id"]).strip(),
+                    int(data["event_id"]),
+                    str(data.get("provider", "")).strip(),
+                )
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_lab_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_lab_state()})

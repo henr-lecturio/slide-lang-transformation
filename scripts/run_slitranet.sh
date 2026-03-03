@@ -49,7 +49,7 @@ if [ ! -d "$VENV_DIR" ]; then
   exit 1
 fi
 
-if [ -f "$LOCAL_ENV_FILE" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+if [ -f "$LOCAL_ENV_FILE" ]; then
   # shellcheck disable=SC1090
   set -a
   source "$LOCAL_ENV_FILE"
@@ -83,6 +83,7 @@ FULLSLIDE_PERSON_OUTSIDE_RATIO="${FULLSLIDE_PERSON_OUTSIDE_RATIO:-0.35}"
 RUN_STEP_EDIT="${RUN_STEP_EDIT:-1}"
 RUN_STEP_TRANSLATE="${RUN_STEP_TRANSLATE:-1}"
 RUN_STEP_UPSCALE="${RUN_STEP_UPSCALE:-1}"
+REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND="${REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND:-0.000225}"
 
 toggle_to_flag() {
   case "${1:-1}" in
@@ -263,6 +264,7 @@ FINAL_SLIDE_RAW_DIR="$OUT_BASE/keyframes/final/slide_raw"
 FINAL_SLIDE_TRANSLATED_DIR="$OUT_BASE/keyframes/final/slide_translated"
 FINAL_SLIDE_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_upscaled"
 FINAL_SLIDE_TRANSLATED_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_translated_upscaled"
+UPSCALE_MANIFEST_JSON="$OUT_BASE/keyframes/final/upscale_manifest.json"
 FINAL_FULL_DIR="$OUT_BASE/keyframes/final/full"
 FINAL_SLIDE_CLEAN_MODE="none"
 if [ "$RUN_STEP_EDIT" = "1" ]; then
@@ -420,8 +422,45 @@ if [ "$RUN_STEP_UPSCALE" = "1" ]; then
       step_done upscale
       echo "[Upscale] Upscaling finished."
       ;;
+    replicate_nightmare_realesrgan)
+      if [ -z "${REPLICATE_API_TOKEN:-}" ]; then
+        echo "ERROR: $FINAL_SLIDE_UPSCALE_MODE requires REPLICATE_API_TOKEN in the environment." >&2
+        exit 1
+      fi
+      REPLICATE_PROVIDER="nightmare_realesrgan"
+      REPLICATE_EXTRA_ARGS=(
+        --nightmare-realesrgan-model-ref "${REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF:-nightmareai/real-esrgan}"
+        --nightmare-realesrgan-version-id "${REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID:-f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa}"
+        --nightmare-realesrgan-scale 4
+        --nightmare-realesrgan-face-enhance false
+        --nightmare-realesrgan-price-per-second "${REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND:-0.000225}"
+      )
+      echo "[Upscale] Upscaling processed final slides with Replicate provider $REPLICATE_PROVIDER ..."
+      step_start upscale
+      step_detail upscale "processed-final-slides:$REPLICATE_PROVIDER"
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_replicate.py" \
+        --input-dir "$FINAL_SLIDE_DIR" \
+        --output-dir "$FINAL_SLIDE_UPSCALED_DIR" \
+        --provider "$REPLICATE_PROVIDER" \
+        --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
+        --manifest-path "$UPSCALE_MANIFEST_JSON" \
+        "${REPLICATE_EXTRA_ARGS[@]}"
+      if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
+        echo "[Upscale] Upscaling translated final slides with Replicate provider $REPLICATE_PROVIDER ..."
+        step_detail upscale "translated-final-slides:$REPLICATE_PROVIDER"
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/upscale_final_slides_replicate.py" \
+          --input-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+          --output-dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR" \
+          --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
+          --manifest-path "$OUT_BASE/keyframes/final/upscale_translated_manifest.json" \
+          --provider "$REPLICATE_PROVIDER" \
+          "${REPLICATE_EXTRA_ARGS[@]}"
+      fi
+      step_done upscale
+      echo "[Upscale] Replicate upscaling finished."
+      ;;
     *)
-      echo "ERROR: FINAL_SLIDE_UPSCALE_MODE must be one of: none, swin2sr" >&2
+      echo "ERROR: FINAL_SLIDE_UPSCALE_MODE must be one of: none, swin2sr, replicate_nightmare_realesrgan" >&2
       exit 1
       ;;
   esac

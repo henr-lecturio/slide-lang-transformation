@@ -46,6 +46,10 @@ const el = {
   finalSlideUpscaleDevice: document.getElementById("final_slide_upscale_device"),
   finalSlideUpscaleTileSize: document.getElementById("final_slide_upscale_tile_size"),
   finalSlideUpscaleTileOverlap: document.getElementById("final_slide_upscale_tile_overlap"),
+  replicateNightmareRealesrganModelRef: document.getElementById("replicate_nightmare_realesrgan_model_ref"),
+  replicateNightmareRealesrganVersionId: document.getElementById("replicate_nightmare_realesrgan_version_id"),
+  replicateNightmareRealesrganPricePerSecond: document.getElementById("replicate_nightmare_realesrgan_price_per_second"),
+  replicateUpscaleConcurrency: document.getElementById("replicate_upscale_concurrency"),
   overlayTime: document.getElementById("overlay-time"),
   regenOverlay: document.getElementById("regen-overlay"),
   refreshOverlay: document.getElementById("refresh-overlay"),
@@ -60,6 +64,7 @@ const el = {
   labPickImage: document.getElementById("lab-pick-image"),
   labRunEdit: document.getElementById("lab-run-edit"),
   labRunTranslate: document.getElementById("lab-run-translate"),
+  labUpscaleProvider: document.getElementById("lab_upscale_provider"),
   labRunUpscale: document.getElementById("lab-run-upscale"),
   labSelectedImage: document.getElementById("lab-selected-image"),
   labJobStatus: document.getElementById("lab-job-status"),
@@ -188,6 +193,12 @@ function videoThumbUrl(videoPath) {
   return `/api/videos/thumbnail?path=${encodeURIComponent(videoPath)}&v=${Date.now()}`;
 }
 
+function formatUsd(value) {
+  const num = Number(value || 0);
+  if (!(num > 0)) return "-";
+  return `$${num.toFixed(4)}`;
+}
+
 function syncActionState() {
   const hasVideo = Boolean((state.selectedVideoPath || "").trim());
   const isBusyRun = state.currentRunStatus === "running" || state.currentRunStatus === "stopping";
@@ -298,9 +309,17 @@ function setConfig(cfg) {
   el.finalSlideUpscaleDevice.value = cfg.FINAL_SLIDE_UPSCALE_DEVICE || "auto";
   el.finalSlideUpscaleTileSize.value = cfg.FINAL_SLIDE_UPSCALE_TILE_SIZE ?? 256;
   el.finalSlideUpscaleTileOverlap.value = cfg.FINAL_SLIDE_UPSCALE_TILE_OVERLAP ?? 24;
+  el.replicateNightmareRealesrganModelRef.value = cfg.REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF || "nightmareai/real-esrgan";
+  el.replicateNightmareRealesrganVersionId.value = cfg.REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID || "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa";
+  el.replicateNightmareRealesrganPricePerSecond.value = cfg.REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND ?? 0.000225;
+  el.replicateUpscaleConcurrency.value = cfg.REPLICATE_UPSCALE_CONCURRENCY ?? 2;
+  el.labUpscaleProvider.value = ["swin2sr", "replicate_nightmare_realesrgan"].includes(cfg.FINAL_SLIDE_UPSCALE_MODE)
+    ? cfg.FINAL_SLIDE_UPSCALE_MODE
+    : "swin2sr";
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
-  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | edit:${cfg.RUN_STEP_EDIT ? "on" : "off"} | translate:${cfg.RUN_STEP_TRANSLATE ? "on" : "off"} | upscale:${cfg.RUN_STEP_UPSCALE ? "on" : "off"} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState}`;
+  const replicateState = cfg.REPLICATE_API_TOKEN_SET ? "set" : "missing";
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | edit:${cfg.RUN_STEP_EDIT ? "on" : "off"} | translate:${cfg.RUN_STEP_TRANSLATE ? "on" : "off"} | upscale:${cfg.RUN_STEP_UPSCALE ? "on" : "off"} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState} | replicate_key: ${replicateState}`;
   syncSettingsFieldState();
   renderSelectedVideo();
 }
@@ -359,6 +378,10 @@ async function saveConfig() {
     FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
     FINAL_SLIDE_UPSCALE_TILE_SIZE: Number(el.finalSlideUpscaleTileSize.value),
     FINAL_SLIDE_UPSCALE_TILE_OVERLAP: Number(el.finalSlideUpscaleTileOverlap.value),
+    REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF: el.replicateNightmareRealesrganModelRef.value.trim(),
+    REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID: el.replicateNightmareRealesrganVersionId.value.trim(),
+    REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND: Number(el.replicateNightmareRealesrganPricePerSecond.value),
+    REPLICATE_UPSCALE_CONCURRENCY: Number(el.replicateUpscaleConcurrency.value),
   };
   await apiPost("/api/config", payload);
   await loadConfig();
@@ -391,6 +414,10 @@ function syncSettingsFieldState() {
   const editEnabled = el.runStepEdit.checked;
   const translateEnabled = el.runStepTranslate.checked;
   const upscaleEnabled = el.runStepUpscale.checked;
+  const upscaleMode = el.finalSlideUpscaleMode.value;
+  const localUpscale = upscaleMode === "swin2sr";
+  const replicateUpscale = upscaleMode === "replicate_nightmare_realesrgan";
+  const replicateNightmareUpscale = upscaleMode === "replicate_nightmare_realesrgan";
 
   el.finalSlidePostprocessMode.disabled = !editEnabled;
   el.geminiEditModel.disabled = !editEnabled;
@@ -402,10 +429,14 @@ function syncSettingsFieldState() {
   el.geminiTranslatePrompt.disabled = !translateEnabled;
 
   el.finalSlideUpscaleMode.disabled = !upscaleEnabled;
-  el.finalSlideUpscaleModel.disabled = !upscaleEnabled;
-  el.finalSlideUpscaleDevice.disabled = !upscaleEnabled;
-  el.finalSlideUpscaleTileSize.disabled = !upscaleEnabled;
-  el.finalSlideUpscaleTileOverlap.disabled = !upscaleEnabled;
+  el.finalSlideUpscaleModel.disabled = !upscaleEnabled || !localUpscale;
+  el.finalSlideUpscaleDevice.disabled = !upscaleEnabled || !localUpscale;
+  el.finalSlideUpscaleTileSize.disabled = !upscaleEnabled || !localUpscale;
+  el.finalSlideUpscaleTileOverlap.disabled = !upscaleEnabled || !localUpscale;
+  el.replicateNightmareRealesrganModelRef.disabled = !upscaleEnabled || !replicateNightmareUpscale;
+  el.replicateNightmareRealesrganVersionId.disabled = !upscaleEnabled || !replicateNightmareUpscale;
+  el.replicateNightmareRealesrganPricePerSecond.disabled = !upscaleEnabled || !replicateNightmareUpscale;
+  el.replicateUpscaleConcurrency.disabled = !upscaleEnabled || !replicateUpscale;
 }
 
 function closeVideoPicker() {
@@ -537,12 +568,14 @@ function setLabStatus(current) {
   const status = current?.status || "idle";
   state.labStatus = status;
   const action = current?.action ? ` | action=${current.action}` : "";
+  const provider = current?.provider ? ` | provider=${current.provider}` : "";
   const jobId = current?.job_id ? ` | job=${current.job_id}` : "";
-  el.labJobStatus.textContent = `status: ${status}${action}${jobId}`;
+  el.labJobStatus.textContent = `status: ${status}${action}${provider}${jobId}`;
   const resultMeta = [];
   if (current?.message) resultMeta.push(current.message);
   if (current?.input_name) resultMeta.push(`input=${current.input_name}`);
   if (current?.result_name) resultMeta.push(`result=${current.result_name}`);
+  if (current?.estimated_cost_usd) resultMeta.push(`est_cost=${formatUsd(current.estimated_cost_usd)}`);
   el.labJobMeta.textContent = resultMeta.length > 0 ? resultMeta.join(" | ") : "Uses current Settings.";
   const logs = (current?.log_tail || []).slice(-120);
   const nextLog = logs.join("\n");
@@ -578,10 +611,14 @@ async function runLabAction(action) {
   }
   el.labResultImage.removeAttribute("src");
   el.labResultImage.onclick = null;
-  const res = await apiPost(`/api/lab/${action}`, {
+  const payload = {
     run_id: state.labSelectedImage.run_id,
     event_id: state.labSelectedImage.event_id,
-  });
+  };
+  if (action === "upscale") {
+    payload.provider = el.labUpscaleProvider.value;
+  }
+  const res = await apiPost(`/api/lab/${action}`, payload);
   setLabStatus(res.current || {});
 }
 
@@ -624,7 +661,7 @@ function renderRunSelect(runs) {
   for (const run of runs) {
     const opt = document.createElement("option");
     opt.value = run.id;
-    opt.textContent = `${run.id} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images} | translated ${run.translated_slide_images || 0} | x4 ${run.upscaled_slide_images || 0} | translated_x4 ${run.translated_upscaled_slide_images || 0}`;
+    opt.textContent = `${run.id} | upscale ${run.upscale_mode_used || "-"} | cost ${formatUsd(run.upscale_estimated_cost_usd)} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images} | translated ${run.translated_slide_images || 0} | x4 ${run.upscaled_slide_images || 0} | translated_x4 ${run.translated_upscaled_slide_images || 0}`;
     el.runSelect.appendChild(opt);
   }
 }
@@ -666,7 +703,7 @@ async function loadRunDetails() {
   state.selectedRunId = runId;
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.runSummary.textContent = `run=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
+  el.runSummary.textContent = `run=${detail.id} | upscale_mode=${detail.upscale_mode_used || "-"} | upscale_cost=${formatUsd(detail.upscale_estimated_cost_usd)} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
   el.csvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
   await loadRunSlides();
 }
@@ -679,7 +716,7 @@ async function loadLatestRunDetails() {
   }
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.latestSummary.textContent = `latest=${detail.id} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
+  el.latestSummary.textContent = `latest=${detail.id} | upscale_mode=${detail.upscale_mode_used || "-"} | upscale_cost=${formatUsd(detail.upscale_estimated_cost_usd)} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
   state.latestCsvLines = detail.final_csv_preview || detail.csv_preview || [];
   const hasCsv = state.latestCsvLines.length > 0;
   el.toggleLatestCsvTable.disabled = !hasCsv;
@@ -1321,6 +1358,7 @@ function bindEvents() {
   el.runStepEdit.addEventListener("change", syncSettingsFieldState);
   el.runStepTranslate.addEventListener("change", syncSettingsFieldState);
   el.runStepUpscale.addEventListener("change", syncSettingsFieldState);
+  el.finalSlideUpscaleMode.addEventListener("change", syncSettingsFieldState);
   el.latestViewMode.addEventListener("change", () => {
     state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
     runTaskImmediate(loadLatestSlides);
