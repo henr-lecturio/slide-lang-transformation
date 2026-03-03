@@ -1,0 +1,9 @@
+Translate the provided mapped lecture narration 1:1 into {{TARGET_LANGUAGE}}.
+
+Rules:
+- Preserve meaning exactly.
+- Do not summarize.
+- Do not omit or add content.
+- Preserve numbers, names, compliance terms, and enumerations.
+- Keep the tone factual and suitable for narrated training slides.
+- Return valid JSON only with this shape: {"translated_text": "..."}

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Scene Detection Runner</title>
+    <title>Slide Detection Runner</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -13,15 +13,17 @@
           <strong>Slide Language Transformation Pipeline</strong>
           <span>Konsole</span>
         </div>
-        <div id="run-status" class="badge">status: idle</div>
       </div>
-      <nav class="topnav" aria-label="Primary">
-        <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
-        <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
-        <button id="tab-image-lab" class="tab-btn" data-tab="image-lab" type="button">Image Lab</button>
-        <button id="tab-roi" class="tab-btn" data-tab="roi" type="button">ROI</button>
-        <button id="tab-settings" class="tab-btn" data-tab="settings" type="button">Settings</button>
-      </nav>
+      <div class="topnav-row">
+        <nav class="topnav" aria-label="Primary">
+          <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
+          <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
+          <button id="tab-image-lab" class="tab-btn" data-tab="image-lab" type="button">Image Lab</button>
+          <button id="tab-roi" class="tab-btn" data-tab="roi" type="button">ROI</button>
+          <button id="tab-settings" class="tab-btn" data-tab="settings" type="button">Settings</button>
+        </nav>
+        <button id="save-settings" class="hidden" type="button">Save Settings</button>
+      </div>
     </header>
 
     <main>
@@ -56,6 +58,7 @@
         <section class="card home-main">
           <h2>Latest Output</h2>
           <div id="latest-summary" class="muted"></div>
+          <div id="latest-downloads" class="summary-links row wrap"></div>
           <div class="row wrap">
             <label>Ansicht
               <select id="latest-view-mode">
@@ -120,6 +123,7 @@
           </div>
 
           <div id="run-summary" class="muted"></div>
+          <div id="run-downloads" class="summary-links row wrap"></div>
           <pre id="csv-preview" class="log"></pre>
           <div id="run-slides-list" class="slides-list"></div>
         </section>
@@ -131,15 +135,15 @@
           <div class="settings-note muted">Einzelbild-Test auf Basis des neuesten `final_slide_images`-Satzes. Die Aktionen verwenden die aktuellen Werte aus `Settings`.</div>
           <div class="row wrap">
             <button id="lab-pick-image" type="button">Bild wählen</button>
-            <button id="lab-run-edit" type="button">Test Edit</button>
-            <button id="lab-run-translate" type="button">Test Translate</button>
-            <label>Upscale Provider
+            <button id="lab-run-edit" type="button">Test Slide Edit</button>
+            <button id="lab-run-translate" type="button">Test Slide Translate</button>
+            <label>Slide Upscale Provider
               <select id="lab_upscale_provider">
                 <option value="swin2sr">Local Swin2SR</option>
                 <option value="replicate_nightmare_realesrgan">Replicate nightmareai/real-esrgan</option>
               </select>
             </label>
-            <button id="lab-run-upscale" type="button">Test Upscale</button>
+            <button id="lab-run-upscale" type="button">Test Slide Upscale</button>
           </div>
           <div id="lab-selected-image" class="muted">Kein Bild gewählt.</div>
           <div id="lab-job-status" class="muted">status: idle</div>
@@ -195,104 +199,441 @@
 
       <section id="panel-settings" class="panel">
         <section class="card">
-          <h2>Settings</h2>
-          <div class="settings-note muted">Scene-detection, transcription und transcript mapping werden immer durchgeführt. Die Toggles unten steuern nur die nachgelagerten Steps.</div>
+          <div class="step-sections">
+            <section class="step-section is-forced" data-step-section="slide-detection">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Slide Detection is always enabled" /></label>
+                    <h3>Slide Detection</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="slide-detection" aria-expanded="false" aria-controls="step-section-body-slide-detection" aria-label="Toggle Slide Detection settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Dieser Pipeline-Step wird immer ausgeführt.</div>
+                </div>
+              </div>
+              <div id="step-section-body-slide-detection" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="keyframe_settle_frames">KEYFRAME_SETTLE_FRAMES</label>
+                    <div class="settings-value"><input id="keyframe_settle_frames" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="keyframe_stable_end_guard_frames">KEYFRAME_STABLE_END_GUARD_FRAMES</label>
+                    <div class="settings-value"><input id="keyframe_stable_end_guard_frames" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="keyframe_stable_lookahead_frames">KEYFRAME_STABLE_LOOKAHEAD_FRAMES</label>
+                    <div class="settings-value"><input id="keyframe_stable_lookahead_frames" type="number" min="1" step="1" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <h3>Pipeline Steps</h3>
-          <div class="grid settings-grid">
-            <label class="toggle-field"><input id="run_step_edit" type="checkbox" /> <span>Edit</span></label>
-            <label class="toggle-field"><input id="run_step_translate" type="checkbox" /> <span>Translate</span></label>
-            <label class="toggle-field"><input id="run_step_upscale" type="checkbox" /> <span>Upscale</span></label>
-          </div>
+            <section class="step-section is-forced" data-step-section="transcription">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Transcription is always enabled" /></label>
+                    <h3>Transcription</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="transcription" aria-expanded="false" aria-controls="step-section-body-transcription" aria-label="Toggle Transcription settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Dieser Pipeline-Step wird immer ausgeführt.</div>
+                </div>
+              </div>
+              <div id="step-section-body-transcription" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="transcription_provider">TRANSCRIPTION_PROVIDER</label>
+                    <div class="settings-value">
+                      <select id="transcription_provider">
+                        <option value="whisper">whisper</option>
+                        <option value="google_chirp_3">google_chirp_3</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-subhead">Whisper</div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="whisper_model">WHISPER_MODEL</label>
+                    <div class="settings-value"><input id="whisper_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="whisper_device">WHISPER_DEVICE</label>
+                    <div class="settings-value"><input id="whisper_device" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="whisper_compute_type">WHISPER_COMPUTE_TYPE</label>
+                    <div class="settings-value"><input id="whisper_compute_type" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="whisper_language">WHISPER_LANGUAGE</label>
+                    <div class="settings-value"><input id="whisper_language" type="text" /></div>
+                  </div>
+                  <div class="settings-subhead">Google Speech</div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_speech_project_id">GOOGLE_SPEECH_PROJECT_ID</label>
+                    <div class="settings-value"><input id="google_speech_project_id" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_speech_location">GOOGLE_SPEECH_LOCATION</label>
+                    <div class="settings-value"><input id="google_speech_location" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_speech_model">GOOGLE_SPEECH_MODEL</label>
+                    <div class="settings-value"><input id="google_speech_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_speech_language_codes">GOOGLE_SPEECH_LANGUAGE_CODES</label>
+                    <div class="settings-value"><input id="google_speech_language_codes" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_speech_chunk_sec">GOOGLE_SPEECH_CHUNK_SEC</label>
+                    <div class="settings-value"><input id="google_speech_chunk_sec" type="number" min="1" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_speech_chunk_overlap_sec">GOOGLE_SPEECH_CHUNK_OVERLAP_SEC</label>
+                    <div class="settings-value"><input id="google_speech_chunk_overlap_sec" type="number" min="0" step="0.05" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <h3>Detection</h3>
-          <div class="grid settings-grid">
-            <label>KEYFRAME_SETTLE_FRAMES <input id="keyframe_settle_frames" type="number" min="0" step="1" /></label>
-            <label>KEYFRAME_STABLE_END_GUARD_FRAMES <input id="keyframe_stable_end_guard_frames" type="number" min="0" step="1" /></label>
-            <label>KEYFRAME_STABLE_LOOKAHEAD_FRAMES <input id="keyframe_stable_lookahead_frames" type="number" min="1" step="1" /></label>
-          </div>
+            <section class="step-section is-forced" data-step-section="transcript-mapping">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Transcript Mapping is always enabled" /></label>
+                    <h3>Transcript Mapping</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="transcript-mapping" aria-expanded="false" aria-controls="step-section-body-transcript-mapping" aria-label="Toggle Transcript Mapping settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Dieser Pipeline-Step wird immer ausgeführt.</div>
+                </div>
+              </div>
+              <div id="step-section-body-transcript-mapping" class="step-section-body">
+                <div class="settings-static muted">Keine separaten Parameter. Der Step nutzt den aktuellen Transcript-Output und die aktuellen Slide-Wechsel des laufenden Runs.</div>
+              </div>
+            </section>
 
-          <h3>Speaker Filter</h3>
-          <div class="grid settings-grid">
-            <label>SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO <input id="speaker_filter_min_stage1_video_ratio" type="number" min="0" max="1" step="0.01" /></label>
-            <label>SPEAKER_FILTER_MAX_EDGE_DENSITY <input id="speaker_filter_max_edge_density" type="number" min="0" max="1" step="0.001" /></label>
-            <label>SPEAKER_FILTER_MAX_LAPLACIAN_VAR <input id="speaker_filter_max_laplacian_var" type="number" min="0" step="1" /></label>
-            <label>SPEAKER_FILTER_MAX_DURATION_SEC <input id="speaker_filter_max_duration_sec" type="number" min="0" step="0.1" /></label>
-          </div>
+            <section class="step-section is-forced" data-step-section="finalize-slides">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Finalize Slides is always enabled" /></label>
+                    <h3>Finalize Slides</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="finalize-slides" aria-expanded="false" aria-controls="step-section-body-finalize-slides" aria-label="Toggle Finalize Slides settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Speaker-Filter und automatische Quellenwahl werden immer ausgeführt.</div>
+                </div>
+              </div>
+              <div id="step-section-body-finalize-slides" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-subhead">Speaker Filter</div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="speaker_filter_min_stage1_video_ratio">SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO</label>
+                    <div class="settings-value"><input id="speaker_filter_min_stage1_video_ratio" type="number" min="0" max="1" step="0.01" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="speaker_filter_max_edge_density">SPEAKER_FILTER_MAX_EDGE_DENSITY</label>
+                    <div class="settings-value"><input id="speaker_filter_max_edge_density" type="number" min="0" max="1" step="0.001" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="speaker_filter_max_laplacian_var">SPEAKER_FILTER_MAX_LAPLACIAN_VAR</label>
+                    <div class="settings-value"><input id="speaker_filter_max_laplacian_var" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="speaker_filter_max_duration_sec">SPEAKER_FILTER_MAX_DURATION_SEC</label>
+                    <div class="settings-value"><input id="speaker_filter_max_duration_sec" type="number" min="0" step="0.1" /></div>
+                  </div>
 
-          <h3>Final Source Auto</h3>
-          <div class="grid settings-grid">
-            <label>FINAL_SOURCE_MODE_AUTO
-              <select id="final_source_mode_auto">
-                <option value="auto">auto</option>
-                <option value="off">off</option>
-              </select>
-            </label>
-            <label>FULLSLIDE_SAMPLE_FRAMES <input id="fullslide_sample_frames" type="number" min="1" step="1" /></label>
-            <label>FULLSLIDE_BORDER_STRIP_PX <input id="fullslide_border_strip_px" type="number" min="2" step="1" /></label>
-            <label>FULLSLIDE_MIN_MATCHED_SIDES <input id="fullslide_min_matched_sides" type="number" min="1" max="4" step="1" /></label>
-            <label>FULLSLIDE_BORDER_DIFF_THRESHOLD <input id="fullslide_border_diff_threshold" type="number" min="0" step="0.1" /></label>
-            <label>FULLSLIDE_PERSON_BOX_AREA_RATIO <input id="fullslide_person_box_area_ratio" type="number" min="0" max="1" step="0.01" /></label>
-            <label>FULLSLIDE_PERSON_OUTSIDE_RATIO <input id="fullslide_person_outside_ratio" type="number" min="0" max="1" step="0.01" /></label>
-          </div>
+                  <div class="settings-subhead">Final Source Auto</div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_source_mode_auto">FINAL_SOURCE_MODE_AUTO</label>
+                    <div class="settings-value">
+                      <select id="final_source_mode_auto">
+                        <option value="auto">auto</option>
+                        <option value="off">off</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="fullslide_sample_frames">FULLSLIDE_SAMPLE_FRAMES</label>
+                    <div class="settings-value"><input id="fullslide_sample_frames" type="number" min="1" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="fullslide_border_strip_px">FULLSLIDE_BORDER_STRIP_PX</label>
+                    <div class="settings-value"><input id="fullslide_border_strip_px" type="number" min="2" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="fullslide_min_matched_sides">FULLSLIDE_MIN_MATCHED_SIDES</label>
+                    <div class="settings-value"><input id="fullslide_min_matched_sides" type="number" min="1" max="4" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="fullslide_border_diff_threshold">FULLSLIDE_BORDER_DIFF_THRESHOLD</label>
+                    <div class="settings-value"><input id="fullslide_border_diff_threshold" type="number" min="0" step="0.1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="fullslide_person_box_area_ratio">FULLSLIDE_PERSON_BOX_AREA_RATIO</label>
+                    <div class="settings-value"><input id="fullslide_person_box_area_ratio" type="number" min="0" max="1" step="0.01" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="fullslide_person_outside_ratio">FULLSLIDE_PERSON_OUTSIDE_RATIO</label>
+                    <div class="settings-value"><input id="fullslide_person_outside_ratio" type="number" min="0" max="1" step="0.01" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <h3>Edit</h3>
-          <div class="grid settings-grid">
-            <label>FINAL_SLIDE_POSTPROCESS_MODE
-              <select id="final_slide_postprocess_mode">
-                <option value="local">local</option>
-                <option value="gemini">gemini</option>
-                <option value="none">none</option>
-              </select>
-            </label>
-            <label>GEMINI_EDIT_MODEL <input id="gemini_edit_model" type="text" /></label>
-          </div>
-          <label class="wide-field">GEMINI_EDIT_PROMPT
-            <textarea id="gemini_edit_prompt" rows="12"></textarea>
-          </label>
+            <section class="step-section" data-step-section="edit" data-step-input="run_step_edit">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_edit" type="checkbox" aria-label="Enable Slide Edit" /></label>
+                    <h3>Slide Edit</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="edit" aria-expanded="false" aria-controls="step-section-body-edit" aria-label="Toggle Slide Edit settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Bereinigt den finalen Slide-Satz nach dem Speaker-Filter.</div>
+                </div>
+              </div>
+              <div id="step-section-body-edit" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_postprocess_mode">FINAL_SLIDE_POSTPROCESS_MODE</label>
+                    <div class="settings-value">
+                      <select id="final_slide_postprocess_mode">
+                        <option value="local">local</option>
+                        <option value="gemini">gemini</option>
+                        <option value="none">none</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_edit_model">GEMINI_EDIT_MODEL</label>
+                    <div class="settings-value"><input id="gemini_edit_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row settings-row-textarea">
+                    <label class="settings-key" for="gemini_edit_prompt">GEMINI_EDIT_PROMPT</label>
+                    <div class="settings-value"><textarea id="gemini_edit_prompt" rows="12"></textarea></div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <h3>Translate</h3>
-          <div class="grid settings-grid">
-            <label>FINAL_SLIDE_TRANSLATION_MODE
-              <select id="final_slide_translation_mode">
-                <option value="none">none</option>
-                <option value="gemini">gemini</option>
-              </select>
-            </label>
-            <label>FINAL_SLIDE_TARGET_LANGUAGE <input id="final_slide_target_language" type="text" /></label>
-            <label>GEMINI_TRANSLATE_MODEL <input id="gemini_translate_model" type="text" /></label>
-          </div>
-          <label class="wide-field">GEMINI_TRANSLATE_PROMPT
-            <textarea id="gemini_translate_prompt" rows="10"></textarea>
-          </label>
+            <section class="step-section" data-step-section="translate" data-step-input="run_step_translate">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_translate" type="checkbox" aria-label="Enable Slide Translate" /></label>
+                    <h3>Slide Translate</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="translate" aria-expanded="false" aria-controls="step-section-body-translate" aria-label="Toggle Slide Translate settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Übersetzt die finalen Slide-Bilder per Image-to-Image.</div>
+                </div>
+              </div>
+              <div id="step-section-body-translate" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_target_language">FINAL_SLIDE_TARGET_LANGUAGE</label>
+                    <div class="settings-value"><input id="final_slide_target_language" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_translation_mode">FINAL_SLIDE_TRANSLATION_MODE</label>
+                    <div class="settings-value">
+                      <select id="final_slide_translation_mode">
+                        <option value="none">none</option>
+                        <option value="gemini">gemini</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_translate_model">GEMINI_TRANSLATE_MODEL</label>
+                    <div class="settings-value"><input id="gemini_translate_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row settings-row-textarea">
+                    <label class="settings-key" for="gemini_translate_prompt">GEMINI_TRANSLATE_PROMPT</label>
+                    <div class="settings-value"><textarea id="gemini_translate_prompt" rows="10"></textarea></div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <h3>Upscale</h3>
-          <div class="grid settings-grid">
-            <label>FINAL_SLIDE_UPSCALE_MODE
-              <select id="final_slide_upscale_mode">
-                <option value="none">none</option>
-                <option value="swin2sr">swin2sr</option>
-                <option value="replicate_nightmare_realesrgan">replicate_nightmare_realesrgan</option>
-              </select>
-            </label>
-            <label>FINAL_SLIDE_UPSCALE_MODEL <input id="final_slide_upscale_model" type="text" /></label>
-            <label>FINAL_SLIDE_UPSCALE_DEVICE
-              <select id="final_slide_upscale_device">
-                <option value="auto">auto</option>
-                <option value="cuda">cuda</option>
-                <option value="cpu">cpu</option>
-              </select>
-            </label>
-            <label>FINAL_SLIDE_UPSCALE_TILE_SIZE <input id="final_slide_upscale_tile_size" type="number" min="0" step="1" /></label>
-            <label>FINAL_SLIDE_UPSCALE_TILE_OVERLAP <input id="final_slide_upscale_tile_overlap" type="number" min="0" step="1" /></label>
-            <label>REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF <input id="replicate_nightmare_realesrgan_model_ref" type="text" /></label>
-            <label>REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID <input id="replicate_nightmare_realesrgan_version_id" type="text" /></label>
-            <label>REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND <input id="replicate_nightmare_realesrgan_price_per_second" type="number" min="0" step="0.0001" /></label>
-            <label>REPLICATE_UPSCALE_CONCURRENCY <input id="replicate_upscale_concurrency" type="number" min="1" step="1" /></label>
-          </div>
+            <section class="step-section" data-step-section="upscale" data-step-input="run_step_upscale">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_upscale" type="checkbox" aria-label="Enable Slide Upscale" /></label>
+                    <h3>Slide Upscale</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="upscale" aria-expanded="false" aria-controls="step-section-body-upscale" aria-label="Toggle Slide Upscale settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Skaliert den finalen Slide-Satz lokal oder über Replicate auf x4.</div>
+                </div>
+              </div>
+              <div id="step-section-body-upscale" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_upscale_mode">FINAL_SLIDE_UPSCALE_MODE</label>
+                    <div class="settings-value">
+                      <select id="final_slide_upscale_mode">
+                        <option value="none">none</option>
+                        <option value="swin2sr">swin2sr</option>
+                        <option value="replicate_nightmare_realesrgan">replicate_nightmare_realesrgan</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_upscale_model">FINAL_SLIDE_UPSCALE_MODEL</label>
+                    <div class="settings-value"><input id="final_slide_upscale_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_upscale_device">FINAL_SLIDE_UPSCALE_DEVICE</label>
+                    <div class="settings-value">
+                      <select id="final_slide_upscale_device">
+                        <option value="auto">auto</option>
+                        <option value="cuda">cuda</option>
+                        <option value="cpu">cpu</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_upscale_tile_size">FINAL_SLIDE_UPSCALE_TILE_SIZE</label>
+                    <div class="settings-value"><input id="final_slide_upscale_tile_size" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="final_slide_upscale_tile_overlap">FINAL_SLIDE_UPSCALE_TILE_OVERLAP</label>
+                    <div class="settings-value"><input id="final_slide_upscale_tile_overlap" type="number" min="0" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="replicate_nightmare_realesrgan_model_ref">REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF</label>
+                    <div class="settings-value"><input id="replicate_nightmare_realesrgan_model_ref" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="replicate_nightmare_realesrgan_version_id">REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID</label>
+                    <div class="settings-value"><input id="replicate_nightmare_realesrgan_version_id" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="replicate_nightmare_realesrgan_price_per_second">REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND</label>
+                    <div class="settings-value"><input id="replicate_nightmare_realesrgan_price_per_second" type="number" min="0" step="0.0001" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="replicate_upscale_concurrency">REPLICATE_UPSCALE_CONCURRENCY</label>
+                    <div class="settings-value"><input id="replicate_upscale_concurrency" type="number" min="1" step="1" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <div class="row">
-            <button id="save-settings">Save Settings</button>
+            <section class="step-section" data-step-section="text-translate" data-step-input="run_step_text_translate">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_text_translate" type="checkbox" aria-label="Enable Text Translate" /></label>
+                    <h3>Text Translate</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="text-translate" aria-expanded="false" aria-controls="step-section-body-text-translate" aria-label="Toggle Text Translate settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Übersetzt den gemappten finalen Slide-Text 1:1 in die Zielsprache.</div>
+                </div>
+              </div>
+              <div id="step-section-body-text-translate" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_text_translate_model">GEMINI_TEXT_TRANSLATE_MODEL</label>
+                    <div class="settings-value"><input id="gemini_text_translate_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row settings-row-textarea">
+                    <label class="settings-key" for="gemini_text_translate_prompt">GEMINI_TEXT_TRANSLATE_PROMPT</label>
+                    <div class="settings-value"><textarea id="gemini_text_translate_prompt" rows="10"></textarea></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section" data-step-section="tts" data-step-input="run_step_tts">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_tts" type="checkbox" aria-label="Enable TTS" /></label>
+                    <h3>TTS</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="tts" aria-expanded="false" aria-controls="step-section-body-tts" aria-label="Toggle TTS settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Erzeugt pro finalem Slide ein Voiceover aus dem übersetzten Text.</div>
+                </div>
+              </div>
+              <div id="step-section-body-tts" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_tts_model">GEMINI_TTS_MODEL</label>
+                    <div class="settings-value"><input id="gemini_tts_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_tts_voice">GEMINI_TTS_VOICE</label>
+                    <div class="settings-value"><input id="gemini_tts_voice" type="text" /></div>
+                  </div>
+                  <div class="settings-row settings-row-textarea">
+                    <label class="settings-key" for="gemini_tts_prompt">GEMINI_TTS_PROMPT</label>
+                    <div class="settings-value"><textarea id="gemini_tts_prompt" rows="8"></textarea></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section" data-step-section="video-export" data-step-input="run_step_video_export">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_video_export" type="checkbox" aria-label="Enable Video Export" /></label>
+                    <h3>Video Export</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="video-export" aria-expanded="false" aria-controls="step-section-body-video-export" aria-label="Toggle Video Export settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Baut aus finalen Slides und Voiceover ein neues MP4 mit SRT und Timeline.</div>
+                </div>
+              </div>
+              <div id="step-section-body-video-export" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="video_export_min_slide_sec">VIDEO_EXPORT_MIN_SLIDE_SEC</label>
+                    <div class="settings-value"><input id="video_export_min_slide_sec" type="number" min="0.1" step="0.1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="video_export_tail_pad_sec">VIDEO_EXPORT_TAIL_PAD_SEC</label>
+                    <div class="settings-value"><input id="video_export_tail_pad_sec" type="number" min="0" step="0.05" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="video_export_width">VIDEO_EXPORT_WIDTH</label>
+                    <div class="settings-value"><input id="video_export_width" type="number" min="2" step="2" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="video_export_height">VIDEO_EXPORT_HEIGHT</label>
+                    <div class="settings-value"><input id="video_export_height" type="number" min="2" step="2" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="video_export_fps">VIDEO_EXPORT_FPS</label>
+                    <div class="settings-value"><input id="video_export_fps" type="number" min="1" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="video_export_bg_color">VIDEO_EXPORT_BG_COLOR</label>
+                    <div class="settings-value"><input id="video_export_bg_color" type="text" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </section>
       </section>

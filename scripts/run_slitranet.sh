@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
 GEMINI_PROMPT_FILE="$ROOT_DIR/config/gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_translate_prompt.txt"
+GEMINI_TEXT_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/gemini_text_translate_prompt.txt"
+GEMINI_TTS_PROMPT_FILE="$ROOT_DIR/config/gemini_tts_prompt.txt"
 LOCAL_ENV_FILE="$ROOT_DIR/.env.local"
 VENV_DIR="$ROOT_DIR/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python"
@@ -68,6 +70,9 @@ GEMINI_EDIT_MODEL="${GEMINI_EDIT_MODEL:-gemini-3-pro-image-preview}"
 FINAL_SLIDE_TRANSLATION_MODE="${FINAL_SLIDE_TRANSLATION_MODE:-none}"
 FINAL_SLIDE_TARGET_LANGUAGE="${FINAL_SLIDE_TARGET_LANGUAGE:-German}"
 GEMINI_TRANSLATE_MODEL="${GEMINI_TRANSLATE_MODEL:-gemini-3-pro-image-preview}"
+GEMINI_TEXT_TRANSLATE_MODEL="${GEMINI_TEXT_TRANSLATE_MODEL:-gemini-2.5-flash}"
+GEMINI_TTS_MODEL="${GEMINI_TTS_MODEL:-gemini-2.5-pro-preview-tts}"
+GEMINI_TTS_VOICE="${GEMINI_TTS_VOICE:-Kore}"
 FINAL_SLIDE_UPSCALE_MODE="${FINAL_SLIDE_UPSCALE_MODE:-none}"
 FINAL_SLIDE_UPSCALE_MODEL="${FINAL_SLIDE_UPSCALE_MODEL:-caidas/swin2SR-classical-sr-x4-64}"
 FINAL_SLIDE_UPSCALE_DEVICE="${FINAL_SLIDE_UPSCALE_DEVICE:-auto}"
@@ -83,7 +88,16 @@ FULLSLIDE_PERSON_OUTSIDE_RATIO="${FULLSLIDE_PERSON_OUTSIDE_RATIO:-0.35}"
 RUN_STEP_EDIT="${RUN_STEP_EDIT:-1}"
 RUN_STEP_TRANSLATE="${RUN_STEP_TRANSLATE:-1}"
 RUN_STEP_UPSCALE="${RUN_STEP_UPSCALE:-1}"
+RUN_STEP_TEXT_TRANSLATE="${RUN_STEP_TEXT_TRANSLATE:-1}"
+RUN_STEP_TTS="${RUN_STEP_TTS:-1}"
+RUN_STEP_VIDEO_EXPORT="${RUN_STEP_VIDEO_EXPORT:-1}"
 REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND="${REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND:-0.000225}"
+VIDEO_EXPORT_MIN_SLIDE_SEC="${VIDEO_EXPORT_MIN_SLIDE_SEC:-1.2}"
+VIDEO_EXPORT_TAIL_PAD_SEC="${VIDEO_EXPORT_TAIL_PAD_SEC:-0.35}"
+VIDEO_EXPORT_WIDTH="${VIDEO_EXPORT_WIDTH:-1920}"
+VIDEO_EXPORT_HEIGHT="${VIDEO_EXPORT_HEIGHT:-1080}"
+VIDEO_EXPORT_FPS="${VIDEO_EXPORT_FPS:-30}"
+VIDEO_EXPORT_BG_COLOR="${VIDEO_EXPORT_BG_COLOR:-white}"
 
 toggle_to_flag() {
   case "${1:-1}" in
@@ -99,6 +113,9 @@ toggle_to_flag() {
 RUN_STEP_EDIT="$(toggle_to_flag "$RUN_STEP_EDIT")"
 RUN_STEP_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TRANSLATE")"
 RUN_STEP_UPSCALE="$(toggle_to_flag "$RUN_STEP_UPSCALE")"
+RUN_STEP_TEXT_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TEXT_TRANSLATE")"
+RUN_STEP_TTS="$(toggle_to_flag "$RUN_STEP_TTS")"
+RUN_STEP_VIDEO_EXPORT="$(toggle_to_flag "$RUN_STEP_VIDEO_EXPORT")"
 
 emit_step() {
   local action="$1"
@@ -162,13 +179,13 @@ else
   printf '\nVIDEO_PATH="%s"\n' "$VIDEO_PATH_RESOLVED" >> "$RUN_DIR/config_used.env"
 fi
 
-step_start scene-detection
-step_detail scene-detection "prepare-dataset"
+step_start slide-detection
+step_detail slide-detection "prepare-dataset"
 DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/prepare_dataset.sh"
-step_detail scene-detection "check-weights"
+step_detail slide-detection "check-weights"
 bash "$ROOT_DIR/scripts/check_weights.sh"
 
-step_detail scene-detection "cuda-check"
+step_detail slide-detection "cuda-check"
 if ! "$PYTHON_BIN" - <<'PY'
 import torch
 raise SystemExit(0 if torch.cuda.is_available() else 1)
@@ -179,7 +196,7 @@ then
   exit 1
 fi
 
-step_detail scene-detection "slitranet-inference"
+step_detail slide-detection "slitranet-inference"
 pushd "$ROOT_DIR/slitranet" >/dev/null
 "$PYTHON_BIN" test_SliTraNet.py \
   --dataset_dir "$DATASET_DIR" \
@@ -204,7 +221,7 @@ else
   echo "WARN: Stage-1 result file not found, initial event will be skipped: $STAGE1_FILE" >&2
 fi
 
-step_detail scene-detection "postprocess"
+step_detail slide-detection "postprocess"
 "$PYTHON_BIN" "$ROOT_DIR/scripts/postprocess_slitranet.py" \
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --roi-file "$ROI_FILE" \
@@ -216,27 +233,53 @@ step_detail scene-detection "postprocess"
   --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}" \
   --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
   --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
-step_done scene-detection
+step_done slide-detection
 
 TRANSCRIPT_JSON="$OUT_BASE/transcript_segments.json"
 TRANSCRIPT_CSV="$OUT_BASE/transcript_segments.csv"
-TRANSCRIPT_ARGS=(
-  --video "$PHASE_DIR/$VIDEO_NAME"
-  --out-json "$TRANSCRIPT_JSON"
-  --out-csv "$TRANSCRIPT_CSV"
-  --model "${WHISPER_MODEL:-medium}"
-  --device "${WHISPER_DEVICE:-cuda}"
-  --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
-)
-if [ -n "${WHISPER_LANGUAGE:-}" ]; then
-  TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
-fi
-
 echo "[ASR] Preparing transcription step ..."
 echo "[Step] transcription: run"
 step_start transcription
-step_detail transcription "faster-whisper"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+case "${TRANSCRIPTION_PROVIDER:-whisper}" in
+  whisper)
+    TRANSCRIPT_ARGS=(
+      --video "$PHASE_DIR/$VIDEO_NAME"
+      --out-json "$TRANSCRIPT_JSON"
+      --out-csv "$TRANSCRIPT_CSV"
+      --model "${WHISPER_MODEL:-medium}"
+      --device "${WHISPER_DEVICE:-cuda}"
+      --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
+    )
+    if [ -n "${WHISPER_LANGUAGE:-}" ]; then
+      TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
+    fi
+    step_detail transcription "faster-whisper"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+    ;;
+  google_chirp_3)
+    if [ -z "${GOOGLE_SPEECH_PROJECT_ID:-}" ]; then
+      echo "ERROR: GOOGLE_SPEECH_PROJECT_ID must not be empty when TRANSCRIPTION_PROVIDER=google_chirp_3." >&2
+      exit 1
+    fi
+    TRANSCRIPT_ARGS=(
+      --video "$PHASE_DIR/$VIDEO_NAME"
+      --out-json "$TRANSCRIPT_JSON"
+      --out-csv "$TRANSCRIPT_CSV"
+      --project-id "${GOOGLE_SPEECH_PROJECT_ID}"
+      --location "${GOOGLE_SPEECH_LOCATION:-global}"
+      --model "${GOOGLE_SPEECH_MODEL:-chirp_3}"
+      --language-codes "${GOOGLE_SPEECH_LANGUAGE_CODES:-en-US}"
+      --chunk-sec "${GOOGLE_SPEECH_CHUNK_SEC:-55}"
+      --chunk-overlap-sec "${GOOGLE_SPEECH_CHUNK_OVERLAP_SEC:-0.75}"
+    )
+    step_detail transcription "google-chirp-3"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}"
+    ;;
+  *)
+    echo "ERROR: TRANSCRIPTION_PROVIDER must be one of: whisper, google_chirp_3" >&2
+    exit 1
+    ;;
+esac
 step_done transcription
 echo "[ASR] Transcription step finished."
 
@@ -266,6 +309,29 @@ FINAL_SLIDE_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_upscaled"
 FINAL_SLIDE_TRANSLATED_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_translated_upscaled"
 UPSCALE_MANIFEST_JSON="$OUT_BASE/keyframes/final/upscale_manifest.json"
 FINAL_FULL_DIR="$OUT_BASE/keyframes/final/full"
+TEXT_TRANSLATED_JSON="$OUT_BASE/slide_text_map_final_translated.json"
+TEXT_TRANSLATED_CSV="$OUT_BASE/slide_text_map_final_translated.csv"
+TTS_AUDIO_DIR="$OUT_BASE/tts/audio"
+TTS_MANIFEST_JSON="$OUT_BASE/tts/tts_manifest.json"
+TTS_MANIFEST_CSV="$OUT_BASE/tts/tts_manifest.csv"
+VIDEO_EXPORT_DIR="$OUT_BASE/video_export"
+VIDEO_EXPORT_TIMELINE_JSON="$VIDEO_EXPORT_DIR/timeline.json"
+VIDEO_EXPORT_TIMELINE_CSV="$VIDEO_EXPORT_DIR/timeline.csv"
+
+lang_slug() {
+  local raw="$1"
+  local slug
+  slug="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+  if [ -z "$slug" ]; then
+    slug="translated"
+  fi
+  printf '%s' "$slug"
+}
+
+dir_has_pngs() {
+  local path="$1"
+  [ -d "$path" ] && find "$path" -maxdepth 1 -type f -name '*.png' | grep -q .
+}
 FINAL_SLIDE_CLEAN_MODE="none"
 if [ "$RUN_STEP_EDIT" = "1" ]; then
   case "$FINAL_SLIDE_POSTPROCESS_MODE" in
@@ -469,6 +535,112 @@ else
   step_skip upscale "disabled"
 fi
 
+TEXT_TRANSLATE_INPUT_JSON="$SLIDE_TEXT_MAP_FINAL_JSON"
+TEXT_TRANSLATE_LANGUAGE="$FINAL_SLIDE_TARGET_LANGUAGE"
+
+if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
+  if [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo "ERROR: text translation requires GEMINI_API_KEY in the environment." >&2
+    exit 1
+  fi
+  if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
+    echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when text translation is enabled." >&2
+    exit 1
+  fi
+  echo "[TextTranslate] Translating mapped slide text to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TEXT_TRANSLATE_MODEL ..."
+  step_start text-translate
+  step_detail text-translate "$FINAL_SLIDE_TARGET_LANGUAGE"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/translate_slide_text.py" \
+    --input-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
+    --out-json "$TEXT_TRANSLATED_JSON" \
+    --out-csv "$TEXT_TRANSLATED_CSV" \
+    --model "$GEMINI_TEXT_TRANSLATE_MODEL" \
+    --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE" \
+    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+  step_done text-translate
+  TEXT_TRANSLATE_INPUT_JSON="$TEXT_TRANSLATED_JSON"
+  echo "[TextTranslate] Translation finished."
+else
+  echo "[Step] text-translate: skipped"
+  step_skip text-translate "disabled"
+fi
+
+TTS_INPUT_JSON="$TEXT_TRANSLATE_INPUT_JSON"
+TTS_LANGUAGE_LABEL="$FINAL_SLIDE_TARGET_LANGUAGE"
+if [ "$RUN_STEP_TEXT_TRANSLATE" = "0" ]; then
+  TTS_LANGUAGE_LABEL="source language of the text"
+fi
+
+if [ "$RUN_STEP_TTS" = "1" ]; then
+  if [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo "ERROR: TTS requires GEMINI_API_KEY in the environment." >&2
+    exit 1
+  fi
+  echo "[TTS] Generating voiceover with model $GEMINI_TTS_MODEL and voice $GEMINI_TTS_VOICE ..."
+  step_start tts
+  step_detail tts "$GEMINI_TTS_VOICE"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/generate_slide_tts.py" \
+    --input-json "$TTS_INPUT_JSON" \
+    --output-dir "$TTS_AUDIO_DIR" \
+    --out-manifest-json "$TTS_MANIFEST_JSON" \
+    --out-manifest-csv "$TTS_MANIFEST_CSV" \
+    --model "$GEMINI_TTS_MODEL" \
+    --voice "$GEMINI_TTS_VOICE" \
+    --prompt-file "$GEMINI_TTS_PROMPT_FILE" \
+    --language-label "$TTS_LANGUAGE_LABEL"
+  step_done tts
+  echo "[TTS] Voiceover generation finished."
+else
+  echo "[Step] tts: skipped"
+  step_skip tts "disabled"
+fi
+
+EXPORT_IMAGE_DIR="$FINAL_SLIDE_DIR"
+EXPORT_IMAGE_LABEL="processed"
+if dir_has_pngs "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"; then
+  EXPORT_IMAGE_DIR="$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
+  EXPORT_IMAGE_LABEL="translated_upscaled"
+elif dir_has_pngs "$FINAL_SLIDE_TRANSLATED_DIR"; then
+  EXPORT_IMAGE_DIR="$FINAL_SLIDE_TRANSLATED_DIR"
+  EXPORT_IMAGE_LABEL="translated"
+elif dir_has_pngs "$FINAL_SLIDE_UPSCALED_DIR"; then
+  EXPORT_IMAGE_DIR="$FINAL_SLIDE_UPSCALED_DIR"
+  EXPORT_IMAGE_LABEL="upscaled"
+fi
+
+VIDEO_LANG_SLUG="$(lang_slug "$FINAL_SLIDE_TARGET_LANGUAGE")"
+VIDEO_EXPORT_MP4="$VIDEO_EXPORT_DIR/final_${VIDEO_LANG_SLUG}.mp4"
+VIDEO_EXPORT_SRT="$VIDEO_EXPORT_DIR/final_${VIDEO_LANG_SLUG}.srt"
+
+if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
+  echo "[VideoExport] Building narrated slide video from $EXPORT_IMAGE_LABEL images ..."
+  step_start video-export
+  step_detail video-export "$EXPORT_IMAGE_LABEL"
+  TTS_MANIFEST_ARG=()
+  if [ -f "$TTS_MANIFEST_JSON" ]; then
+    TTS_MANIFEST_ARG+=(--tts-manifest-json "$TTS_MANIFEST_JSON")
+  fi
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/export_slide_video.py" \
+    --slide-map-json "$TTS_INPUT_JSON" \
+    --image-dir "$EXPORT_IMAGE_DIR" \
+    "${TTS_MANIFEST_ARG[@]}" \
+    --out-video "$VIDEO_EXPORT_MP4" \
+    --out-timeline-json "$VIDEO_EXPORT_TIMELINE_JSON" \
+    --out-timeline-csv "$VIDEO_EXPORT_TIMELINE_CSV" \
+    --out-srt "$VIDEO_EXPORT_SRT" \
+    --min-slide-sec "$VIDEO_EXPORT_MIN_SLIDE_SEC" \
+    --tail-pad-sec "$VIDEO_EXPORT_TAIL_PAD_SEC" \
+    --width "$VIDEO_EXPORT_WIDTH" \
+    --height "$VIDEO_EXPORT_HEIGHT" \
+    --fps "$VIDEO_EXPORT_FPS" \
+    --bg-color "$VIDEO_EXPORT_BG_COLOR"
+  step_done video-export
+  echo "[VideoExport] Export finished."
+else
+  echo "[Step] video-export: skipped"
+  step_skip video-export "disabled"
+fi
+
 LATEST_LINK="$ROOT_DIR/output/latest"
 if [ -L "$LATEST_LINK" ] || [ ! -e "$LATEST_LINK" ]; then
   ln -sfn "$RUN_DIR" "$LATEST_LINK"
@@ -478,6 +650,7 @@ echo "Done."
 echo "Run dir: $RUN_DIR"
 echo "Main output: $OUT_BASE/slide_changes.csv"
 echo "Transcript: $TRANSCRIPT_JSON"
+echo "Transcription provider: ${TRANSCRIPTION_PROVIDER:-whisper}"
 echo "Slide text map: $SLIDE_TEXT_MAP_JSON"
 echo "Final slide text map: $SLIDE_TEXT_MAP_FINAL_JSON"
 echo "Final slide raw images: $FINAL_SLIDE_RAW_DIR"
@@ -487,8 +660,15 @@ echo "Final source mode auto: $FINAL_SOURCE_MODE_AUTO"
 echo "Run step edit: $RUN_STEP_EDIT"
 echo "Run step translate: $RUN_STEP_TRANSLATE"
 echo "Run step upscale: $RUN_STEP_UPSCALE"
+echo "Run step text translate: $RUN_STEP_TEXT_TRANSLATE"
+echo "Run step tts: $RUN_STEP_TTS"
+echo "Run step video export: $RUN_STEP_VIDEO_EXPORT"
 echo "Final slide translated images: $FINAL_SLIDE_TRANSLATED_DIR"
 echo "Final slide translation mode: $FINAL_SLIDE_TRANSLATION_MODE"
 echo "Final slide upscaled images: $FINAL_SLIDE_UPSCALED_DIR"
 echo "Final slide translated upscaled images: $FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
 echo "Final slide upscale mode: $FINAL_SLIDE_UPSCALE_MODE"
+echo "Translated text map: $TEXT_TRANSLATED_JSON"
+echo "TTS manifest: $TTS_MANIFEST_JSON"
+echo "Video export image source: $EXPORT_IMAGE_DIR"
+echo "Video export output: $VIDEO_EXPORT_MP4"

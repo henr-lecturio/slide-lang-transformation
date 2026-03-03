@@ -17,6 +17,7 @@ fi
 "$PYTHON_BIN" -m pip install --upgrade pip
 "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/slitranet/requirements.txt"
 "$PYTHON_BIN" -m pip install faster-whisper
+"$PYTHON_BIN" -m pip install google-cloud-speech
 "$PYTHON_BIN" -m pip install google-genai
 "$PYTHON_BIN" -m pip install replicate
 "$PYTHON_BIN" -m pip install transformers safetensors

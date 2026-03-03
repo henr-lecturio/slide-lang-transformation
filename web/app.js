@@ -1,5 +1,4 @@
 const el = {
-  status: document.getElementById("run-status"),
   tabButtons: document.querySelectorAll(".tab-btn"),
   panelHome: document.getElementById("panel-home"),
   panelAllRuns: document.getElementById("panel-all-runs"),
@@ -20,7 +19,21 @@ const el = {
   runStepEdit: document.getElementById("run_step_edit"),
   runStepTranslate: document.getElementById("run_step_translate"),
   runStepUpscale: document.getElementById("run_step_upscale"),
+  runStepTextTranslate: document.getElementById("run_step_text_translate"),
+  runStepTts: document.getElementById("run_step_tts"),
+  runStepVideoExport: document.getElementById("run_step_video_export"),
   finalSourceModeAuto: document.getElementById("final_source_mode_auto"),
+  transcriptionProvider: document.getElementById("transcription_provider"),
+  whisperModel: document.getElementById("whisper_model"),
+  whisperDevice: document.getElementById("whisper_device"),
+  whisperComputeType: document.getElementById("whisper_compute_type"),
+  whisperLanguage: document.getElementById("whisper_language"),
+  googleSpeechProjectId: document.getElementById("google_speech_project_id"),
+  googleSpeechLocation: document.getElementById("google_speech_location"),
+  googleSpeechModel: document.getElementById("google_speech_model"),
+  googleSpeechLanguageCodes: document.getElementById("google_speech_language_codes"),
+  googleSpeechChunkSec: document.getElementById("google_speech_chunk_sec"),
+  googleSpeechChunkOverlapSec: document.getElementById("google_speech_chunk_overlap_sec"),
   fullslideSampleFrames: document.getElementById("fullslide_sample_frames"),
   fullslideBorderStripPx: document.getElementById("fullslide_border_strip_px"),
   fullslideMinMatchedSides: document.getElementById("fullslide_min_matched_sides"),
@@ -41,6 +54,11 @@ const el = {
   finalSlideTargetLanguage: document.getElementById("final_slide_target_language"),
   geminiTranslateModel: document.getElementById("gemini_translate_model"),
   geminiTranslatePrompt: document.getElementById("gemini_translate_prompt"),
+  geminiTextTranslateModel: document.getElementById("gemini_text_translate_model"),
+  geminiTextTranslatePrompt: document.getElementById("gemini_text_translate_prompt"),
+  geminiTtsModel: document.getElementById("gemini_tts_model"),
+  geminiTtsVoice: document.getElementById("gemini_tts_voice"),
+  geminiTtsPrompt: document.getElementById("gemini_tts_prompt"),
   finalSlideUpscaleMode: document.getElementById("final_slide_upscale_mode"),
   finalSlideUpscaleModel: document.getElementById("final_slide_upscale_model"),
   finalSlideUpscaleDevice: document.getElementById("final_slide_upscale_device"),
@@ -50,6 +68,12 @@ const el = {
   replicateNightmareRealesrganVersionId: document.getElementById("replicate_nightmare_realesrgan_version_id"),
   replicateNightmareRealesrganPricePerSecond: document.getElementById("replicate_nightmare_realesrgan_price_per_second"),
   replicateUpscaleConcurrency: document.getElementById("replicate_upscale_concurrency"),
+  videoExportMinSlideSec: document.getElementById("video_export_min_slide_sec"),
+  videoExportTailPadSec: document.getElementById("video_export_tail_pad_sec"),
+  videoExportWidth: document.getElementById("video_export_width"),
+  videoExportHeight: document.getElementById("video_export_height"),
+  videoExportFps: document.getElementById("video_export_fps"),
+  videoExportBgColor: document.getElementById("video_export_bg_color"),
   overlayTime: document.getElementById("overlay-time"),
   regenOverlay: document.getElementById("regen-overlay"),
   refreshOverlay: document.getElementById("refresh-overlay"),
@@ -73,6 +97,7 @@ const el = {
   labOriginalImage: document.getElementById("lab-original-image"),
   labResultImage: document.getElementById("lab-result-image"),
   latestSummary: document.getElementById("latest-summary"),
+  latestDownloads: document.getElementById("latest-downloads"),
   latestViewMode: document.getElementById("latest-view-mode"),
   latestFinalSourceMode: document.getElementById("latest-final-source-mode"),
   latestFinalDisplayMode: document.getElementById("latest-final-display-mode"),
@@ -86,6 +111,7 @@ const el = {
   runFinalDisplayMode: document.getElementById("run-final-display-mode"),
   runFinalResolutionMode: document.getElementById("run-final-resolution-mode"),
   runSummary: document.getElementById("run-summary"),
+  runDownloads: document.getElementById("run-downloads"),
   csvPreview: document.getElementById("csv-preview"),
   runSlidesList: document.getElementById("run-slides-list"),
   imageModal: document.getElementById("image-modal"),
@@ -109,6 +135,7 @@ const el = {
 const state = {
   selectedRunId: null,
   latestRunId: null,
+  currentRunId: null,
   selectedVideoPath: "",
   videoItems: [],
   labImages: [],
@@ -125,6 +152,7 @@ const state = {
   lastSettledRefreshKey: "",
   currentRunStatus: "idle",
   labStatus: "idle",
+  stepSectionExpanded: {},
 };
 
 const buttonFeedbackTimers = new WeakMap();
@@ -162,9 +190,8 @@ async function safeJson(res) {
 function setStatus(current) {
   const status = current.status || "idle";
   state.currentRunStatus = status;
+  state.currentRunId = current.run_id || null;
   const runId = current.run_id ? `, run ${current.run_id}` : "";
-  const stepText = current.current_step ? ` | ${current.current_step}${current.current_detail ? `: ${current.current_detail}` : ""}` : "";
-  el.status.textContent = `status: ${status}${runId}${stepText}`;
   if (el.statusSummary) {
     el.statusSummary.textContent = `status: ${status}${runId}`;
   }
@@ -197,6 +224,112 @@ function formatUsd(value) {
   const num = Number(value || 0);
   if (!(num > 0)) return "-";
   return `$${num.toFixed(4)}`;
+}
+
+function preferredLatestRunId(runs, current) {
+  const currentRunId = current?.run_id || "";
+  const currentStatus = current?.status || "";
+  if (currentRunId && currentStatus && currentStatus !== "idle") {
+    return currentRunId;
+  }
+  return runs.length > 0 ? runs[0].id : null;
+}
+
+function buildRunSummary(detail, label = "run") {
+  return [
+    `${label}=${detail.id}`,
+    `run_status=${detail.run_status || "-"}`,
+    `available=${detail.highest_available_label || "no output yet"}`,
+    `upscale_mode=${detail.upscale_mode_used || "-"}`,
+    `upscale_cost=${formatUsd(detail.upscale_estimated_cost_usd)}`,
+    `base_events=${detail.event_count}`,
+    `final_events=${detail.final_event_count}`,
+    `final_slide_images=${detail.final_slide_images}`,
+    `translated_slide_images=${detail.translated_slide_images || 0}`,
+    `upscaled_slide_images=${detail.upscaled_slide_images || 0}`,
+    `translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`,
+    `translated_text_events=${detail.translated_text_events || 0}`,
+    `tts_segments=${detail.tts_segments || 0}`,
+    `video_export=${detail.exported_video_name || "-"}`,
+  ].join(" | ");
+}
+
+function isStepSectionEnabled(section) {
+  const inputId = section?.dataset?.stepInput || "";
+  if (!inputId) return true;
+  const input = document.getElementById(inputId);
+  return Boolean(input && input.checked);
+}
+
+function syncStepSections() {
+  const sections = document.querySelectorAll(".step-section[data-step-section]");
+  for (const section of sections) {
+    const sectionId = section.dataset.stepSection;
+    const body = section.querySelector(".step-section-body");
+    const toggleBtn = section.querySelector(".step-section-toggle");
+    const forced = !section.dataset.stepInput;
+    const enabled = isStepSectionEnabled(section);
+
+    if (!(sectionId in state.stepSectionExpanded)) {
+      state.stepSectionExpanded[sectionId] = false;
+    }
+
+    if (!forced && !enabled) {
+      state.stepSectionExpanded[sectionId] = false;
+    }
+
+    const expanded = Boolean(state.stepSectionExpanded[sectionId]);
+    const showBody = forced ? expanded : enabled && expanded;
+
+    section.classList.toggle("is-forced", forced);
+    section.classList.toggle("is-enabled", enabled);
+    section.classList.toggle("is-disabled", !enabled);
+    section.classList.toggle("is-open", showBody);
+
+    if (body) {
+      body.hidden = !showBody;
+      body.setAttribute("aria-hidden", showBody ? "false" : "true");
+    }
+
+    if (toggleBtn) {
+      toggleBtn.disabled = !forced && !enabled;
+      toggleBtn.setAttribute("aria-expanded", showBody ? "true" : "false");
+      toggleBtn.setAttribute("aria-label", !forced && !enabled ? "Section disabled" : (showBody ? "Collapse settings section" : "Expand settings section"));
+    }
+  }
+}
+
+function renderDownloadLinks(target, detail) {
+  if (!target) return;
+  target.innerHTML = "";
+  if (!detail) return;
+
+  const links = [
+    { label: "Translated Text JSON", url: detail.translated_text_json_url, name: "slide_text_map_final_translated.json" },
+    { label: "Translated Text CSV", url: detail.translated_text_csv_url, name: "slide_text_map_final_translated.csv" },
+    { label: "TTS Manifest", url: detail.tts_manifest_url, name: "tts_manifest.json" },
+    { label: "Timeline JSON", url: detail.video_timeline_json_url, name: "timeline.json" },
+    { label: "Timeline CSV", url: detail.video_timeline_csv_url, name: "timeline.csv" },
+    { label: "Subtitles", url: detail.exported_srt_url, name: detail.exported_video_name ? detail.exported_video_name.replace(/\.mp4$/i, ".srt") : "final.srt" },
+    { label: "Exported MP4", url: detail.exported_video_url, name: detail.exported_video_name || "final.mp4" },
+  ].filter((item) => item.url);
+
+  if (links.length === 0) {
+    const empty = document.createElement("span");
+    empty.className = "muted";
+    empty.textContent = "No export files available.";
+    target.appendChild(empty);
+    return;
+  }
+
+  for (const link of links) {
+    const a = document.createElement("a");
+    a.className = "summary-link";
+    a.href = link.url;
+    a.download = link.name || "";
+    a.textContent = link.label;
+    target.appendChild(a);
+  }
 }
 
 function syncActionState() {
@@ -283,7 +416,21 @@ function setConfig(cfg) {
   el.runStepEdit.checked = Boolean(cfg.RUN_STEP_EDIT);
   el.runStepTranslate.checked = Boolean(cfg.RUN_STEP_TRANSLATE);
   el.runStepUpscale.checked = Boolean(cfg.RUN_STEP_UPSCALE);
+  el.runStepTextTranslate.checked = Boolean(cfg.RUN_STEP_TEXT_TRANSLATE);
+  el.runStepTts.checked = Boolean(cfg.RUN_STEP_TTS);
+  el.runStepVideoExport.checked = Boolean(cfg.RUN_STEP_VIDEO_EXPORT);
   el.finalSourceModeAuto.value = cfg.FINAL_SOURCE_MODE_AUTO || "auto";
+  el.transcriptionProvider.value = cfg.TRANSCRIPTION_PROVIDER || "whisper";
+  el.whisperModel.value = cfg.WHISPER_MODEL || "medium";
+  el.whisperDevice.value = cfg.WHISPER_DEVICE || "cuda";
+  el.whisperComputeType.value = cfg.WHISPER_COMPUTE_TYPE || "float16";
+  el.whisperLanguage.value = cfg.WHISPER_LANGUAGE || "";
+  el.googleSpeechProjectId.value = cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.googleSpeechLocation.value = cfg.GOOGLE_SPEECH_LOCATION || "global";
+  el.googleSpeechModel.value = cfg.GOOGLE_SPEECH_MODEL || "chirp_3";
+  el.googleSpeechLanguageCodes.value = cfg.GOOGLE_SPEECH_LANGUAGE_CODES || "en-US";
+  el.googleSpeechChunkSec.value = cfg.GOOGLE_SPEECH_CHUNK_SEC ?? 55;
+  el.googleSpeechChunkOverlapSec.value = cfg.GOOGLE_SPEECH_CHUNK_OVERLAP_SEC ?? 0.75;
   el.fullslideSampleFrames.value = cfg.FULLSLIDE_SAMPLE_FRAMES ?? 3;
   el.fullslideBorderStripPx.value = cfg.FULLSLIDE_BORDER_STRIP_PX ?? 24;
   el.fullslideMinMatchedSides.value = cfg.FULLSLIDE_MIN_MATCHED_SIDES ?? 2;
@@ -304,6 +451,11 @@ function setConfig(cfg) {
   el.finalSlideTargetLanguage.value = cfg.FINAL_SLIDE_TARGET_LANGUAGE || "German";
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
+  el.geminiTextTranslateModel.value = cfg.GEMINI_TEXT_TRANSLATE_MODEL || "gemini-2.5-flash";
+  el.geminiTextTranslatePrompt.value = cfg.GEMINI_TEXT_TRANSLATE_PROMPT || "";
+  el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-pro-preview-tts";
+  el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
+  el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
   el.finalSlideUpscaleDevice.value = cfg.FINAL_SLIDE_UPSCALE_DEVICE || "auto";
@@ -313,13 +465,19 @@ function setConfig(cfg) {
   el.replicateNightmareRealesrganVersionId.value = cfg.REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID || "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa";
   el.replicateNightmareRealesrganPricePerSecond.value = cfg.REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND ?? 0.000225;
   el.replicateUpscaleConcurrency.value = cfg.REPLICATE_UPSCALE_CONCURRENCY ?? 2;
+  el.videoExportMinSlideSec.value = cfg.VIDEO_EXPORT_MIN_SLIDE_SEC ?? 1.2;
+  el.videoExportTailPadSec.value = cfg.VIDEO_EXPORT_TAIL_PAD_SEC ?? 0.35;
+  el.videoExportWidth.value = cfg.VIDEO_EXPORT_WIDTH ?? 1920;
+  el.videoExportHeight.value = cfg.VIDEO_EXPORT_HEIGHT ?? 1080;
+  el.videoExportFps.value = cfg.VIDEO_EXPORT_FPS ?? 30;
+  el.videoExportBgColor.value = cfg.VIDEO_EXPORT_BG_COLOR || "white";
   el.labUpscaleProvider.value = ["swin2sr", "replicate_nightmare_realesrgan"].includes(cfg.FINAL_SLIDE_UPSCALE_MODE)
     ? cfg.FINAL_SLIDE_UPSCALE_MODE
     : "swin2sr";
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   const geminiState = cfg.GEMINI_API_KEY_SET ? "set" : "missing";
   const replicateState = cfg.REPLICATE_API_TOKEN_SET ? "set" : "missing";
-  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | edit:${cfg.RUN_STEP_EDIT ? "on" : "off"} | translate:${cfg.RUN_STEP_TRANSLATE ? "on" : "off"} | upscale:${cfg.RUN_STEP_UPSCALE ? "on" : "off"} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState} | replicate_key: ${replicateState}`;
+  el.configMeta.textContent = `VIDEO_PATH: ${videoLabel} | transcription:${cfg.TRANSCRIPTION_PROVIDER} | source_auto: ${cfg.FINAL_SOURCE_MODE_AUTO} | edit:${cfg.RUN_STEP_EDIT ? "on" : "off"} | image_translate:${cfg.RUN_STEP_TRANSLATE ? "on" : "off"} | upscale:${cfg.RUN_STEP_UPSCALE ? "on" : "off"} | text_translate:${cfg.RUN_STEP_TEXT_TRANSLATE ? "on" : "off"} | tts:${cfg.RUN_STEP_TTS ? "on" : "off"} | video_export:${cfg.RUN_STEP_VIDEO_EXPORT ? "on" : "off"} | final_mode: ${cfg.FINAL_SLIDE_POSTPROCESS_MODE} | image_translate_mode: ${cfg.FINAL_SLIDE_TRANSLATION_MODE} | upscale_mode: ${cfg.FINAL_SLIDE_UPSCALE_MODE} | gemini_key: ${geminiState} | replicate_key: ${replicateState}`;
   syncSettingsFieldState();
   renderSelectedVideo();
 }
@@ -334,6 +492,9 @@ function setActiveTab(tabName) {
   el.panelImageLab.classList.toggle("active", tabName === "image-lab");
   el.panelRoi.classList.toggle("active", tabName === "roi");
   el.panelSettings.classList.toggle("active", tabName === "settings");
+  if (el.saveSettings) {
+    el.saveSettings.classList.toggle("hidden", tabName !== "settings");
+  }
 }
 
 async function loadConfig() {
@@ -352,6 +513,20 @@ async function saveConfig() {
     RUN_STEP_EDIT: el.runStepEdit.checked ? 1 : 0,
     RUN_STEP_TRANSLATE: el.runStepTranslate.checked ? 1 : 0,
     RUN_STEP_UPSCALE: el.runStepUpscale.checked ? 1 : 0,
+    RUN_STEP_TEXT_TRANSLATE: el.runStepTextTranslate.checked ? 1 : 0,
+    RUN_STEP_TTS: el.runStepTts.checked ? 1 : 0,
+    RUN_STEP_VIDEO_EXPORT: el.runStepVideoExport.checked ? 1 : 0,
+    TRANSCRIPTION_PROVIDER: el.transcriptionProvider.value,
+    WHISPER_MODEL: el.whisperModel.value.trim(),
+    WHISPER_DEVICE: el.whisperDevice.value.trim(),
+    WHISPER_COMPUTE_TYPE: el.whisperComputeType.value.trim(),
+    WHISPER_LANGUAGE: el.whisperLanguage.value.trim(),
+    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
+    GOOGLE_SPEECH_LOCATION: el.googleSpeechLocation.value.trim(),
+    GOOGLE_SPEECH_MODEL: el.googleSpeechModel.value.trim(),
+    GOOGLE_SPEECH_LANGUAGE_CODES: el.googleSpeechLanguageCodes.value.trim(),
+    GOOGLE_SPEECH_CHUNK_SEC: Number(el.googleSpeechChunkSec.value),
+    GOOGLE_SPEECH_CHUNK_OVERLAP_SEC: Number(el.googleSpeechChunkOverlapSec.value),
     FINAL_SOURCE_MODE_AUTO: el.finalSourceModeAuto.value,
     FULLSLIDE_SAMPLE_FRAMES: Number(el.fullslideSampleFrames.value),
     FULLSLIDE_BORDER_STRIP_PX: Number(el.fullslideBorderStripPx.value),
@@ -373,6 +548,11 @@ async function saveConfig() {
     FINAL_SLIDE_TARGET_LANGUAGE: el.finalSlideTargetLanguage.value.trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
+    GEMINI_TEXT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
+    GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
+    GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
+    GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
     FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
     FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
@@ -382,6 +562,12 @@ async function saveConfig() {
     REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID: el.replicateNightmareRealesrganVersionId.value.trim(),
     REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND: Number(el.replicateNightmareRealesrganPricePerSecond.value),
     REPLICATE_UPSCALE_CONCURRENCY: Number(el.replicateUpscaleConcurrency.value),
+    VIDEO_EXPORT_MIN_SLIDE_SEC: Number(el.videoExportMinSlideSec.value),
+    VIDEO_EXPORT_TAIL_PAD_SEC: Number(el.videoExportTailPadSec.value),
+    VIDEO_EXPORT_WIDTH: Number(el.videoExportWidth.value),
+    VIDEO_EXPORT_HEIGHT: Number(el.videoExportHeight.value),
+    VIDEO_EXPORT_FPS: Number(el.videoExportFps.value),
+    VIDEO_EXPORT_BG_COLOR: el.videoExportBgColor.value.trim(),
   };
   await apiPost("/api/config", payload);
   await loadConfig();
@@ -414,19 +600,42 @@ function syncSettingsFieldState() {
   const editEnabled = el.runStepEdit.checked;
   const translateEnabled = el.runStepTranslate.checked;
   const upscaleEnabled = el.runStepUpscale.checked;
+  const textTranslateEnabled = el.runStepTextTranslate.checked;
+  const ttsEnabled = el.runStepTts.checked;
+  const videoExportEnabled = el.runStepVideoExport.checked;
+  const transcriptionProvider = el.transcriptionProvider.value;
   const upscaleMode = el.finalSlideUpscaleMode.value;
   const localUpscale = upscaleMode === "swin2sr";
   const replicateUpscale = upscaleMode === "replicate_nightmare_realesrgan";
   const replicateNightmareUpscale = upscaleMode === "replicate_nightmare_realesrgan";
+  const googleTranscription = transcriptionProvider === "google_chirp_3";
+
+  el.whisperModel.disabled = googleTranscription;
+  el.whisperDevice.disabled = googleTranscription;
+  el.whisperComputeType.disabled = googleTranscription;
+  el.whisperLanguage.disabled = googleTranscription;
+  el.googleSpeechProjectId.disabled = !googleTranscription;
+  el.googleSpeechLocation.disabled = !googleTranscription;
+  el.googleSpeechModel.disabled = !googleTranscription;
+  el.googleSpeechLanguageCodes.disabled = !googleTranscription;
+  el.googleSpeechChunkSec.disabled = !googleTranscription;
+  el.googleSpeechChunkOverlapSec.disabled = !googleTranscription;
 
   el.finalSlidePostprocessMode.disabled = !editEnabled;
   el.geminiEditModel.disabled = !editEnabled;
   el.geminiEditPrompt.disabled = !editEnabled;
 
   el.finalSlideTranslationMode.disabled = !translateEnabled;
-  el.finalSlideTargetLanguage.disabled = !translateEnabled;
+  el.finalSlideTargetLanguage.disabled = !(translateEnabled || textTranslateEnabled || ttsEnabled);
   el.geminiTranslateModel.disabled = !translateEnabled;
   el.geminiTranslatePrompt.disabled = !translateEnabled;
+
+  el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
+  el.geminiTextTranslatePrompt.disabled = !textTranslateEnabled;
+
+  el.geminiTtsModel.disabled = !ttsEnabled;
+  el.geminiTtsVoice.disabled = !ttsEnabled;
+  el.geminiTtsPrompt.disabled = !ttsEnabled;
 
   el.finalSlideUpscaleMode.disabled = !upscaleEnabled;
   el.finalSlideUpscaleModel.disabled = !upscaleEnabled || !localUpscale;
@@ -437,6 +646,14 @@ function syncSettingsFieldState() {
   el.replicateNightmareRealesrganVersionId.disabled = !upscaleEnabled || !replicateNightmareUpscale;
   el.replicateNightmareRealesrganPricePerSecond.disabled = !upscaleEnabled || !replicateNightmareUpscale;
   el.replicateUpscaleConcurrency.disabled = !upscaleEnabled || !replicateUpscale;
+
+  el.videoExportMinSlideSec.disabled = !videoExportEnabled;
+  el.videoExportTailPadSec.disabled = !videoExportEnabled;
+  el.videoExportWidth.disabled = !videoExportEnabled;
+  el.videoExportHeight.disabled = !videoExportEnabled;
+  el.videoExportFps.disabled = !videoExportEnabled;
+  el.videoExportBgColor.disabled = !videoExportEnabled;
+  syncStepSections();
 }
 
 function closeVideoPicker() {
@@ -641,6 +858,7 @@ async function regenerateOverlay() {
 
 function clearLatestOutput() {
   el.latestSummary.textContent = "No runs yet";
+  renderDownloadLinks(el.latestDownloads, null);
   state.latestCsvLines = [];
   state.latestCsvExpanded = false;
   el.latestCsvTable.innerHTML = "";
@@ -652,6 +870,7 @@ function clearLatestOutput() {
 
 function clearSelectedRunOutput() {
   el.runSummary.textContent = "No runs yet";
+  renderDownloadLinks(el.runDownloads, null);
   el.csvPreview.textContent = "";
   el.runSlidesList.innerHTML = "";
 }
@@ -661,7 +880,7 @@ function renderRunSelect(runs) {
   for (const run of runs) {
     const opt = document.createElement("option");
     opt.value = run.id;
-    opt.textContent = `${run.id} | upscale ${run.upscale_mode_used || "-"} | cost ${formatUsd(run.upscale_estimated_cost_usd)} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images} | translated ${run.translated_slide_images || 0} | x4 ${run.upscaled_slide_images || 0} | translated_x4 ${run.translated_upscaled_slide_images || 0}`;
+    opt.textContent = `${run.id} | status ${run.run_status || "-"} | available ${run.highest_available_label || "no output yet"} | upscale ${run.upscale_mode_used || "-"} | cost ${formatUsd(run.upscale_estimated_cost_usd)} | base ${run.event_count} | final ${run.final_event_count} | final_img ${run.final_slide_images} | translated ${run.translated_slide_images || 0} | x4 ${run.upscaled_slide_images || 0} | translated_x4 ${run.translated_upscaled_slide_images || 0} | text_tx ${run.translated_text_events || 0} | tts ${run.tts_segments || 0} | video ${run.exported_video_name ? "yes" : "no"}`;
     el.runSelect.appendChild(opt);
   }
 }
@@ -676,7 +895,7 @@ async function loadRuns() {
   }
 
   const runs = data.runs || [];
-  state.latestRunId = runs.length > 0 ? runs[0].id : null;
+  state.latestRunId = preferredLatestRunId(runs, current);
   const prev = state.selectedRunId;
 
   renderRunSelect(runs);
@@ -703,7 +922,8 @@ async function loadRunDetails() {
   state.selectedRunId = runId;
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.runSummary.textContent = `run=${detail.id} | upscale_mode=${detail.upscale_mode_used || "-"} | upscale_cost=${formatUsd(detail.upscale_estimated_cost_usd)} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
+  el.runSummary.textContent = buildRunSummary(detail, "run");
+  renderDownloadLinks(el.runDownloads, detail);
   el.csvPreview.textContent = (detail.final_csv_preview || detail.csv_preview || []).join("\n");
   await loadRunSlides();
 }
@@ -716,7 +936,8 @@ async function loadLatestRunDetails() {
   }
 
   const detail = await apiGet(`/api/runs/${encodeURIComponent(runId)}`);
-  el.latestSummary.textContent = `latest=${detail.id} | upscale_mode=${detail.upscale_mode_used || "-"} | upscale_cost=${formatUsd(detail.upscale_estimated_cost_usd)} | base_events=${detail.event_count} | final_events=${detail.final_event_count} | final_slide_images=${detail.final_slide_images} | translated_slide_images=${detail.translated_slide_images || 0} | upscaled_slide_images=${detail.upscaled_slide_images || 0} | translated_upscaled_slide_images=${detail.translated_upscaled_slide_images || 0}`;
+  el.latestSummary.textContent = buildRunSummary(detail, "latest");
+  renderDownloadLinks(el.latestDownloads, detail);
   state.latestCsvLines = detail.final_csv_preview || detail.csv_preview || [];
   const hasCsv = state.latestCsvLines.length > 0;
   el.toggleLatestCsvTable.disabled = !hasCsv;
@@ -1167,7 +1388,7 @@ async function renderFinalSlides(runId, target, slideSourceMode, resolutionMode,
 
     const textWrap = document.createElement("div");
     textWrap.className = "slide-text";
-    textWrap.textContent = item.text || "(no text)";
+    textWrap.textContent = item.translated_text || item.text || "(no text)";
 
     row.appendChild(media);
     row.appendChild(textWrap);
@@ -1299,6 +1520,11 @@ async function pollCurrent() {
   try {
     const current = await apiGet("/api/runs/current");
     setStatus(current);
+    if (current.run_id && current.status && current.status !== "idle") {
+      state.latestRunId = current.run_id;
+      await loadLatestRunDetails();
+      await loadLatestSlides();
+    }
     const key = settledRefreshKey(current);
     if (key && key !== state.lastSettledRefreshKey) {
       state.lastSettledRefreshKey = key;
@@ -1355,10 +1581,30 @@ function bindEvents() {
     await runLabAction("upscale");
     showButtonSuccess(el.labRunUpscale, "Started");
   }));
-  el.runStepEdit.addEventListener("change", syncSettingsFieldState);
-  el.runStepTranslate.addEventListener("change", syncSettingsFieldState);
-  el.runStepUpscale.addEventListener("change", syncSettingsFieldState);
+  el.transcriptionProvider.addEventListener("change", syncSettingsFieldState);
   el.finalSlideUpscaleMode.addEventListener("change", syncSettingsFieldState);
+
+  for (const input of [
+    el.runStepEdit,
+    el.runStepTranslate,
+    el.runStepUpscale,
+    el.runStepTextTranslate,
+    el.runStepTts,
+    el.runStepVideoExport,
+  ]) {
+    input.addEventListener("change", () => {
+      syncSettingsFieldState();
+    });
+  }
+
+  document.querySelectorAll(".step-section-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionId = button.dataset.stepToggle;
+      if (!sectionId || button.disabled) return;
+      state.stepSectionExpanded[sectionId] = !state.stepSectionExpanded[sectionId];
+      syncStepSections();
+    });
+  });
   el.latestViewMode.addEventListener("change", () => {
     state.latestSlidesMode = el.latestViewMode.value === "base" ? "base" : "final";
     runTaskImmediate(loadLatestSlides);

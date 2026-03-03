@@ -24,6 +24,8 @@ WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.txt"
+GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_text_translate_prompt.txt"
+GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
@@ -39,13 +41,16 @@ PYTHON_BIN = str(VENV_PY if VENV_PY.exists() else Path(sys.executable))
 RUN_ID_PATTERN = re.compile(r"^(?:\d{8}_\d{6}|\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})$")
 STEP_MARKER_RE = re.compile(r"^@@STEP\s+(START|DONE|SKIP|DETAIL)\s+([a-z0-9-]+)(?:\s+(.*))?$")
 STEP_DEFS = [
-    ("scene-detection", "Scene Detection"),
+    ("slide-detection", "Slide Detection"),
     ("transcription", "Transcription"),
     ("transcript-mapping", "Transcript Mapping"),
     ("finalize-slides", "Finalize Slides"),
-    ("edit", "Edit"),
-    ("translate", "Translate"),
-    ("upscale", "Upscale"),
+    ("edit", "Slide Edit"),
+    ("translate", "Slide Translate"),
+    ("upscale", "Slide Upscale"),
+    ("text-translate", "Text Translate"),
+    ("tts", "TTS"),
+    ("video-export", "Video Export"),
 ]
 STEP_LABELS = {step_id: label for step_id, label in STEP_DEFS}
 
@@ -96,6 +101,130 @@ LAB_STATE = {
     "log_tail": deque(maxlen=400),
     "process": None,
 }
+
+
+def run_status_path(run_dir: Path) -> Path:
+    return run_dir / "run_status.json"
+
+
+def write_run_status(run_dir: Path, payload: dict) -> None:
+    try:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        run_status_path(run_dir).write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def read_run_status(run_dir: Path) -> dict:
+    raw = read_json_file(run_status_path(run_dir))
+    return raw if isinstance(raw, dict) else {}
+
+
+def current_state_for_run(run_id: str) -> dict | None:
+    with RUN_LOCK:
+        if RUN_STATE.get("run_id") != run_id:
+            return None
+        status = str(RUN_STATE.get("status", "") or "")
+        if not status or status == "idle":
+            return None
+        return {
+            "status": status,
+            "started_at": RUN_STATE.get("started_at"),
+            "finished_at": RUN_STATE.get("finished_at"),
+            "exit_code": RUN_STATE.get("exit_code"),
+            "current_step": RUN_STATE.get("current_step") or "",
+            "current_detail": RUN_STATE.get("current_detail") or "",
+            "error_step": RUN_STATE.get("error_step") or "",
+        }
+
+
+def effective_run_status(run_dir: Path, run_id: str) -> dict:
+    current = current_state_for_run(run_id)
+    if current:
+        return current
+    recorded = read_run_status(run_dir)
+    if recorded:
+        return {
+            "status": str(recorded.get("status", "") or ""),
+            "started_at": recorded.get("started_at"),
+            "finished_at": recorded.get("finished_at"),
+            "exit_code": recorded.get("exit_code"),
+            "current_step": str(recorded.get("current_step", "") or ""),
+            "current_detail": str(recorded.get("current_detail", "") or ""),
+            "error_step": str(recorded.get("error_step", "") or ""),
+        }
+    return {
+        "status": "",
+        "started_at": None,
+        "finished_at": None,
+        "exit_code": None,
+        "current_step": "",
+        "current_detail": "",
+        "error_step": "",
+    }
+
+
+def artifact_availability(run_dir: Path) -> dict[str, object]:
+    base_csv = run_dir / "slitranet" / "slide_changes.csv"
+    final_csv = run_dir / "slitranet" / "slide_text_map_final.csv"
+    slide_dir = run_dir / "slitranet" / "keyframes" / "slide"
+    final_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide"
+    translated_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated"
+    upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_upscaled"
+    translated_upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
+    translated_text_csv = run_dir / "slitranet" / "slide_text_map_final_translated.csv"
+    tts_audio_dir = run_dir / "slitranet" / "tts" / "audio"
+    video_export_dir = run_dir / "slitranet" / "video_export"
+    exported_video = latest_file_in_dir(video_export_dir, ".mp4")
+
+    base_events_ready = base_csv.exists() and csv_event_count(base_csv) > 0
+    final_slides_ready = final_csv.exists() and count_files(final_slide_dir) > 0
+    translated_slides_ready = count_files(translated_slide_dir) > 0
+    upscaled_slides_ready = count_files(upscaled_slide_dir) > 0
+    translated_upscaled_slides_ready = count_files(translated_upscaled_slide_dir) > 0
+    translated_text_ready = translated_text_csv.exists() and csv_event_count(translated_text_csv) > 0
+    tts_ready = count_files(tts_audio_dir) > 0
+    video_export_ready = exported_video is not None
+
+    highest_available = "none"
+    highest_available_label = "no output yet"
+    if video_export_ready:
+        highest_available = "video_export"
+        highest_available_label = "video export"
+    elif tts_ready:
+        highest_available = "tts"
+        highest_available_label = "tts audio"
+    elif translated_upscaled_slides_ready:
+        highest_available = "translated_upscaled_slides"
+        highest_available_label = "translated upscaled slides"
+    elif upscaled_slides_ready:
+        highest_available = "upscaled_slides"
+        highest_available_label = "upscaled slides"
+    elif translated_slides_ready:
+        highest_available = "translated_slides"
+        highest_available_label = "translated slides"
+    elif final_slides_ready:
+        highest_available = "final_slides"
+        highest_available_label = "final slides"
+    elif base_events_ready:
+        highest_available = "base_events"
+        highest_available_label = "base events"
+
+    return {
+        "base_events_ready": base_events_ready,
+        "final_slides_ready": final_slides_ready,
+        "translated_slides_ready": translated_slides_ready,
+        "upscaled_slides_ready": upscaled_slides_ready,
+        "translated_upscaled_slides_ready": translated_upscaled_slides_ready,
+        "translated_text_ready": translated_text_ready,
+        "tts_ready": tts_ready,
+        "video_export_ready": video_export_ready,
+        "highest_available": highest_available,
+        "highest_available_label": highest_available_label,
+    }
 
 
 def latest_run_id() -> str | None:
@@ -304,6 +433,17 @@ def summarize_run_upscale_cost(run_dir: Path) -> dict[str, float | int | str]:
     }
 
 
+def latest_file_in_dir(path: Path, suffix: str) -> Path | None:
+    if not path.exists():
+        return None
+    files = sorted(
+        (p for p in path.iterdir() if p.is_file() and p.suffix.lower() == suffix.lower()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return files[0] if files else None
+
+
 def csv_event_count(path: Path) -> int:
     if not path.exists():
         return 0
@@ -430,9 +570,15 @@ def list_runs() -> list[dict]:
         translated_upscaled_slide_dir = (
             entry / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
         )
+        translated_text_csv = entry / "slitranet" / "slide_text_map_final_translated.csv"
+        tts_audio_dir = entry / "slitranet" / "tts" / "audio"
+        video_export_dir = entry / "slitranet" / "video_export"
+        exported_video = latest_file_in_dir(video_export_dir, ".mp4")
         full_dir = entry / "slitranet" / "keyframes" / "full"
         config_used = parse_env(entry / "config_used.env") if (entry / "config_used.env").exists() else {}
         upscale_summary = summarize_run_upscale_cost(entry)
+        run_status = effective_run_status(entry, entry.name)
+        artifacts = artifact_availability(entry)
         runs.append(
             {
                 "id": entry.name,
@@ -445,9 +591,17 @@ def list_runs() -> list[dict]:
                 "translated_slide_images": count_files(translated_slide_dir),
                 "upscaled_slide_images": count_files(upscaled_slide_dir),
                 "translated_upscaled_slide_images": count_files(translated_upscaled_slide_dir),
+                "translated_text_events": csv_event_count(translated_text_csv),
+                "tts_segments": count_files(tts_audio_dir),
+                "exported_video_name": exported_video.name if exported_video else "",
                 "full_images": count_files(full_dir),
                 "upscale_mode_used": config_used.get("FINAL_SLIDE_UPSCALE_MODE", ""),
                 "upscale_estimated_cost_usd": upscale_summary["upscale_estimated_cost_usd"],
+                "run_status": run_status["status"],
+                "error_step": run_status["error_step"],
+                "current_step": run_status["current_step"],
+                "highest_available": artifacts["highest_available"],
+                "highest_available_label": artifacts["highest_available_label"],
                 "mtime": int(entry.stat().st_mtime),
             }
         )
@@ -470,9 +624,20 @@ def run_detail(run_id: str) -> dict:
     translated_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated"
     upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_upscaled"
     translated_upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
+    translated_text_csv = run_dir / "slitranet" / "slide_text_map_final_translated.csv"
+    translated_text_json = run_dir / "slitranet" / "slide_text_map_final_translated.json"
+    tts_audio_dir = run_dir / "slitranet" / "tts" / "audio"
+    tts_manifest_json = run_dir / "slitranet" / "tts" / "tts_manifest.json"
+    video_export_dir = run_dir / "slitranet" / "video_export"
+    video_timeline_json = video_export_dir / "timeline.json"
+    video_timeline_csv = video_export_dir / "timeline.csv"
+    exported_video = latest_file_in_dir(video_export_dir, ".mp4")
+    exported_srt = latest_file_in_dir(video_export_dir, ".srt")
     full_dir = run_dir / "slitranet" / "keyframes" / "full"
     config_used = parse_env(run_dir / "config_used.env") if (run_dir / "config_used.env").exists() else {}
     upscale_summary = summarize_run_upscale_cost(run_dir)
+    run_status = effective_run_status(run_dir, run_id)
+    artifacts = artifact_availability(run_dir)
 
     transition_files = []
     if transitions_dir.exists():
@@ -494,9 +659,27 @@ def run_detail(run_id: str) -> dict:
         "translated_slide_images": count_files(translated_slide_dir),
         "upscaled_slide_images": count_files(upscaled_slide_dir),
         "translated_upscaled_slide_images": count_files(translated_upscaled_slide_dir),
+        "translated_text_events": csv_event_count(translated_text_csv),
+        "translated_text_json_url": f"/api/runs/{run_id}/file/slitranet/slide_text_map_final_translated.json" if translated_text_json.exists() else "",
+        "translated_text_csv_url": f"/api/runs/{run_id}/file/slitranet/slide_text_map_final_translated.csv" if translated_text_csv.exists() else "",
+        "tts_segments": count_files(tts_audio_dir),
+        "tts_manifest_url": f"/api/runs/{run_id}/file/slitranet/tts/tts_manifest.json" if tts_manifest_json.exists() else "",
+        "video_timeline_json_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.json" if video_timeline_json.exists() else "",
+        "video_timeline_csv_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.csv" if video_timeline_csv.exists() else "",
+        "exported_video_name": exported_video.name if exported_video else "",
+        "exported_video_url": f"/api/runs/{run_id}/file/{exported_video.relative_to(run_dir).as_posix()}" if exported_video else "",
+        "exported_srt_url": f"/api/runs/{run_id}/file/{exported_srt.relative_to(run_dir).as_posix()}" if exported_srt else "",
         "full_images": count_files(full_dir),
         "upscale_mode_used": config_used.get("FINAL_SLIDE_UPSCALE_MODE", ""),
         "upscale_estimated_cost_usd": upscale_summary["upscale_estimated_cost_usd"],
+        "run_status": run_status["status"],
+        "run_started_at": run_status["started_at"],
+        "run_finished_at": run_status["finished_at"],
+        "run_exit_code": run_status["exit_code"],
+        "current_step": run_status["current_step"],
+        "current_detail": run_status["current_detail"],
+        "error_step": run_status["error_step"],
+        **artifacts,
     }
 
 
@@ -648,6 +831,21 @@ def run_final_slides(run_id: str) -> list[dict]:
     if not final_csv.exists():
         return []
     overrides = load_final_image_mode_overrides(run_dir)
+    translated_map = read_json_file(run_dir / "slitranet" / "slide_text_map_final_translated.json")
+    translated_text_by_event: dict[int, str] = {}
+    if isinstance(translated_map, dict):
+        translated_events = translated_map.get("events")
+        if isinstance(translated_events, list):
+            for event in translated_events:
+                if not isinstance(event, dict):
+                    continue
+                try:
+                    translated_event_id = int(event.get("event_id", "0") or "0")
+                except Exception:
+                    continue
+                if translated_event_id <= 0:
+                    continue
+                translated_text_by_event[translated_event_id] = str(event.get("translated_text", "") or "").strip()
 
     items: list[dict] = []
     with final_csv.open("r", encoding="utf-8") as f:
@@ -665,6 +863,7 @@ def run_final_slides(run_id: str) -> list[dict]:
                     "slide_start": float(row.get("slide_start", "0") or "0"),
                     "slide_end": float(row.get("slide_end", "0") or "0"),
                     "text": (row.get("text", "") or "").strip(),
+                    "translated_text": translated_text_by_event.get(event_id, ""),
                     "segments_count": int(row.get("segments_count", "0") or "0"),
                     "source_segment_ids": row.get("source_segment_ids", "") or "",
                     "source_mode_auto": row.get("source_mode_auto", "") or "",
@@ -1062,6 +1261,20 @@ def finalize_run_state(code: int, run_id: str | None = None) -> None:
             RUN_STATE["run_id"] = run_id
         elif not RUN_STATE.get("run_id"):
             RUN_STATE["run_id"] = latest_run_id()
+        final_run_id = str(RUN_STATE.get("run_id") or "")
+        payload = {
+            "status": RUN_STATE["status"],
+            "started_at": RUN_STATE.get("started_at"),
+            "finished_at": RUN_STATE.get("finished_at"),
+            "exit_code": RUN_STATE.get("exit_code"),
+            "current_step": RUN_STATE.get("current_step") or "",
+            "current_detail": RUN_STATE.get("current_detail") or "",
+            "error_step": RUN_STATE.get("error_step") or "",
+        }
+    if final_run_id:
+        run_dir = RUNS_DIR / final_run_id
+        if run_dir.exists():
+            write_run_status(run_dir, payload)
 
 
 def snapshot_lab_state() -> dict:
@@ -1172,6 +1385,18 @@ def _run_worker(process: subprocess.Popen) -> None:
                     run_id = p.name
                     with RUN_LOCK:
                         RUN_STATE["run_id"] = run_id
+                        payload = {
+                            "status": RUN_STATE.get("status", "running") or "running",
+                            "started_at": RUN_STATE.get("started_at"),
+                            "finished_at": RUN_STATE.get("finished_at"),
+                            "exit_code": RUN_STATE.get("exit_code"),
+                            "current_step": RUN_STATE.get("current_step") or "",
+                            "current_detail": RUN_STATE.get("current_detail") or "",
+                            "error_step": RUN_STATE.get("error_step") or "",
+                        }
+                    run_dir = RUNS_DIR / run_id
+                    if run_dir.exists():
+                        write_run_status(run_dir, payload)
     finally:
         code = process.wait()
         finalize_run_state(code, run_id)
@@ -1220,12 +1445,22 @@ def start_run() -> tuple[bool, str]:
     if not video_path:
         return False, "No video selected"
     resolve_video_config_path(video_path)
+    transcription_provider = (env.get("TRANSCRIPTION_PROVIDER", "whisper") or "whisper").strip().lower()
     run_step_edit = (env.get("RUN_STEP_EDIT", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     run_step_translate = (env.get("RUN_STEP_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
+    run_step_text_translate = (env.get("RUN_STEP_TEXT_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
+    run_step_tts = (env.get("RUN_STEP_TTS", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
-    if ((run_step_edit and final_slide_mode == "gemini") or (run_step_translate and translation_mode == "gemini")) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
+    if (
+        (run_step_edit and final_slide_mode == "gemini")
+        or (run_step_translate and translation_mode == "gemini")
+        or run_step_text_translate
+        or run_step_tts
+    ) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
         return False, "GEMINI_API_KEY is not set in the server environment"
+    if transcription_provider == "google_chirp_3" and not (env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip():
+        return False, "GOOGLE_SPEECH_PROJECT_ID must be set when TRANSCRIPTION_PROVIDER=google_chirp_3"
 
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
@@ -1309,9 +1544,23 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(env.get("ROI_Y0", "0")),
                     "ROI_X1": int(env.get("ROI_X1", "0")),
                     "ROI_Y1": int(env.get("ROI_Y1", "0")),
+                    "TRANSCRIPTION_PROVIDER": env.get("TRANSCRIPTION_PROVIDER", "whisper"),
+                    "WHISPER_MODEL": env.get("WHISPER_MODEL", "medium"),
+                    "WHISPER_DEVICE": env.get("WHISPER_DEVICE", "cuda"),
+                    "WHISPER_COMPUTE_TYPE": env.get("WHISPER_COMPUTE_TYPE", "float16"),
+                    "WHISPER_LANGUAGE": env.get("WHISPER_LANGUAGE", ""),
+                    "GOOGLE_SPEECH_PROJECT_ID": env.get("GOOGLE_SPEECH_PROJECT_ID", ""),
+                    "GOOGLE_SPEECH_LOCATION": env.get("GOOGLE_SPEECH_LOCATION", "global"),
+                    "GOOGLE_SPEECH_MODEL": env.get("GOOGLE_SPEECH_MODEL", "chirp_3"),
+                    "GOOGLE_SPEECH_LANGUAGE_CODES": env.get("GOOGLE_SPEECH_LANGUAGE_CODES", "en-US"),
+                    "GOOGLE_SPEECH_CHUNK_SEC": float(env.get("GOOGLE_SPEECH_CHUNK_SEC", "55")),
+                    "GOOGLE_SPEECH_CHUNK_OVERLAP_SEC": float(env.get("GOOGLE_SPEECH_CHUNK_OVERLAP_SEC", "0.75")),
                     "RUN_STEP_EDIT": int(env.get("RUN_STEP_EDIT", "1")),
                     "RUN_STEP_TRANSLATE": int(env.get("RUN_STEP_TRANSLATE", "1")),
                     "RUN_STEP_UPSCALE": int(env.get("RUN_STEP_UPSCALE", "1")),
+                    "RUN_STEP_TEXT_TRANSLATE": int(env.get("RUN_STEP_TEXT_TRANSLATE", "1")),
+                    "RUN_STEP_TTS": int(env.get("RUN_STEP_TTS", "1")),
+                    "RUN_STEP_VIDEO_EXPORT": int(env.get("RUN_STEP_VIDEO_EXPORT", "1")),
                     "FINAL_SOURCE_MODE_AUTO": env.get("FINAL_SOURCE_MODE_AUTO", "auto"),
                     "FULLSLIDE_SAMPLE_FRAMES": int(env.get("FULLSLIDE_SAMPLE_FRAMES", "3")),
                     "FULLSLIDE_BORDER_STRIP_PX": int(env.get("FULLSLIDE_BORDER_STRIP_PX", "24")),
@@ -1333,6 +1582,11 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German"),
                     "GEMINI_TRANSLATE_MODEL": env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview"),
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "GEMINI_TEXT_TRANSLATE_MODEL": env.get("GEMINI_TEXT_TRANSLATE_MODEL", "gemini-2.5-flash"),
+                    "GEMINI_TEXT_TRANSLATE_PROMPT": read_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts"),
+                    "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
+                    "GEMINI_TTS_PROMPT": read_text_file(GEMINI_TTS_PROMPT_PATH).rstrip("\n"),
                     "FINAL_SLIDE_UPSCALE_MODE": env.get("FINAL_SLIDE_UPSCALE_MODE", "none"),
                     "FINAL_SLIDE_UPSCALE_MODEL": env.get(
                         "FINAL_SLIDE_UPSCALE_MODEL",
@@ -1353,6 +1607,12 @@ class Handler(BaseHTTPRequestHandler):
                         env.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", "0.000225")
                     ),
                     "REPLICATE_UPSCALE_CONCURRENCY": int(env.get("REPLICATE_UPSCALE_CONCURRENCY", "2")),
+                    "VIDEO_EXPORT_MIN_SLIDE_SEC": float(env.get("VIDEO_EXPORT_MIN_SLIDE_SEC", "1.2")),
+                    "VIDEO_EXPORT_TAIL_PAD_SEC": float(env.get("VIDEO_EXPORT_TAIL_PAD_SEC", "0.35")),
+                    "VIDEO_EXPORT_WIDTH": int(env.get("VIDEO_EXPORT_WIDTH", "1920")),
+                    "VIDEO_EXPORT_HEIGHT": int(env.get("VIDEO_EXPORT_HEIGHT", "1080")),
+                    "VIDEO_EXPORT_FPS": int(env.get("VIDEO_EXPORT_FPS", "30")),
+                    "VIDEO_EXPORT_BG_COLOR": env.get("VIDEO_EXPORT_BG_COLOR", "white"),
                     "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                     "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                 }
@@ -1498,9 +1758,23 @@ class Handler(BaseHTTPRequestHandler):
                     "ROI_Y0": int(data["ROI_Y0"]),
                     "ROI_X1": int(data["ROI_X1"]),
                     "ROI_Y1": int(data["ROI_Y1"]),
+                    "TRANSCRIPTION_PROVIDER": str(data["TRANSCRIPTION_PROVIDER"]).strip(),
+                    "WHISPER_MODEL": str(data["WHISPER_MODEL"]).strip(),
+                    "WHISPER_DEVICE": str(data["WHISPER_DEVICE"]).strip(),
+                    "WHISPER_COMPUTE_TYPE": str(data["WHISPER_COMPUTE_TYPE"]).strip(),
+                    "WHISPER_LANGUAGE": str(data["WHISPER_LANGUAGE"]).strip(),
+                    "GOOGLE_SPEECH_PROJECT_ID": str(data["GOOGLE_SPEECH_PROJECT_ID"]).strip(),
+                    "GOOGLE_SPEECH_LOCATION": str(data["GOOGLE_SPEECH_LOCATION"]).strip(),
+                    "GOOGLE_SPEECH_MODEL": str(data["GOOGLE_SPEECH_MODEL"]).strip(),
+                    "GOOGLE_SPEECH_LANGUAGE_CODES": str(data["GOOGLE_SPEECH_LANGUAGE_CODES"]).strip(),
+                    "GOOGLE_SPEECH_CHUNK_SEC": float(data["GOOGLE_SPEECH_CHUNK_SEC"]),
+                    "GOOGLE_SPEECH_CHUNK_OVERLAP_SEC": float(data["GOOGLE_SPEECH_CHUNK_OVERLAP_SEC"]),
                     "RUN_STEP_EDIT": int(data["RUN_STEP_EDIT"]),
                     "RUN_STEP_TRANSLATE": int(data["RUN_STEP_TRANSLATE"]),
                     "RUN_STEP_UPSCALE": int(data["RUN_STEP_UPSCALE"]),
+                    "RUN_STEP_TEXT_TRANSLATE": int(data["RUN_STEP_TEXT_TRANSLATE"]),
+                    "RUN_STEP_TTS": int(data["RUN_STEP_TTS"]),
+                    "RUN_STEP_VIDEO_EXPORT": int(data["RUN_STEP_VIDEO_EXPORT"]),
                     "FINAL_SOURCE_MODE_AUTO": str(data["FINAL_SOURCE_MODE_AUTO"]).strip(),
                     "FULLSLIDE_SAMPLE_FRAMES": int(data["FULLSLIDE_SAMPLE_FRAMES"]),
                     "FULLSLIDE_BORDER_STRIP_PX": int(data["FULLSLIDE_BORDER_STRIP_PX"]),
@@ -1520,6 +1794,9 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TRANSLATION_MODE": str(data["FINAL_SLIDE_TRANSLATION_MODE"]).strip(),
                     "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
                     "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
+                    "GEMINI_TEXT_TRANSLATE_MODEL": str(data["GEMINI_TEXT_TRANSLATE_MODEL"]).strip(),
+                    "GEMINI_TTS_MODEL": str(data["GEMINI_TTS_MODEL"]).strip(),
+                    "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODE": str(data["FINAL_SLIDE_UPSCALE_MODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODEL": str(data["FINAL_SLIDE_UPSCALE_MODEL"]).strip(),
                     "FINAL_SLIDE_UPSCALE_DEVICE": str(data["FINAL_SLIDE_UPSCALE_DEVICE"]).strip(),
@@ -1535,18 +1812,52 @@ class Handler(BaseHTTPRequestHandler):
                         data["REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND"]
                     ),
                     "REPLICATE_UPSCALE_CONCURRENCY": int(data["REPLICATE_UPSCALE_CONCURRENCY"]),
+                    "VIDEO_EXPORT_MIN_SLIDE_SEC": float(data["VIDEO_EXPORT_MIN_SLIDE_SEC"]),
+                    "VIDEO_EXPORT_TAIL_PAD_SEC": float(data["VIDEO_EXPORT_TAIL_PAD_SEC"]),
+                    "VIDEO_EXPORT_WIDTH": int(data["VIDEO_EXPORT_WIDTH"]),
+                    "VIDEO_EXPORT_HEIGHT": int(data["VIDEO_EXPORT_HEIGHT"]),
+                    "VIDEO_EXPORT_FPS": int(data["VIDEO_EXPORT_FPS"]),
+                    "VIDEO_EXPORT_BG_COLOR": str(data["VIDEO_EXPORT_BG_COLOR"]).strip(),
                 }
                 gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
+                gemini_text_translate_prompt = str(data["GEMINI_TEXT_TRANSLATE_PROMPT"])
+                gemini_tts_prompt = str(data["GEMINI_TTS_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
                 for key in (
                     "RUN_STEP_EDIT",
                     "RUN_STEP_TRANSLATE",
                     "RUN_STEP_UPSCALE",
+                    "RUN_STEP_TEXT_TRANSLATE",
+                    "RUN_STEP_TTS",
+                    "RUN_STEP_VIDEO_EXPORT",
                 ):
                     if cfg[key] not in {0, 1}:
                         raise ValueError(f"{key} must be 0 or 1")
+                if cfg["TRANSCRIPTION_PROVIDER"] not in {"whisper", "google_chirp_3"}:
+                    raise ValueError("TRANSCRIPTION_PROVIDER must be whisper or google_chirp_3")
+                if not cfg["WHISPER_MODEL"]:
+                    raise ValueError("WHISPER_MODEL must not be empty")
+                if not cfg["WHISPER_DEVICE"]:
+                    raise ValueError("WHISPER_DEVICE must not be empty")
+                if not cfg["WHISPER_COMPUTE_TYPE"]:
+                    raise ValueError("WHISPER_COMPUTE_TYPE must not be empty")
+                if cfg["TRANSCRIPTION_PROVIDER"] == "google_chirp_3":
+                    if not cfg["GOOGLE_SPEECH_PROJECT_ID"]:
+                        raise ValueError("GOOGLE_SPEECH_PROJECT_ID must not be empty when using google_chirp_3")
+                    if not cfg["GOOGLE_SPEECH_LOCATION"]:
+                        raise ValueError("GOOGLE_SPEECH_LOCATION must not be empty")
+                    if not cfg["GOOGLE_SPEECH_MODEL"]:
+                        raise ValueError("GOOGLE_SPEECH_MODEL must not be empty")
+                    if not cfg["GOOGLE_SPEECH_LANGUAGE_CODES"]:
+                        raise ValueError("GOOGLE_SPEECH_LANGUAGE_CODES must not be empty")
+                    if cfg["GOOGLE_SPEECH_CHUNK_SEC"] <= 0:
+                        raise ValueError("GOOGLE_SPEECH_CHUNK_SEC must be > 0")
+                    if cfg["GOOGLE_SPEECH_CHUNK_OVERLAP_SEC"] < 0:
+                        raise ValueError("GOOGLE_SPEECH_CHUNK_OVERLAP_SEC must be >= 0")
+                    if cfg["GOOGLE_SPEECH_CHUNK_OVERLAP_SEC"] >= cfg["GOOGLE_SPEECH_CHUNK_SEC"]:
+                        raise ValueError("GOOGLE_SPEECH_CHUNK_OVERLAP_SEC must be smaller than GOOGLE_SPEECH_CHUNK_SEC")
                 if cfg["FINAL_SOURCE_MODE_AUTO"] not in {"off", "auto"}:
                     raise ValueError("FINAL_SOURCE_MODE_AUTO must be off or auto")
                 if cfg["FULLSLIDE_SAMPLE_FRAMES"] < 1:
@@ -1583,12 +1894,25 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] not in {"none", "gemini"}:
                     raise ValueError("FINAL_SLIDE_TRANSLATION_MODE must be none or gemini")
-                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini" and not cfg["FINAL_SLIDE_TARGET_LANGUAGE"]:
+                if (
+                    cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini"
+                    or cfg["RUN_STEP_TEXT_TRANSLATE"] == 1
+                ) and not cfg["FINAL_SLIDE_TARGET_LANGUAGE"]:
                     raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled")
                 if not cfg["GEMINI_TRANSLATE_MODEL"]:
                     raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
+                if not cfg["GEMINI_TEXT_TRANSLATE_MODEL"]:
+                    raise ValueError("GEMINI_TEXT_TRANSLATE_MODEL must not be empty")
+                if not gemini_text_translate_prompt.strip():
+                    raise ValueError("GEMINI_TEXT_TRANSLATE_PROMPT must not be empty")
+                if not cfg["GEMINI_TTS_MODEL"]:
+                    raise ValueError("GEMINI_TTS_MODEL must not be empty")
+                if not cfg["GEMINI_TTS_VOICE"]:
+                    raise ValueError("GEMINI_TTS_VOICE must not be empty")
+                if not gemini_tts_prompt.strip():
+                    raise ValueError("GEMINI_TTS_PROMPT must not be empty")
                 if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {
                     "none",
                     "swin2sr",
@@ -1620,9 +1944,21 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND must be >= 0")
                 if cfg["REPLICATE_UPSCALE_CONCURRENCY"] < 1:
                     raise ValueError("REPLICATE_UPSCALE_CONCURRENCY must be >= 1")
+                if cfg["VIDEO_EXPORT_MIN_SLIDE_SEC"] <= 0:
+                    raise ValueError("VIDEO_EXPORT_MIN_SLIDE_SEC must be > 0")
+                if cfg["VIDEO_EXPORT_TAIL_PAD_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_TAIL_PAD_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_WIDTH"] <= 0 or cfg["VIDEO_EXPORT_HEIGHT"] <= 0:
+                    raise ValueError("VIDEO_EXPORT_WIDTH and VIDEO_EXPORT_HEIGHT must be > 0")
+                if cfg["VIDEO_EXPORT_FPS"] <= 0:
+                    raise ValueError("VIDEO_EXPORT_FPS must be > 0")
+                if not cfg["VIDEO_EXPORT_BG_COLOR"]:
+                    raise ValueError("VIDEO_EXPORT_BG_COLOR must not be empty")
                 write_config_values(CONFIG_PATH, cfg)
                 write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
                 write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
+                write_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH, gemini_text_translate_prompt)
+                write_text_file(GEMINI_TTS_PROMPT_PATH, gemini_tts_prompt)
                 return self._send_json(
                     200,
                     {
@@ -1726,7 +2062,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Local UI server for scene-detection project")
+    parser = argparse.ArgumentParser(description="Local UI server for slide-detection project")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()

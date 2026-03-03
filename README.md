@@ -1,4 +1,4 @@
-# Scene Detection (SliTraNet Wrapper)
+# Slide Detection (SliTraNet Wrapper)
 
 Dieses Projekt nutzt das originale SliTraNet (`./slitranet`) und ergänzt einen pragmatischen lokalen Workflow für:
 - ROI-Konfiguration
@@ -28,7 +28,17 @@ ROI direkt in `config/slitranet.env` setzen:
 - `KEYFRAME_SETTLE_FRAMES`
 - `KEYFRAME_STABLE_END_GUARD_FRAMES`
 - `KEYFRAME_STABLE_LOOKAHEAD_FRAMES`
+- `TRANSCRIPTION_PROVIDER` (`whisper`, `google_chirp_3`)
 - `WHISPER_MODEL` (z. B. `medium`)
+- `WHISPER_DEVICE`
+- `WHISPER_COMPUTE_TYPE`
+- `WHISPER_LANGUAGE`
+- `GOOGLE_SPEECH_PROJECT_ID`
+- `GOOGLE_SPEECH_LOCATION`
+- `GOOGLE_SPEECH_MODEL` (standardmäßig `chirp_3`)
+- `GOOGLE_SPEECH_LANGUAGE_CODES` (z. B. `en-US` oder `de-DE`)
+- `GOOGLE_SPEECH_CHUNK_SEC`
+- `GOOGLE_SPEECH_CHUNK_OVERLAP_SEC`
 - `SPEAKER_FILTER_MIN_STAGE1_VIDEO_RATIO`
 - `SPEAKER_FILTER_MAX_EDGE_DENSITY`
 - `SPEAKER_FILTER_MAX_LAPLACIAN_VAR`
@@ -40,6 +50,12 @@ ROI direkt in `config/slitranet.env` setzen:
 - `FINAL_SLIDE_TARGET_LANGUAGE`
 - `GEMINI_TRANSLATE_MODEL` (wenn `FINAL_SLIDE_TRANSLATION_MODE=gemini`)
 - `config/gemini_translate_prompt.txt` (Gemini-Übersetzungsprompt; auch über die Web-UI bearbeitbar)
+- `RUN_STEP_TEXT_TRANSLATE`, `RUN_STEP_TTS`, `RUN_STEP_VIDEO_EXPORT`
+- `GEMINI_TEXT_TRANSLATE_MODEL`
+- `config/gemini_text_translate_prompt.txt` (1:1-Übersetzung des gemappten Textes)
+- `GEMINI_TTS_MODEL`
+- `GEMINI_TTS_VOICE`
+- `config/gemini_tts_prompt.txt` (TTS-Stilprompt)
 - `FINAL_SLIDE_UPSCALE_MODE` (`none`, `swin2sr`, `replicate_nightmare_realesrgan`)
 - `FINAL_SLIDE_UPSCALE_MODEL` (standardmäßig `caidas/swin2SR-classical-sr-x4-64`)
 - `FINAL_SLIDE_UPSCALE_DEVICE` (`auto`, `cuda`, `cpu`)
@@ -49,17 +65,34 @@ ROI direkt in `config/slitranet.env` setzen:
 - `REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID`
 - `REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND`
 - `REPLICATE_UPSCALE_CONCURRENCY`
+- `VIDEO_EXPORT_MIN_SLIDE_SEC`
+- `VIDEO_EXPORT_TAIL_PAD_SEC`
+- `VIDEO_EXPORT_WIDTH`
+- `VIDEO_EXPORT_HEIGHT`
+- `VIDEO_EXPORT_FPS`
+- `VIDEO_EXPORT_BG_COLOR`
 
 Für Gemini liegt der API-Key lokal in `.env.local` im Projektroot:
 
 ```bash
 GEMINI_API_KEY="..."
 REPLICATE_API_TOKEN="..."
+# Optional for Google Cloud Speech-to-Text via ADC:
+# GOOGLE_APPLICATION_CREDENTIALS="/abs/path/to/service-account.json"
 ```
 
 `.env.local` ist gitignoriert und wird von `scripts/run_slitranet.sh`,
 `scripts/edit_final_slides_gemini.py`, `scripts/upscale_final_slides_replicate.py`,
 und `web/server.py` automatisch geladen.
+
+Wenn `TRANSCRIPTION_PROVIDER=google_chirp_3` genutzt wird, braucht der Prozess
+zusätzlich gültige Google Cloud Application Default Credentials, z. B. über:
+
+```bash
+gcloud auth application-default login
+```
+
+oder über `GOOGLE_APPLICATION_CREDENTIALS` in `.env.local`.
 
 Overlay zur Kontrolle erzeugen:
 
@@ -101,6 +134,12 @@ Der Run erzeugt einen neuen Ordner:
 - `output/runs/<timestamp>/slitranet/keyframes/final/slide_upscaled` (wenn Upscaling aktiv ist)
 - `output/runs/<timestamp>/slitranet/keyframes/final/slide_translated_upscaled` (wenn Übersetzung + Upscaling aktiv sind)
 - `output/runs/<timestamp>/slitranet/keyframes/final/upscale_manifest.json` (bei API-Upscaling)
+- `output/runs/<timestamp>/slitranet/slide_text_map_final_translated.{json,csv}` (wenn Textübersetzung aktiv ist)
+- `output/runs/<timestamp>/slitranet/tts/audio/*.wav` (wenn TTS aktiv ist)
+- `output/runs/<timestamp>/slitranet/tts/tts_manifest.{json,csv}` (wenn TTS aktiv ist)
+- `output/runs/<timestamp>/slitranet/video_export/timeline.{json,csv}` (wenn Video-Export aktiv ist)
+- `output/runs/<timestamp>/slitranet/video_export/final_<sprache>.mp4` (wenn Video-Export aktiv ist)
+- `output/runs/<timestamp>/slitranet/video_export/final_<sprache>.srt` (wenn Video-Export aktiv ist)
 
 Hinweis: Beim ersten Upscale-Run lädt `transformers` das Swin2SR-Modell von Hugging Face und cached es lokal.
 
