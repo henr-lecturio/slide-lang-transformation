@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 import mimetypes
 import os
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import wave
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,7 +25,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
+from scripts.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
 
 WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
@@ -31,6 +33,7 @@ GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_translate_prompt.txt"
 GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "gemini_text_translate_prompt.txt"
 GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
+GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "gemini_tts_languages.json"
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
@@ -314,6 +317,36 @@ def read_json_file(path: Path) -> dict | list | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def load_gemini_tts_language_options() -> list[dict[str, str]]:
+    raw = read_json_file(GEMINI_TTS_LANGUAGES_PATH)
+    if not isinstance(raw, list):
+        return []
+    options: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "") or "").strip()
+        code = str(item.get("tts_language_code", "") or "").strip()
+        launch_readiness = str(item.get("launch_readiness", "") or "").strip()
+        if not label or not code:
+            continue
+        options.append(
+            {
+                "label": label,
+                "tts_language_code": code,
+                "launch_readiness": launch_readiness,
+            }
+        )
+    return options
+
+
+def gemini_tts_language_maps() -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    options = load_gemini_tts_language_options()
+    by_code = {item["tts_language_code"]: item for item in options}
+    by_label = {item["label"]: item for item in options}
+    return by_code, by_label
 
 
 def ensure_within(base: Path, target: Path) -> Path:
@@ -1541,6 +1574,360 @@ def tts_health_sample_text(language_code: str) -> str:
     return samples.get(prefix, "This is a short voice test.")
 
 
+def ensure_google_speech_client(location: str):
+    try:
+        from google.cloud import speech_v2
+        from google.cloud.speech_v2.types import cloud_speech
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "google-cloud-speech is not installed in this environment. "
+            "Run: source .venv/bin/activate && pip install google-cloud-speech"
+        ) from exc
+
+    client_kwargs = {}
+    if location and location != "global":
+        client_kwargs["client_options"] = {"api_endpoint": f"{location}-speech.googleapis.com"}
+    client = speech_v2.SpeechClient(**client_kwargs)
+    return client, cloud_speech
+
+
+def parse_google_speech_language_codes(raw: str) -> list[str]:
+    items = [part.strip() for part in (raw or "").split(",")]
+    items = [item for item in items if item]
+    return items or ["en-US"]
+
+
+def make_silent_wav_bytes(duration_sec: float = 1.2, sample_rate: int = 16000) -> bytes:
+    frame_count = max(1, int(round(duration_sec * sample_rate)))
+    payload = io.BytesIO()
+    with wave.open(payload, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(b"\x00\x00" * frame_count)
+    return payload.getvalue()
+
+
+def ensure_gemini_client():
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "google-genai is not installed in this environment. "
+            "Run: source .venv/bin/activate && pip install google-genai"
+        ) from exc
+
+    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
+    return genai.Client(api_key=api_key), types
+
+
+def inject_target_language(prompt: str, target_language: str) -> str:
+    target = str(target_language or "").strip()
+    base = str(prompt or "").strip()
+    if not target:
+        raise RuntimeError("Target language must not be empty.")
+    if "{{TARGET_LANGUAGE}}" in base:
+        return base.replace("{{TARGET_LANGUAGE}}", target)
+    return f"Target language: {target}\n\n{base}"
+
+
+def ensure_cv2_numpy():
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "opencv-python-headless and numpy are required for Gemini image health checks."
+        ) from exc
+    return cv2, np
+
+
+def extract_gemini_response_text(response) -> str:
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) or []:
+            part_text = getattr(part, "text", None)
+            if isinstance(part_text, str) and part_text.strip():
+                return part_text.strip()
+    raise RuntimeError("Gemini response did not contain text.")
+
+
+def strip_code_fences(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def encode_png(image) -> bytes:
+    cv2, _np = ensure_cv2_numpy()
+    ok, data = cv2.imencode(".png", image)
+    if not ok:
+        raise RuntimeError("Failed to encode PNG image.")
+    return data.tobytes()
+
+
+def extract_gemini_image_bytes(response) -> bytes | None:
+    part_sets = []
+    direct_parts = getattr(response, "parts", None)
+    if direct_parts:
+        part_sets.append(direct_parts)
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None)
+        if parts:
+            part_sets.append(parts)
+    for parts in part_sets:
+        for part in parts:
+            inline_data = getattr(part, "inline_data", None)
+            data = getattr(inline_data, "data", None)
+            if isinstance(data, bytes):
+                return data
+    return None
+
+
+def decode_gemini_image_bytes(data: bytes):
+    cv2, np = ensure_cv2_numpy()
+    arr = np.frombuffer(data, dtype=np.uint8)
+    image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if image is None or image.size == 0:
+        raise RuntimeError("Failed to decode Gemini image response.")
+    return image
+
+
+def make_health_slide_image():
+    cv2, np = ensure_cv2_numpy()
+    image = np.full((180, 320, 3), 255, dtype=np.uint8)
+    cv2.rectangle(image, (16, 16), (304, 164), (228, 232, 238), 2)
+    cv2.putText(image, "Hello", (34, 72), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (18, 18, 18), 3, cv2.LINE_AA)
+    cv2.putText(image, "Quarterly summary", (34, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (60, 60, 60), 2, cv2.LINE_AA)
+    cv2.rectangle(image, (36, 128), (136, 148), (200, 220, 255), -1)
+    cv2.rectangle(image, (148, 128), (248, 148), (220, 235, 205), -1)
+    return image
+
+
+def make_health_edit_assets():
+    cv2, np = ensure_cv2_numpy()
+    original = make_health_slide_image()
+    mask = np.zeros((original.shape[0], original.shape[1]), dtype=np.uint8)
+    cv2.rectangle(mask, (262, 122), (319, 179), 255, -1)
+    overlay = original.copy()
+    red = np.zeros_like(overlay)
+    red[:, :, 2] = 255
+    active = mask > 0
+    overlay[active] = cv2.addWeighted(overlay, 0.35, red, 0.65, 0)[active]
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(overlay, contours, -1, (0, 0, 255), 2)
+    return original, overlay, mask
+
+
+def run_transcription_health_check(payload: dict) -> dict:
+    provider = str(payload.get("TRANSCRIPTION_PROVIDER", "") or "").strip().lower()
+    project_id = str(payload.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
+    location = str(payload.get("GOOGLE_SPEECH_LOCATION", "") or "").strip() or "global"
+    model = str(payload.get("GOOGLE_SPEECH_MODEL", "") or "").strip() or "chirp_3"
+    language_codes = parse_google_speech_language_codes(str(payload.get("GOOGLE_SPEECH_LANGUAGE_CODES", "") or ""))
+
+    if provider != "google_chirp_3":
+        return {
+            "ok": False,
+            "error_type": "NotApplicable",
+            "error_message": "Transcription API test is only available for TRANSCRIPTION_PROVIDER=google_chirp_3.",
+        }
+    if not project_id:
+        raise ValueError("GOOGLE_SPEECH_PROJECT_ID must not be empty")
+
+    start = time.perf_counter()
+    try:
+        client, cloud_speech = ensure_google_speech_client(location)
+        recognizer = f"projects/{project_id}/locations/{location}/recognizers/_"
+        config = cloud_speech.RecognitionConfig(
+            auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
+            language_codes=language_codes,
+            model=model,
+            features=cloud_speech.RecognitionFeatures(enable_automatic_punctuation=True),
+        )
+        request = cloud_speech.RecognizeRequest(
+            recognizer=recognizer,
+            config=config,
+            content=make_silent_wav_bytes(),
+        )
+        response = client.recognize(request=request)
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "provider": provider,
+            "project_id": project_id,
+            "location": location,
+            "model": model,
+            "language_codes": language_codes,
+            "latency_ms": latency_ms,
+            "results_count": len(getattr(response, "results", []) or []),
+            "message": "Transcription API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
+def run_slide_edit_health_check(payload: dict) -> dict:
+    mode = str(payload.get("FINAL_SLIDE_POSTPROCESS_MODE", "") or "").strip().lower()
+    model = str(payload.get("GEMINI_EDIT_MODEL", "") or "").strip()
+    prompt = str(payload.get("GEMINI_EDIT_PROMPT", "") or "").strip()
+    if mode != "gemini":
+        return {
+            "ok": False,
+            "error_type": "NotApplicable",
+            "error_message": "Slide Edit API test is only available for FINAL_SLIDE_POSTPROCESS_MODE=gemini.",
+        }
+    if not model:
+        raise ValueError("GEMINI_EDIT_MODEL must not be empty")
+    if not prompt:
+        raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
+
+    start = time.perf_counter()
+    try:
+        client, types = ensure_gemini_client()
+        original, overlay, mask = make_health_edit_assets()
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                prompt,
+                types.Part.from_bytes(data=encode_png(original), mime_type="image/png"),
+                types.Part.from_bytes(data=encode_png(overlay), mime_type="image/png"),
+                types.Part.from_bytes(data=encode_png(mask), mime_type="image/png"),
+            ],
+            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+        )
+        image_bytes = extract_gemini_image_bytes(response)
+        if not image_bytes:
+            raise RuntimeError("Gemini response did not include an image.")
+        image = decode_gemini_image_bytes(image_bytes)
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "model": model,
+            "latency_ms": latency_ms,
+            "image_width": int(image.shape[1]),
+            "image_height": int(image.shape[0]),
+            "image_bytes": len(image_bytes),
+            "message": "Slide Edit API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
+def run_slide_translate_health_check(payload: dict) -> dict:
+    mode = str(payload.get("FINAL_SLIDE_TRANSLATION_MODE", "") or "").strip().lower()
+    model = str(payload.get("GEMINI_TRANSLATE_MODEL", "") or "").strip()
+    prompt = str(payload.get("GEMINI_TRANSLATE_PROMPT", "") or "").strip()
+    target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
+    if mode != "gemini":
+        return {
+            "ok": False,
+            "error_type": "NotApplicable",
+            "error_message": "Slide Translate API test is only available for FINAL_SLIDE_TRANSLATION_MODE=gemini.",
+        }
+    if not model:
+        raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
+    if not prompt:
+        raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
+    if not target_language:
+        raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
+
+    start = time.perf_counter()
+    try:
+        client, types = ensure_gemini_client()
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                inject_target_language(prompt, target_language),
+                types.Part.from_bytes(data=encode_png(make_health_slide_image()), mime_type="image/png"),
+            ],
+            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+        )
+        image_bytes = extract_gemini_image_bytes(response)
+        if not image_bytes:
+            raise RuntimeError("Gemini response did not include an image.")
+        image = decode_gemini_image_bytes(image_bytes)
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "model": model,
+            "target_language": target_language,
+            "latency_ms": latency_ms,
+            "image_width": int(image.shape[1]),
+            "image_height": int(image.shape[0]),
+            "image_bytes": len(image_bytes),
+            "message": "Slide Translate API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
+def run_text_translate_health_check(payload: dict) -> dict:
+    model = str(payload.get("GEMINI_TEXT_TRANSLATE_MODEL", "") or "").strip()
+    prompt = str(payload.get("GEMINI_TEXT_TRANSLATE_PROMPT", "") or "").strip()
+    target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
+    if not model:
+        raise ValueError("GEMINI_TEXT_TRANSLATE_MODEL must not be empty")
+    if not prompt:
+        raise ValueError("GEMINI_TEXT_TRANSLATE_PROMPT must not be empty")
+    if not target_language:
+        raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
+
+    start = time.perf_counter()
+    try:
+        client, _types = ensure_gemini_client()
+        source_text = "Compliance training starts on Monday."
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                f"{inject_target_language(prompt, target_language)}\n\nSource text:\n{json.dumps(source_text, ensure_ascii=False)}"
+            ],
+            config={"response_mime_type": "application/json"},
+        )
+        raw = strip_code_fences(extract_gemini_response_text(response))
+        parsed = json.loads(raw)
+        translated_text = str(parsed.get("translated_text", "") or "").strip()
+        if not translated_text:
+            raise RuntimeError("Gemini translation JSON did not include translated_text.")
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "model": model,
+            "target_language": target_language,
+            "latency_ms": latency_ms,
+            "translated_text": translated_text,
+            "message": "Text Translate API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
 def run_tts_health_check(payload: dict) -> dict:
     project_id = str(payload.get("GOOGLE_TTS_PROJECT_ID", "") or "").strip()
     language_code = str(payload.get("GOOGLE_TTS_LANGUAGE_CODE", "") or "").strip()
@@ -1554,6 +1941,9 @@ def run_tts_health_check(payload: dict) -> dict:
         raise ValueError("GEMINI_TTS_VOICE must not be empty")
     if not language_code:
         raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must not be empty")
+    code_map, _label_map = gemini_tts_language_maps()
+    if language_code not in code_map:
+        raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must be selected from the supported Gemini TTS language list")
     if not prompt:
         raise ValueError("GEMINI_TTS_PROMPT must not be empty")
 
@@ -1661,7 +2051,7 @@ class Handler(BaseHTTPRequestHandler):
                     "GEMINI_EDIT_MODEL": env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview"),
                     "GEMINI_EDIT_PROMPT": read_text_file(GEMINI_PROMPT_PATH).rstrip("\n"),
                     "FINAL_SLIDE_TRANSLATION_MODE": env.get("FINAL_SLIDE_TRANSLATION_MODE", "none"),
-                    "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German"),
+                    "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
                     "GEMINI_TRANSLATE_MODEL": env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview"),
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
                     "GEMINI_TEXT_TRANSLATE_MODEL": env.get("GEMINI_TEXT_TRANSLATE_MODEL", "gemini-2.5-flash"),
@@ -1669,7 +2059,8 @@ class Handler(BaseHTTPRequestHandler):
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
                     "GOOGLE_TTS_PROJECT_ID": env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
-                    "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "en-US"),
+                    "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "de-DE"),
+                    "GEMINI_TTS_LANGUAGE_OPTIONS": load_gemini_tts_language_options(),
                     "GEMINI_TTS_PROMPT": read_text_file(GEMINI_TTS_PROMPT_PATH).rstrip("\n"),
                     "FINAL_SLIDE_UPSCALE_MODE": env.get("FINAL_SLIDE_UPSCALE_MODE", "none"),
                     "FINAL_SLIDE_UPSCALE_MODEL": env.get(
@@ -1985,6 +2376,11 @@ class Handler(BaseHTTPRequestHandler):
                     or cfg["RUN_STEP_TEXT_TRANSLATE"] == 1
                 ) and not cfg["FINAL_SLIDE_TARGET_LANGUAGE"]:
                     raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled")
+                code_map, label_map = gemini_tts_language_maps()
+                target_language_option = label_map.get(cfg["FINAL_SLIDE_TARGET_LANGUAGE"])
+                tts_language_option = code_map.get(cfg["GOOGLE_TTS_LANGUAGE_CODE"])
+                if cfg["FINAL_SLIDE_TARGET_LANGUAGE"] and not target_language_option:
+                    raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must be selected from the supported Gemini TTS language list")
                 if not cfg["GEMINI_TRANSLATE_MODEL"]:
                     raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
                 if not gemini_translate_prompt.strip():
@@ -2003,6 +2399,11 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("GOOGLE_TTS_PROJECT_ID must not be empty when TTS is enabled")
                 if cfg["RUN_STEP_TTS"] == 1 and not cfg["GOOGLE_TTS_LANGUAGE_CODE"]:
                     raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must not be empty when TTS is enabled")
+                if cfg["GOOGLE_TTS_LANGUAGE_CODE"] and not tts_language_option:
+                    raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must be selected from the supported Gemini TTS language list")
+                if target_language_option and tts_language_option:
+                    if target_language_option["tts_language_code"] != tts_language_option["tts_language_code"]:
+                        raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE and GOOGLE_TTS_LANGUAGE_CODE must refer to the same Gemini TTS language entry")
                 if not gemini_tts_prompt.strip():
                     raise ValueError("GEMINI_TTS_PROMPT must not be empty")
                 if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {
@@ -2076,6 +2477,22 @@ class Handler(BaseHTTPRequestHandler):
                     "mtime": int(OVERLAY_PATH.stat().st_mtime) if OVERLAY_PATH.exists() else None,
                 }
                 return self._send_json(200, payload)
+
+            if path == "/api/transcription/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_transcription_health_check(data))
+
+            if path == "/api/slide-edit/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_slide_edit_health_check(data))
+
+            if path == "/api/slide-translate/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_slide_translate_health_check(data))
+
+            if path == "/api/text-translate/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_text_translate_health_check(data))
 
             if path == "/api/tts/health":
                 data = self._read_json_body()

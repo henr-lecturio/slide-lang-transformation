@@ -34,6 +34,9 @@ const el = {
   googleSpeechLanguageCodes: document.getElementById("google_speech_language_codes"),
   googleSpeechChunkSec: document.getElementById("google_speech_chunk_sec"),
   googleSpeechChunkOverlapSec: document.getElementById("google_speech_chunk_overlap_sec"),
+  transcriptionHealthCheck: document.getElementById("transcription-health-check"),
+  transcriptionHealthStatus: document.getElementById("transcription-health-status"),
+  transcriptionHealthMeta: document.getElementById("transcription-health-meta"),
   fullslideSampleFrames: document.getElementById("fullslide_sample_frames"),
   fullslideBorderStripPx: document.getElementById("fullslide_border_strip_px"),
   fullslideMinMatchedSides: document.getElementById("fullslide_min_matched_sides"),
@@ -50,12 +53,22 @@ const el = {
   finalSlidePostprocessMode: document.getElementById("final_slide_postprocess_mode"),
   geminiEditModel: document.getElementById("gemini_edit_model"),
   geminiEditPrompt: document.getElementById("gemini_edit_prompt"),
+  slideEditHealthCheck: document.getElementById("slide-edit-health-check"),
+  slideEditHealthStatus: document.getElementById("slide-edit-health-status"),
+  slideEditHealthMeta: document.getElementById("slide-edit-health-meta"),
   finalSlideTranslationMode: document.getElementById("final_slide_translation_mode"),
+  finalSlideTargetLanguageSearch: document.getElementById("final_slide_target_language_search"),
   finalSlideTargetLanguage: document.getElementById("final_slide_target_language"),
   geminiTranslateModel: document.getElementById("gemini_translate_model"),
   geminiTranslatePrompt: document.getElementById("gemini_translate_prompt"),
+  slideTranslateHealthCheck: document.getElementById("slide-translate-health-check"),
+  slideTranslateHealthStatus: document.getElementById("slide-translate-health-status"),
+  slideTranslateHealthMeta: document.getElementById("slide-translate-health-meta"),
   geminiTextTranslateModel: document.getElementById("gemini_text_translate_model"),
   geminiTextTranslatePrompt: document.getElementById("gemini_text_translate_prompt"),
+  textTranslateHealthCheck: document.getElementById("text-translate-health-check"),
+  textTranslateHealthStatus: document.getElementById("text-translate-health-status"),
+  textTranslateHealthMeta: document.getElementById("text-translate-health-meta"),
   geminiTtsModel: document.getElementById("gemini_tts_model"),
   geminiTtsVoice: document.getElementById("gemini_tts_voice"),
   googleTtsProjectId: document.getElementById("google_tts_project_id"),
@@ -159,35 +172,10 @@ const state = {
   currentRunStatus: "idle",
   labStatus: "idle",
   stepSectionExpanded: {},
+  ttsLanguageOptions: [],
 };
 
 const ACTIVE_TAB_STORAGE_KEY = "slide-transform-active-tab";
-const TARGET_LANGUAGE_PREFIX_RULES = [
-  { prefixes: ["de"], names: ["german", "deutsch"] },
-  { prefixes: ["en"], names: ["english", "englisch"] },
-  { prefixes: ["fr"], names: ["french", "francais", "français"] },
-  { prefixes: ["es"], names: ["spanish", "espanol", "español"] },
-  { prefixes: ["it"], names: ["italian", "italiano"] },
-  { prefixes: ["pt"], names: ["portuguese", "portugues", "português"] },
-  { prefixes: ["nl"], names: ["dutch", "nederlands"] },
-  { prefixes: ["pl"], names: ["polish", "polski"] },
-  { prefixes: ["sv"], names: ["swedish", "svenska"] },
-  { prefixes: ["da"], names: ["danish", "dansk"] },
-  { prefixes: ["nb", "no"], names: ["norwegian", "norsk"] },
-  { prefixes: ["fi"], names: ["finnish", "suomi"] },
-  { prefixes: ["cs"], names: ["czech", "čeština", "cestina"] },
-  { prefixes: ["sk"], names: ["slovak", "slovencina", "slovenčina"] },
-  { prefixes: ["ro"], names: ["romanian", "romana", "română", "romana"] },
-  { prefixes: ["hu"], names: ["hungarian", "magyar"] },
-  { prefixes: ["tr"], names: ["turkish", "turkce", "türkçe"] },
-  { prefixes: ["ru"], names: ["russian", "russkiy", "русский"] },
-  { prefixes: ["uk"], names: ["ukrainian", "українська", "ukrainska"] },
-  { prefixes: ["ja"], names: ["japanese", "nihongo", "日本語"] },
-  { prefixes: ["ko"], names: ["korean", "한국어"] },
-  { prefixes: ["zh"], names: ["chinese", "mandarin", "中文"] },
-  { prefixes: ["ar"], names: ["arabic", "العربية"] },
-  { prefixes: ["hi"], names: ["hindi", "हिन्दी", "हिंदी"] },
-];
 
 const buttonFeedbackTimers = new WeakMap();
 
@@ -482,7 +470,11 @@ function setConfig(cfg) {
   el.geminiEditModel.value = cfg.GEMINI_EDIT_MODEL || "gemini-3-pro-image-preview";
   el.geminiEditPrompt.value = cfg.GEMINI_EDIT_PROMPT || "";
   el.finalSlideTranslationMode.value = cfg.FINAL_SLIDE_TRANSLATION_MODE || "none";
-  el.finalSlideTargetLanguage.value = cfg.FINAL_SLIDE_TARGET_LANGUAGE || "German";
+  state.ttsLanguageOptions = Array.isArray(cfg.GEMINI_TTS_LANGUAGE_OPTIONS) ? cfg.GEMINI_TTS_LANGUAGE_OPTIONS : [];
+  if (el.finalSlideTargetLanguageSearch) {
+    el.finalSlideTargetLanguageSearch.value = "";
+  }
+  renderTtsLanguageOptions("", cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
   el.geminiTextTranslateModel.value = cfg.GEMINI_TEXT_TRANSLATE_MODEL || "gemini-2.5-flash";
@@ -490,7 +482,6 @@ function setConfig(cfg) {
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
   el.googleTtsProjectId.value = cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
-  el.googleTtsLanguageCode.value = cfg.GOOGLE_TTS_LANGUAGE_CODE || "en-US";
   el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
@@ -507,7 +498,11 @@ function setConfig(cfg) {
   el.videoExportHeight.value = cfg.VIDEO_EXPORT_HEIGHT ?? 1080;
   el.videoExportFps.value = cfg.VIDEO_EXPORT_FPS ?? 30;
   el.videoExportBgColor.value = cfg.VIDEO_EXPORT_BG_COLOR || "white";
-  clearTtsHealthStatus();
+  clearHealthStatus("transcription");
+  clearHealthStatus("slideEdit");
+  clearHealthStatus("slideTranslate");
+  clearHealthStatus("textTranslate");
+  clearHealthStatus("tts");
   el.labUpscaleProvider.value = ["swin2sr", "replicate_nightmare_realesrgan"].includes(cfg.FINAL_SLIDE_UPSCALE_MODE)
     ? cfg.FINAL_SLIDE_UPSCALE_MODE
     : "swin2sr";
@@ -601,7 +596,7 @@ async function saveConfig() {
     GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
     GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
     FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
-    FINAL_SLIDE_TARGET_LANGUAGE: el.finalSlideTargetLanguage.value.trim(),
+    FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
     GEMINI_TEXT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
@@ -609,7 +604,7 @@ async function saveConfig() {
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
     GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
-    GOOGLE_TTS_LANGUAGE_CODE: el.googleTtsLanguageCode.value.trim(),
+    GOOGLE_TTS_LANGUAGE_CODE: (getSelectedTtsLanguageOption()?.tts_language_code || "").trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
     FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
@@ -654,21 +649,53 @@ function showButtonSuccess(button, successLabel, message = "") {
   buttonFeedbackTimers.set(button, timer);
 }
 
-function setTtsHealthStatus(kind, text, meta = "") {
-  if (el.ttsHealthStatus) {
-    el.ttsHealthStatus.className = `health-check-status is-${kind}`;
-    el.ttsHealthStatus.textContent = text;
+const healthUi = {
+  transcription: {
+    button: () => el.transcriptionHealthCheck,
+    status: () => el.transcriptionHealthStatus,
+    meta: () => el.transcriptionHealthMeta,
+  },
+  slideEdit: {
+    button: () => el.slideEditHealthCheck,
+    status: () => el.slideEditHealthStatus,
+    meta: () => el.slideEditHealthMeta,
+  },
+  slideTranslate: {
+    button: () => el.slideTranslateHealthCheck,
+    status: () => el.slideTranslateHealthStatus,
+    meta: () => el.slideTranslateHealthMeta,
+  },
+  textTranslate: {
+    button: () => el.textTranslateHealthCheck,
+    status: () => el.textTranslateHealthStatus,
+    meta: () => el.textTranslateHealthMeta,
+  },
+  tts: {
+    button: () => el.ttsHealthCheck,
+    status: () => el.ttsHealthStatus,
+    meta: () => el.ttsHealthMeta,
+  },
+};
+
+function setHealthStatus(key, kind, text, meta = "") {
+  const ui = healthUi[key];
+  if (!ui) return;
+  const statusEl = ui.status();
+  const metaEl = ui.meta();
+  if (statusEl) {
+    statusEl.className = `health-check-status is-${kind}`;
+    statusEl.textContent = text;
   }
-  if (el.ttsHealthMeta) {
-    el.ttsHealthMeta.textContent = meta;
+  if (metaEl) {
+    metaEl.textContent = meta;
   }
 }
 
-function clearTtsHealthStatus() {
-  setTtsHealthStatus("idle", "Not tested.", "");
+function clearHealthStatus(key, text = "Not tested.") {
+  setHealthStatus(key, "idle", text, "");
 }
 
-function normalizeLanguageLabel(value) {
+function normalizeLanguageSearch(value) {
   return String(value || "")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -676,19 +703,75 @@ function normalizeLanguageLabel(value) {
     .trim();
 }
 
-function expectedTtsLanguagePrefixes(targetLanguage) {
-  const normalized = normalizeLanguageLabel(targetLanguage);
-  if (!normalized) return [];
-  for (const rule of TARGET_LANGUAGE_PREFIX_RULES) {
-    if (rule.names.some((name) => normalized.includes(normalizeLanguageLabel(name)))) {
-      return rule.prefixes;
-    }
-  }
-  return [];
+function getTtsLanguageOptions() {
+  return Array.isArray(state.ttsLanguageOptions) ? state.ttsLanguageOptions : [];
 }
 
-function ttsLanguagePrefix(languageCode) {
-  return String(languageCode || "").trim().toLowerCase().split(/[-_]/)[0] || "";
+function findTtsLanguageOptionByCode(code) {
+  const wanted = String(code || "").trim();
+  if (!wanted) return null;
+  return getTtsLanguageOptions().find((item) => item.tts_language_code === wanted) || null;
+}
+
+function findTtsLanguageOptionByLabel(label) {
+  const wanted = String(label || "").trim();
+  if (!wanted) return null;
+  return getTtsLanguageOptions().find((item) => item.label === wanted) || null;
+}
+
+function getSelectedTtsLanguageOption() {
+  return findTtsLanguageOptionByCode(el.finalSlideTargetLanguage.value);
+}
+
+function filteredTtsLanguageOptions(filterText = "") {
+  const query = normalizeLanguageSearch(filterText);
+  const all = getTtsLanguageOptions();
+  if (!query) return all;
+  return all.filter((item) => {
+    const readiness = normalizeLanguageSearch(item.launch_readiness || "");
+    const label = normalizeLanguageSearch(item.label || "");
+    const code = normalizeLanguageSearch(item.tts_language_code || "");
+    return label.includes(query) || code.includes(query) || readiness.includes(query);
+  });
+}
+
+function renderTtsLanguageOptions(filterText = "", preferredCode = "", preferredLabel = "") {
+  const filtered = filteredTtsLanguageOptions(filterText);
+  const previousCode = String(preferredCode || el.finalSlideTargetLanguage.value || "").trim();
+  const previousLabel = String(preferredLabel || "").trim();
+  el.finalSlideTargetLanguage.innerHTML = "";
+
+  if (filtered.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No matching languages";
+    el.finalSlideTargetLanguage.appendChild(option);
+    el.finalSlideTargetLanguage.value = "";
+    el.googleTtsLanguageCode.value = "";
+    updateTtsLanguageHint();
+    return;
+  }
+
+  for (const item of filtered) {
+    const option = document.createElement("option");
+    option.value = item.tts_language_code;
+    option.textContent = item.launch_readiness
+      ? `${item.label} [${item.tts_language_code}] (${item.launch_readiness})`
+      : `${item.label} [${item.tts_language_code}]`;
+    el.finalSlideTargetLanguage.appendChild(option);
+  }
+
+  const preferred = filtered.find((item) => item.tts_language_code === previousCode)
+    || filtered.find((item) => item.label === previousLabel)
+    || filtered[0];
+  el.finalSlideTargetLanguage.value = preferred.tts_language_code;
+  syncSelectedTtsLanguage();
+}
+
+function syncSelectedTtsLanguage() {
+  const selected = getSelectedTtsLanguageOption();
+  el.googleTtsLanguageCode.value = selected ? selected.tts_language_code : "";
+  updateTtsLanguageHint();
 }
 
 function setTtsLanguageHint(kind, text = "") {
@@ -703,44 +786,155 @@ function updateTtsLanguageHint() {
     setTtsLanguageHint("idle", "");
     return;
   }
+  const selected = getSelectedTtsLanguageOption();
+  if (!selected) {
+    setTtsLanguageHint("warning", "Select a supported Gemini TTS language from the catalog.");
+    return;
+  }
   if (!el.runStepTextTranslate.checked) {
-    setTtsLanguageHint("note", "TTS currently speaks the source mapped text because Text Translate is disabled.");
-    return;
-  }
-  const targetLanguage = el.finalSlideTargetLanguage.value.trim();
-  const languageCode = el.googleTtsLanguageCode.value.trim();
-  if (!targetLanguage || !languageCode) {
-    setTtsLanguageHint("idle", "");
-    return;
-  }
-  const expectedPrefixes = expectedTtsLanguagePrefixes(targetLanguage);
-  if (expectedPrefixes.length === 0) {
-    setTtsLanguageHint("note", `Target language "${targetLanguage}" is free-form. Verify GOOGLE_TTS_LANGUAGE_CODE manually.`);
-    return;
-  }
-  const actualPrefix = ttsLanguagePrefix(languageCode);
-  if (!expectedPrefixes.includes(actualPrefix)) {
     setTtsLanguageHint(
-      "warning",
-      `Target language "${targetLanguage}" usually expects GOOGLE_TTS_LANGUAGE_CODE starting with "${expectedPrefixes[0]}-". Current value: "${languageCode}".`,
+      "note",
+      `TTS will use ${selected.label} [${selected.tts_language_code}] for the source mapped text because Text Translate is disabled.`,
     );
     return;
   }
-  setTtsLanguageHint("ok", `TTS language code matches the configured target language "${targetLanguage}".`);
+  const readiness = selected.launch_readiness ? ` | ${selected.launch_readiness}` : "";
+  setTtsLanguageHint("ok", `Selected Gemini TTS language: ${selected.label} | ${selected.tts_language_code}${readiness}`);
 }
 
 function collectTtsHealthPayload() {
+  const selected = getSelectedTtsLanguageOption();
   return {
     GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
-    GOOGLE_TTS_LANGUAGE_CODE: el.googleTtsLanguageCode.value.trim(),
+    GOOGLE_TTS_LANGUAGE_CODE: selected ? selected.tts_language_code : "",
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
   };
 }
 
+function collectTranscriptionHealthPayload() {
+  return {
+    TRANSCRIPTION_PROVIDER: el.transcriptionProvider.value,
+    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
+    GOOGLE_SPEECH_LOCATION: el.googleSpeechLocation.value.trim(),
+    GOOGLE_SPEECH_MODEL: el.googleSpeechModel.value.trim(),
+    GOOGLE_SPEECH_LANGUAGE_CODES: el.googleSpeechLanguageCodes.value.trim(),
+  };
+}
+
+function collectSlideEditHealthPayload() {
+  return {
+    FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
+    GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
+    GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
+  };
+}
+
+function collectSlideTranslateHealthPayload() {
+  return {
+    FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
+    FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
+    GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
+    GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
+  };
+}
+
+function collectTextTranslateHealthPayload() {
+  return {
+    FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
+    GEMINI_TEXT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
+  };
+}
+
+async function testTranscriptionHealth() {
+  setHealthStatus("transcription", "pending", "Testing...", "");
+  const result = await apiPost("/api/transcription/health", collectTranscriptionHealthPayload());
+  if (result.ok) {
+    const meta = [
+      `project=${result.project_id || "-"}`,
+      `location=${result.location || "-"}`,
+      `model=${result.model || "-"}`,
+      `languages=${Array.isArray(result.language_codes) ? result.language_codes.join(",") : "-"}`,
+      `${result.latency_ms || 0} ms`,
+      `results=${result.results_count || 0}`,
+    ].join(" | ");
+    setHealthStatus("transcription", "ok", "Reachable", meta);
+    showButtonSuccess(el.transcriptionHealthCheck, "OK");
+    return;
+  }
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Transcription API check failed."]
+    .filter(Boolean)
+    .join(" | ");
+  setHealthStatus("transcription", "error", "Failed", meta);
+}
+
+async function testSlideEditHealth() {
+  setHealthStatus("slideEdit", "pending", "Testing...", "");
+  const result = await apiPost("/api/slide-edit/health", collectSlideEditHealthPayload());
+  if (result.ok) {
+    const meta = [
+      `model=${result.model || "-"}`,
+      `${result.latency_ms || 0} ms`,
+      `${result.image_width || 0}x${result.image_height || 0}`,
+      `${result.image_bytes || 0} bytes`,
+    ].join(" | ");
+    setHealthStatus("slideEdit", "ok", "Reachable", meta);
+    showButtonSuccess(el.slideEditHealthCheck, "OK");
+    return;
+  }
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Slide Edit API check failed."]
+    .filter(Boolean)
+    .join(" | ");
+  setHealthStatus("slideEdit", "error", "Failed", meta);
+}
+
+async function testSlideTranslateHealth() {
+  setHealthStatus("slideTranslate", "pending", "Testing...", "");
+  const result = await apiPost("/api/slide-translate/health", collectSlideTranslateHealthPayload());
+  if (result.ok) {
+    const meta = [
+      `target=${result.target_language || "-"}`,
+      `model=${result.model || "-"}`,
+      `${result.latency_ms || 0} ms`,
+      `${result.image_width || 0}x${result.image_height || 0}`,
+      `${result.image_bytes || 0} bytes`,
+    ].join(" | ");
+    setHealthStatus("slideTranslate", "ok", "Reachable", meta);
+    showButtonSuccess(el.slideTranslateHealthCheck, "OK");
+    return;
+  }
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Slide Translate API check failed."]
+    .filter(Boolean)
+    .join(" | ");
+  setHealthStatus("slideTranslate", "error", "Failed", meta);
+}
+
+async function testTextTranslateHealth() {
+  setHealthStatus("textTranslate", "pending", "Testing...", "");
+  const result = await apiPost("/api/text-translate/health", collectTextTranslateHealthPayload());
+  if (result.ok) {
+    const translated = String(result.translated_text || "").trim();
+    const preview = translated.length > 90 ? `${translated.slice(0, 87)}...` : translated;
+    const meta = [
+      `target=${result.target_language || "-"}`,
+      `model=${result.model || "-"}`,
+      `${result.latency_ms || 0} ms`,
+      preview ? `sample=\"${preview}\"` : "",
+    ].filter(Boolean).join(" | ");
+    setHealthStatus("textTranslate", "ok", "Reachable", meta);
+    showButtonSuccess(el.textTranslateHealthCheck, "OK");
+    return;
+  }
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Text Translate API check failed."]
+    .filter(Boolean)
+    .join(" | ");
+  setHealthStatus("textTranslate", "error", "Failed", meta);
+}
+
 async function testTtsHealth() {
-  setTtsHealthStatus("pending", "Testing...", "");
+  setHealthStatus("tts", "pending", "Testing...", "");
   const result = await apiPost("/api/tts/health", collectTtsHealthPayload());
   if (result.ok) {
     const meta = [
@@ -751,7 +945,7 @@ async function testTtsHealth() {
       `${result.audio_bytes || 0} bytes`,
       `${result.duration_sec || 0}s`,
     ].join(" | ");
-    setTtsHealthStatus("ok", "Reachable", meta);
+    setHealthStatus("tts", "ok", "Reachable", meta);
     showButtonSuccess(el.ttsHealthCheck, "OK");
     return;
   }
@@ -759,7 +953,7 @@ async function testTtsHealth() {
     result.error_type || "Error",
     result.error_message || result.message || "TTS API check failed.",
   ].filter(Boolean).join(" | ");
-  setTtsHealthStatus("error", "Failed", meta);
+  setHealthStatus("tts", "error", "Failed", meta);
 }
 
 function syncSettingsFieldState() {
@@ -786,18 +980,62 @@ function syncSettingsFieldState() {
   el.googleSpeechLanguageCodes.disabled = !googleTranscription;
   el.googleSpeechChunkSec.disabled = !googleTranscription;
   el.googleSpeechChunkOverlapSec.disabled = !googleTranscription;
+  if (el.transcriptionHealthCheck) {
+    el.transcriptionHealthCheck.disabled = !googleTranscription;
+  }
+  if (!googleTranscription) {
+    setHealthStatus("transcription", "idle", "Only for google_chirp_3.", "");
+  } else if (el.transcriptionHealthStatus?.textContent === "Only for google_chirp_3.") {
+    clearHealthStatus("transcription");
+  }
 
   el.finalSlidePostprocessMode.disabled = !editEnabled;
   el.geminiEditModel.disabled = !editEnabled;
   el.geminiEditPrompt.disabled = !editEnabled;
+  const editApiEnabled = editEnabled && el.finalSlidePostprocessMode.value === "gemini";
+  if (el.slideEditHealthCheck) {
+    el.slideEditHealthCheck.disabled = !editApiEnabled;
+  }
+  if (!editApiEnabled) {
+    setHealthStatus("slideEdit", "idle", editEnabled ? "Only for gemini mode." : "Step disabled.", "");
+  } else if (
+    el.slideEditHealthStatus?.textContent === "Only for gemini mode."
+    || el.slideEditHealthStatus?.textContent === "Step disabled."
+  ) {
+    clearHealthStatus("slideEdit");
+  }
 
   el.finalSlideTranslationMode.disabled = !translateEnabled;
-  el.finalSlideTargetLanguage.disabled = !(translateEnabled || textTranslateEnabled || ttsEnabled);
+  const languageSelectionEnabled = translateEnabled || textTranslateEnabled || ttsEnabled;
+  if (el.finalSlideTargetLanguageSearch) {
+    el.finalSlideTargetLanguageSearch.disabled = !languageSelectionEnabled;
+  }
+  el.finalSlideTargetLanguage.disabled = !languageSelectionEnabled;
   el.geminiTranslateModel.disabled = !translateEnabled;
   el.geminiTranslatePrompt.disabled = !translateEnabled;
+  const slideTranslateApiEnabled = translateEnabled && el.finalSlideTranslationMode.value === "gemini";
+  if (el.slideTranslateHealthCheck) {
+    el.slideTranslateHealthCheck.disabled = !slideTranslateApiEnabled;
+  }
+  if (!slideTranslateApiEnabled) {
+    setHealthStatus("slideTranslate", "idle", translateEnabled ? "Only for gemini mode." : "Step disabled.", "");
+  } else if (
+    el.slideTranslateHealthStatus?.textContent === "Only for gemini mode."
+    || el.slideTranslateHealthStatus?.textContent === "Step disabled."
+  ) {
+    clearHealthStatus("slideTranslate");
+  }
 
   el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
   el.geminiTextTranslatePrompt.disabled = !textTranslateEnabled;
+  if (el.textTranslateHealthCheck) {
+    el.textTranslateHealthCheck.disabled = !textTranslateEnabled;
+  }
+  if (!textTranslateEnabled) {
+    setHealthStatus("textTranslate", "idle", "Step disabled.", "");
+  } else if (el.textTranslateHealthStatus?.textContent === "Step disabled.") {
+    clearHealthStatus("textTranslate");
+  }
 
   el.geminiTtsModel.disabled = !ttsEnabled;
   el.geminiTtsVoice.disabled = !ttsEnabled;
@@ -808,7 +1046,9 @@ function syncSettingsFieldState() {
     el.ttsHealthCheck.disabled = !ttsEnabled;
   }
   if (!ttsEnabled) {
-    clearTtsHealthStatus();
+    setHealthStatus("tts", "idle", "Step disabled.", "");
+  } else if (el.ttsHealthStatus?.textContent === "Step disabled.") {
+    clearHealthStatus("tts");
   }
   updateTtsLanguageHint();
 
@@ -1725,6 +1965,26 @@ function bindEvents() {
   el.ttsHealthCheck.addEventListener("click", () => runTask(async () => {
     await testTtsHealth();
   }));
+  if (el.transcriptionHealthCheck) {
+    el.transcriptionHealthCheck.addEventListener("click", () => runTask(async () => {
+      await testTranscriptionHealth();
+    }));
+  }
+  if (el.slideEditHealthCheck) {
+    el.slideEditHealthCheck.addEventListener("click", () => runTask(async () => {
+      await testSlideEditHealth();
+    }));
+  }
+  if (el.slideTranslateHealthCheck) {
+    el.slideTranslateHealthCheck.addEventListener("click", () => runTask(async () => {
+      await testSlideTranslateHealth();
+    }));
+  }
+  if (el.textTranslateHealthCheck) {
+    el.textTranslateHealthCheck.addEventListener("click", () => runTask(async () => {
+      await testTextTranslateHealth();
+    }));
+  }
   el.regenOverlay.addEventListener("click", () => runTask(async () => {
     await regenerateOverlay();
     showButtonSuccess(el.regenOverlay, "Generated");
@@ -1776,25 +2036,76 @@ function bindEvents() {
   }
 
   for (const input of [
+    el.transcriptionProvider,
+    el.googleSpeechProjectId,
+    el.googleSpeechLocation,
+    el.googleSpeechModel,
+    el.googleSpeechLanguageCodes,
+  ]) {
+    input.addEventListener("input", () => clearHealthStatus("transcription"));
+    input.addEventListener("change", () => clearHealthStatus("transcription"));
+  }
+
+  for (const input of [el.runStepEdit, el.finalSlidePostprocessMode, el.geminiEditModel, el.geminiEditPrompt]) {
+    input.addEventListener("input", () => clearHealthStatus("slideEdit"));
+    input.addEventListener("change", () => clearHealthStatus("slideEdit"));
+  }
+
+  for (const input of [
+    el.runStepTranslate,
+    el.finalSlideTranslationMode,
+    el.finalSlideTargetLanguageSearch,
+    el.finalSlideTargetLanguage,
+    el.geminiTranslateModel,
+    el.geminiTranslatePrompt,
+  ]) {
+    input.addEventListener("input", () => clearHealthStatus("slideTranslate"));
+    input.addEventListener("change", () => clearHealthStatus("slideTranslate"));
+  }
+
+  for (const input of [
+    el.runStepTextTranslate,
+    el.finalSlideTargetLanguageSearch,
+    el.finalSlideTargetLanguage,
+    el.geminiTextTranslateModel,
+    el.geminiTextTranslatePrompt,
+  ]) {
+    input.addEventListener("input", () => clearHealthStatus("textTranslate"));
+    input.addEventListener("change", () => clearHealthStatus("textTranslate"));
+  }
+
+  for (const input of [
     el.googleTtsProjectId,
-    el.googleTtsLanguageCode,
+    el.finalSlideTargetLanguageSearch,
+    el.finalSlideTargetLanguage,
     el.geminiTtsModel,
     el.geminiTtsVoice,
     el.geminiTtsPrompt,
   ]) {
-    input.addEventListener("input", clearTtsHealthStatus);
-    input.addEventListener("change", clearTtsHealthStatus);
+    input.addEventListener("input", () => clearHealthStatus("tts"));
+    input.addEventListener("change", () => clearHealthStatus("tts"));
   }
 
   for (const input of [
+    el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
-    el.googleTtsLanguageCode,
     el.runStepTts,
     el.runStepTextTranslate,
   ]) {
     input.addEventListener("input", updateTtsLanguageHint);
     input.addEventListener("change", updateTtsLanguageHint);
   }
+
+  if (el.finalSlideTargetLanguageSearch) {
+    el.finalSlideTargetLanguageSearch.addEventListener("input", () => {
+      renderTtsLanguageOptions(
+        el.finalSlideTargetLanguageSearch.value,
+        getSelectedTtsLanguageOption()?.tts_language_code || "",
+        getSelectedTtsLanguageOption()?.label || "",
+      );
+    });
+  }
+  el.finalSlideTargetLanguage.addEventListener("change", syncSelectedTtsLanguage);
 
   document.querySelectorAll(".step-section-toggle").forEach((button) => {
     button.addEventListener("click", () => {

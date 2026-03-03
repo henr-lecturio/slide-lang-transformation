@@ -13,7 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from cloud_tts import ensure_cloud_tts_client, synthesize_cloud_tts_audio, write_wave_bytes
+from scripts.cloud_tts import ensure_cloud_tts_client, synthesize_cloud_tts_audio, write_wave_bytes
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "gemini_tts_prompt.txt"
