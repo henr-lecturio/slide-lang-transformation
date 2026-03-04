@@ -27,6 +27,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.lib.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
+from scripts.lib.cloud_vision import ensure_cloud_vision_client, detect_image_text_bytes
 from scripts.lib.translation_memory import (
     append_glossary_to_prompt,
     apply_termbase_placeholders,
@@ -74,6 +75,7 @@ STEP_DEFS = [
     ("upscale", "Slide Upscale"),
     ("tts", "TTS"),
     ("tts-alignment", "TTS Alignment"),
+    ("review", "Review"),
     ("video-export", "Video Export"),
 ]
 STEP_LABELS = {step_id: label for step_id, label in STEP_DEFS}
@@ -239,6 +241,8 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     translated_text_csv = run_dir / "slitranet" / "slide_text_map_final_translated.csv"
     tts_audio_dir = run_dir / "slitranet" / "tts" / "audio"
     tts_alignment_csv = run_dir / "slitranet" / "tts" / "segment_alignment.csv"
+    review_dir = run_dir / "slitranet" / "review"
+    reviewed_timeline_csv = review_dir / "reviewed_timeline.csv"
     video_export_dir = run_dir / "slitranet" / "video_export"
     exported_video = latest_file_in_dir(video_export_dir, ".mp4")
 
@@ -249,6 +253,7 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     translated_upscaled_slides_ready = count_files(translated_upscaled_slide_dir) > 0
     translated_text_ready = translated_text_csv.exists() and csv_event_count(translated_text_csv) > 0
     tts_ready = (tts_alignment_csv.exists() and csv_event_count(tts_alignment_csv) > 0) or count_files(tts_audio_dir) > 0
+    review_ready = reviewed_timeline_csv.exists() and csv_event_count(reviewed_timeline_csv) > 0
     video_export_ready = exported_video is not None
 
     highest_available = "none"
@@ -256,6 +261,9 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     if video_export_ready:
         highest_available = "video_export"
         highest_available_label = "video export"
+    elif review_ready:
+        highest_available = "review"
+        highest_available_label = "reviewed timeline"
     elif tts_ready:
         highest_available = "tts"
         highest_available_label = "tts audio"
@@ -283,6 +291,7 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
         "translated_upscaled_slides_ready": translated_upscaled_slides_ready,
         "translated_text_ready": translated_text_ready,
         "tts_ready": tts_ready,
+        "review_ready": review_ready,
         "video_export_ready": video_export_ready,
         "highest_available": highest_available,
         "highest_available_label": highest_available_label,
@@ -746,6 +755,13 @@ def run_detail(run_id: str) -> dict:
     tts_alignment_json = run_dir / "slitranet" / "tts" / "segment_alignment.json"
     tts_alignment_csv = run_dir / "slitranet" / "tts" / "segment_alignment.csv"
     tts_full_audio = run_dir / "slitranet" / "tts" / "audio" / "full_transcript.wav"
+    review_dir = run_dir / "slitranet" / "review"
+    review_slide_ocr_json = review_dir / "slide_ocr.json"
+    review_slide_ocr_csv = review_dir / "slide_ocr.csv"
+    review_slide_voice_alignment_json = review_dir / "slide_voice_alignment.json"
+    review_slide_voice_alignment_csv = review_dir / "slide_voice_alignment.csv"
+    reviewed_timeline_json = review_dir / "reviewed_timeline.json"
+    reviewed_timeline_csv = review_dir / "reviewed_timeline.csv"
     video_export_dir = run_dir / "slitranet" / "video_export"
     video_timeline_json = video_export_dir / "timeline.json"
     video_timeline_csv = video_export_dir / "timeline.csv"
@@ -785,6 +801,12 @@ def run_detail(run_id: str) -> dict:
         "tts_alignment_json_url": f"/api/runs/{run_id}/file/slitranet/tts/segment_alignment.json" if tts_alignment_json.exists() else "",
         "tts_alignment_csv_url": f"/api/runs/{run_id}/file/slitranet/tts/segment_alignment.csv" if tts_alignment_csv.exists() else "",
         "tts_full_audio_url": f"/api/runs/{run_id}/file/slitranet/tts/audio/full_transcript.wav" if tts_full_audio.exists() else "",
+        "review_slide_ocr_json_url": f"/api/runs/{run_id}/file/slitranet/review/slide_ocr.json" if review_slide_ocr_json.exists() else "",
+        "review_slide_ocr_csv_url": f"/api/runs/{run_id}/file/slitranet/review/slide_ocr.csv" if review_slide_ocr_csv.exists() else "",
+        "review_slide_voice_alignment_json_url": f"/api/runs/{run_id}/file/slitranet/review/slide_voice_alignment.json" if review_slide_voice_alignment_json.exists() else "",
+        "review_slide_voice_alignment_csv_url": f"/api/runs/{run_id}/file/slitranet/review/slide_voice_alignment.csv" if review_slide_voice_alignment_csv.exists() else "",
+        "reviewed_timeline_json_url": f"/api/runs/{run_id}/file/slitranet/review/reviewed_timeline.json" if reviewed_timeline_json.exists() else "",
+        "reviewed_timeline_csv_url": f"/api/runs/{run_id}/file/slitranet/review/reviewed_timeline.csv" if reviewed_timeline_csv.exists() else "",
         "video_timeline_json_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.json" if video_timeline_json.exists() else "",
         "video_timeline_csv_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.csv" if video_timeline_csv.exists() else "",
         "exported_video_name": exported_video.name if exported_video else "",
@@ -1081,6 +1103,7 @@ def export_lab_artifacts_for_run(run_id: str) -> dict:
         slide_map_json = run_dir / "slitranet" / "slide_text_map_final.json"
     tts_alignment_json = run_dir / "slitranet" / "tts" / "segment_alignment.json"
     full_audio_path = run_dir / "slitranet" / "tts" / "audio" / "full_transcript.wav"
+    reviewed_timeline_json = run_dir / "slitranet" / "review" / "reviewed_timeline.json"
 
     missing: list[str] = []
     if not slide_map_json.exists():
@@ -1097,6 +1120,7 @@ def export_lab_artifacts_for_run(run_id: str) -> dict:
         "slide_map_json": slide_map_json if slide_map_json.exists() else None,
         "image_dir": image_dir,
         "tts_alignment_json": tts_alignment_json if tts_alignment_json.exists() else None,
+        "reviewed_timeline_json": reviewed_timeline_json if reviewed_timeline_json.exists() else None,
         "full_audio_path": full_audio_path if full_audio_path.exists() else None,
         "export_ready": len(missing) == 0,
         "missing_requirements": missing,
@@ -1171,6 +1195,7 @@ def start_export_lab_job(run_id: str, overrides: dict | None = None) -> tuple[bo
         str(artifacts["image_dir"]),
         "--tts-alignment-json",
         str(artifacts["tts_alignment_json"]),
+        *(["--reviewed-timeline-json", str(artifacts["reviewed_timeline_json"])] if artifacts.get("reviewed_timeline_json") else []),
         "--out-video",
         str(out_video),
         "--out-timeline-json",
@@ -1910,6 +1935,7 @@ def start_run() -> tuple[bool, str]:
     run_step_translate = (env.get("RUN_STEP_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     run_step_text_translate = (env.get("RUN_STEP_TEXT_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     run_step_tts = (env.get("RUN_STEP_TTS", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
+    run_step_review = (env.get("RUN_STEP_REVIEW", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
     if (
@@ -1924,6 +1950,10 @@ def start_run() -> tuple[bool, str]:
         (env.get("GOOGLE_TTS_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
     ):
         return False, "GOOGLE_TTS_PROJECT_ID must be set when TTS is enabled"
+    if run_step_review and not (
+        (env.get("GOOGLE_VISION_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
+    ):
+        return False, "GOOGLE_VISION_PROJECT_ID must be set when Review is enabled"
 
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
@@ -2530,6 +2560,46 @@ def run_tts_health_check(payload: dict) -> dict:
         }
 
 
+def run_review_health_check(payload: dict) -> dict:
+    provider = str(payload.get("REVIEW_PROVIDER", "") or "").strip().lower()
+    if provider != "google_cloud_vision":
+        return {
+            "ok": False,
+            "error_type": "NotApplicable",
+            "error_message": "Review API test is only available for REVIEW_PROVIDER=google_cloud_vision.",
+        }
+    project_id = str(payload.get("GOOGLE_VISION_PROJECT_ID", "") or "").strip() or str(payload.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
+    feature = str(payload.get("GOOGLE_VISION_FEATURE", "") or "").strip() or "DOCUMENT_TEXT_DETECTION"
+    start = time.perf_counter()
+    try:
+        client, vision, resolved_project, default_project = ensure_cloud_vision_client(project_id)
+        image = make_health_slide_image()
+        text = detect_image_text_bytes(client, vision, encode_png(image), feature=feature)
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        preview = text[:120].replace("\n", " ").strip()
+        return {
+            "ok": True,
+            "project_id_used": resolved_project,
+            "default_project": default_project or "",
+            "feature": feature,
+            "latency_ms": latency_ms,
+            "ocr_chars": len(text),
+            "sample_preview": preview,
+            "message": "Review API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": False,
+            "project_id_used": project_id,
+            "feature": feature,
+            "latency_ms": latency_ms,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+            "message": "Review API check failed.",
+        }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SceneDetectionUI/0.1"
 
@@ -2541,6 +2611,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 return self._serve_static("index.html")
+            if path == "/favicon.ico":
+                return self._serve_static("favicon.ico")
+            if path == "/favicon.png":
+                return self._serve_static("favicon.png")
             if path == "/styles.css":
                 return self._serve_static("styles.css")
             if path == "/app.js":
@@ -2575,6 +2649,7 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_UPSCALE": int(env.get("RUN_STEP_UPSCALE", "1")),
                     "RUN_STEP_TEXT_TRANSLATE": int(env.get("RUN_STEP_TEXT_TRANSLATE", "1")),
                     "RUN_STEP_TTS": int(env.get("RUN_STEP_TTS", "1")),
+                    "RUN_STEP_REVIEW": int(env.get("RUN_STEP_REVIEW", "1")),
                     "RUN_STEP_VIDEO_EXPORT": int(env.get("RUN_STEP_VIDEO_EXPORT", "1")),
                     "FINAL_SOURCE_MODE_AUTO": env.get("FINAL_SOURCE_MODE_AUTO", "auto"),
                     "FULLSLIDE_SAMPLE_FRAMES": int(env.get("FULLSLIDE_SAMPLE_FRAMES", "3")),
@@ -2606,6 +2681,12 @@ class Handler(BaseHTTPRequestHandler):
                     "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "de-DE"),
                     "GEMINI_TTS_LANGUAGE_OPTIONS": load_gemini_tts_language_options(),
                     "GEMINI_TTS_PROMPT": read_text_file(GEMINI_TTS_PROMPT_PATH).rstrip("\n"),
+                    "REVIEW_PROVIDER": env.get("REVIEW_PROVIDER", "google_cloud_vision"),
+                    "GOOGLE_VISION_PROJECT_ID": env.get("GOOGLE_VISION_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+                    "GOOGLE_VISION_FEATURE": env.get("GOOGLE_VISION_FEATURE", "DOCUMENT_TEXT_DETECTION"),
+                    "REVIEW_MIN_MATCH_CONFIDENCE": float(env.get("REVIEW_MIN_MATCH_CONFIDENCE", "0.70")),
+                    "REVIEW_MIN_OCR_CHARS": int(env.get("REVIEW_MIN_OCR_CHARS", "8")),
+                    "REVIEW_MAX_BOUNDARY_ADJUST_SEC": float(env.get("REVIEW_MAX_BOUNDARY_ADJUST_SEC", "2.5")),
                     "FINAL_SLIDE_UPSCALE_MODE": env.get("FINAL_SLIDE_UPSCALE_MODE", "none"),
                     "FINAL_SLIDE_UPSCALE_MODEL": env.get(
                         "FINAL_SLIDE_UPSCALE_MODEL",
@@ -2810,6 +2891,7 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_UPSCALE": int(data["RUN_STEP_UPSCALE"]),
                     "RUN_STEP_TEXT_TRANSLATE": int(data["RUN_STEP_TEXT_TRANSLATE"]),
                     "RUN_STEP_TTS": int(data["RUN_STEP_TTS"]),
+                    "RUN_STEP_REVIEW": int(data["RUN_STEP_REVIEW"]),
                     "RUN_STEP_VIDEO_EXPORT": int(data["RUN_STEP_VIDEO_EXPORT"]),
                     "FINAL_SOURCE_MODE_AUTO": str(data["FINAL_SOURCE_MODE_AUTO"]).strip(),
                     "FULLSLIDE_SAMPLE_FRAMES": int(data["FULLSLIDE_SAMPLE_FRAMES"]),
@@ -2835,6 +2917,12 @@ class Handler(BaseHTTPRequestHandler):
                     "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
                     "GOOGLE_TTS_PROJECT_ID": str(data["GOOGLE_TTS_PROJECT_ID"]).strip(),
                     "GOOGLE_TTS_LANGUAGE_CODE": str(data["GOOGLE_TTS_LANGUAGE_CODE"]).strip(),
+                    "REVIEW_PROVIDER": str(data["REVIEW_PROVIDER"]).strip(),
+                    "GOOGLE_VISION_PROJECT_ID": str(data["GOOGLE_VISION_PROJECT_ID"]).strip(),
+                    "GOOGLE_VISION_FEATURE": str(data["GOOGLE_VISION_FEATURE"]).strip(),
+                    "REVIEW_MIN_MATCH_CONFIDENCE": float(data["REVIEW_MIN_MATCH_CONFIDENCE"]),
+                    "REVIEW_MIN_OCR_CHARS": int(data["REVIEW_MIN_OCR_CHARS"]),
+                    "REVIEW_MAX_BOUNDARY_ADJUST_SEC": float(data["REVIEW_MAX_BOUNDARY_ADJUST_SEC"]),
                     "FINAL_SLIDE_UPSCALE_MODE": str(data["FINAL_SLIDE_UPSCALE_MODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODEL": str(data["FINAL_SLIDE_UPSCALE_MODEL"]).strip(),
                     "FINAL_SLIDE_UPSCALE_DEVICE": str(data["FINAL_SLIDE_UPSCALE_DEVICE"]).strip(),
@@ -2879,6 +2967,7 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_UPSCALE",
                     "RUN_STEP_TEXT_TRANSLATE",
                     "RUN_STEP_TTS",
+                    "RUN_STEP_REVIEW",
                     "RUN_STEP_VIDEO_EXPORT",
                 ):
                     if cfg[key] not in {0, 1}:
@@ -2977,6 +3066,20 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE and GOOGLE_TTS_LANGUAGE_CODE must refer to the same Gemini TTS language entry")
                 if not gemini_tts_prompt.strip():
                     raise ValueError("GEMINI_TTS_PROMPT must not be empty")
+                if cfg["REVIEW_PROVIDER"] not in {"google_cloud_vision"}:
+                    raise ValueError("REVIEW_PROVIDER must be google_cloud_vision")
+                if cfg["RUN_STEP_REVIEW"] == 1 and not (
+                    cfg["GOOGLE_VISION_PROJECT_ID"] or cfg["GOOGLE_SPEECH_PROJECT_ID"]
+                ):
+                    raise ValueError("GOOGLE_VISION_PROJECT_ID must not be empty when Review is enabled")
+                if cfg["GOOGLE_VISION_FEATURE"] not in {"DOCUMENT_TEXT_DETECTION", "TEXT_DETECTION"}:
+                    raise ValueError("GOOGLE_VISION_FEATURE must be DOCUMENT_TEXT_DETECTION or TEXT_DETECTION")
+                if not (0.0 <= cfg["REVIEW_MIN_MATCH_CONFIDENCE"] <= 1.0):
+                    raise ValueError("REVIEW_MIN_MATCH_CONFIDENCE must be in [0, 1]")
+                if cfg["REVIEW_MIN_OCR_CHARS"] < 1:
+                    raise ValueError("REVIEW_MIN_OCR_CHARS must be >= 1")
+                if cfg["REVIEW_MAX_BOUNDARY_ADJUST_SEC"] < 0:
+                    raise ValueError("REVIEW_MAX_BOUNDARY_ADJUST_SEC must be >= 0")
                 if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {
                     "none",
                     "swin2sr",
@@ -3084,6 +3187,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/text-translate/health":
                 data = self._read_json_body()
                 return self._send_json(200, run_text_translate_health_check(data))
+
+            if path == "/api/review/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_review_health_check(data))
 
             if path == "/api/slide-upscale/health":
                 data = self._read_json_body()

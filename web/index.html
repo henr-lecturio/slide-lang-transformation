@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Slide Detection Runner</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.png" />
+
     <link rel="stylesheet" href="/css/base.css" />
     <link rel="stylesheet" href="/css/layout.css" />
     <link rel="stylesheet" href="/css/forms.css" />
@@ -845,6 +847,80 @@
                       </div>
                       <div id="tts-health-meta-wrap" class="health-check-meta-wrap" hidden>
                         <div id="tts-health-meta" class="health-check-meta muted"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section" data-step-section="review" data-step-input="run_step_review">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_review" type="checkbox" aria-label="Enable Review" /></label>
+                    <h3>Review</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="review" aria-expanded="false" aria-controls="step-section-body-review" aria-label="Toggle Review settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Uses OCR on translated slides to review timing against the aligned TTS word stream.</div>
+                </div>
+              </div>
+              <div id="step-section-body-review" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="review_provider">REVIEW_PROVIDER</label>
+                    <div class="settings-value">
+                      <select id="review_provider">
+                        <option value="google_cloud_vision">google_cloud_vision</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_vision_project_id">GOOGLE_VISION_PROJECT_ID</label>
+                    <div class="settings-value"><input id="google_vision_project_id" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_vision_feature">GOOGLE_VISION_FEATURE</label>
+                    <div class="settings-value">
+                      <select id="google_vision_feature">
+                        <option value="DOCUMENT_TEXT_DETECTION">DOCUMENT_TEXT_DETECTION</option>
+                        <option value="TEXT_DETECTION">TEXT_DETECTION</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="review_min_match_confidence">REVIEW_MIN_MATCH_CONFIDENCE</label>
+                    <div class="settings-value"><input id="review_min_match_confidence" type="number" min="0" max="1" step="0.01" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="review_min_ocr_chars">REVIEW_MIN_OCR_CHARS</label>
+                    <div class="settings-value"><input id="review_min_ocr_chars" type="number" min="1" step="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="review_max_boundary_adjust_sec">REVIEW_MAX_BOUNDARY_ADJUST_SEC</label>
+                    <div class="settings-value"><input id="review_max_boundary_adjust_sec" type="number" min="0" step="0.1" /></div>
+                  </div>
+                  <div class="settings-row settings-row-inline">
+                    <div class="settings-key">Review API Test</div>
+                    <div class="settings-value">
+                      <div class="settings-inline-actions">
+                        <button id="review-health-check" type="button">Test Review API</button>
+                        <span id="review-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="review-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="review-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
+                      </div>
+                      <div id="review-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="review-health-meta" class="health-check-meta muted"></div>
                       </div>
                     </div>
                   </div>

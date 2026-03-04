@@ -39,6 +39,13 @@ const healthUi = {
     wrap: () => el.slideUpscaleHealthMetaWrap,
     meta: () => el.slideUpscaleHealthMeta,
   },
+  review: {
+    button: () => el.reviewHealthCheck,
+    status: () => el.reviewHealthStatus,
+    toggle: () => el.reviewHealthMetaToggle,
+    wrap: () => el.reviewHealthMetaWrap,
+    meta: () => el.reviewHealthMeta,
+  },
   tts: {
     button: () => el.ttsHealthCheck,
     status: () => el.ttsHealthStatus,
@@ -156,6 +163,15 @@ function collectSlideUpscaleHealthPayload() {
   };
 }
 
+function collectReviewHealthPayload() {
+  return {
+    REVIEW_PROVIDER: el.reviewProvider.value,
+    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
+    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
+    GOOGLE_VISION_FEATURE: el.googleVisionFeature.value,
+  };
+}
+
 export async function testTranscriptionHealth() {
   setHealthStatus("transcription", "pending", "Testing...", "");
   const result = await apiPost("/api/transcription/health", collectTranscriptionHealthPayload());
@@ -267,6 +283,28 @@ export async function testSlideUpscaleHealth() {
     .filter(Boolean)
     .join(" | ");
   setHealthStatus("slideUpscale", "error", "Failed", meta);
+}
+
+export async function testReviewHealth() {
+  setHealthStatus("review", "pending", "Testing...", "");
+  const result = await apiPost("/api/review/health", collectReviewHealthPayload());
+  if (result.ok) {
+    const meta = [
+      `project=${result.project_id_used || "-"}`,
+      `feature=${result.feature || "-"}`,
+      `${result.latency_ms || 0} ms`,
+      `ocr_chars=${result.ocr_chars || 0}`,
+      result.sample_preview ? `sample=\"${result.sample_preview}\"` : "",
+    ].filter(Boolean).join(" | ");
+    setHealthStatus("review", "ok", "Reachable", meta);
+    showButtonSuccess(el.reviewHealthCheck, "OK");
+    return;
+  }
+  const meta = [
+    result.error_type || "Error",
+    result.error_message || result.message || "Review API check failed.",
+  ].filter(Boolean).join(" | ");
+  setHealthStatus("review", "error", "Failed", meta);
 }
 
 export async function testTtsHealth() {

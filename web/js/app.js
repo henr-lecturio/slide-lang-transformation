@@ -3,6 +3,7 @@ import { state } from "./state.js";
 import { formatRunIdLabel, getInitialActiveTab, setActiveTab, showButtonSuccess, syncSettingsKeyTooltips } from "./ui-core.js";
 import {
   clearHealthStatus,
+  testReviewHealth,
   testSlideEditHealth,
   testSlideTranslateHealth,
   testSlideUpscaleHealth,
@@ -189,6 +190,9 @@ function bindEvents() {
   if (el.slideUpscaleHealthCheck) {
     el.slideUpscaleHealthCheck.addEventListener("click", () => runTask(testSlideUpscaleHealth));
   }
+  if (el.reviewHealthCheck) {
+    el.reviewHealthCheck.addEventListener("click", () => runTask(testReviewHealth));
+  }
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.addEventListener("click", () => runTask(testTextTranslateHealth));
   }
@@ -197,6 +201,7 @@ function bindEvents() {
     ["slideEdit", el.slideEditHealthMetaToggle],
     ["slideTranslate", el.slideTranslateHealthMetaToggle],
     ["slideUpscale", el.slideUpscaleHealthMetaToggle],
+    ["review", el.reviewHealthMetaToggle],
     ["textTranslate", el.textTranslateHealthMetaToggle],
     ["tts", el.ttsHealthMetaToggle],
   ].forEach(([key, button]) => {

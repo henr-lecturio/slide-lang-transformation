@@ -278,6 +278,7 @@ def main() -> int:
 
     aligned_segments: list[dict[str, Any]] = []
     chunk_results: list[dict[str, Any]] = []
+    aligned_words: list[dict[str, Any]] = []
 
     for chunk in chunks:
         if not isinstance(chunk, dict):
@@ -298,6 +299,18 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"[TTSAlign] WARN chunk {chunk_index}: ASR failed, falling back to proportional alignment: {exc}", flush=True)
                 words, asr_text = [], ""
+
+        chunk_start_sec = float(chunk.get("start_sec", 0.0) or 0.0)
+        for word in words:
+            aligned_words.append(
+                {
+                    "chunk_index": chunk_index,
+                    "text": str(word.get("text", "") or ""),
+                    "normalized": str(word.get("normalized", "") or ""),
+                    "start_sec": round(chunk_start_sec + float(word.get("start", 0.0) or 0.0), 3),
+                    "end_sec": round(chunk_start_sec + float(word.get("end", 0.0) or 0.0), 3),
+                }
+            )
 
         expected_text = clean_text(str(chunk.get("tts_text", "") or ""))
         chunk_similarity = (
@@ -345,6 +358,7 @@ def main() -> int:
         "aligned_segment_count": len(aligned_segments),
         "chunks": chunk_results,
         "segments": aligned_segments,
+        "words": aligned_words,
     }
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     write_csv(out_csv, aligned_segments)

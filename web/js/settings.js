@@ -247,6 +247,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.roiY0.value = cfg.ROI_Y0;
   el.roiX1.value = cfg.ROI_X1;
   el.roiY1.value = cfg.ROI_Y1;
+  el.runStepReview.checked = Boolean(cfg.RUN_STEP_REVIEW);
   el.runStepEdit.checked = Boolean(cfg.RUN_STEP_EDIT);
   el.runStepTranslate.checked = Boolean(cfg.RUN_STEP_TRANSLATE);
   el.runStepUpscale.checked = Boolean(cfg.RUN_STEP_UPSCALE);
@@ -296,6 +297,12 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
   el.googleTtsProjectId.value = cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
+  el.reviewProvider.value = cfg.REVIEW_PROVIDER || "google_cloud_vision";
+  el.googleVisionProjectId.value = cfg.GOOGLE_VISION_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.googleVisionFeature.value = cfg.GOOGLE_VISION_FEATURE || "DOCUMENT_TEXT_DETECTION";
+  el.reviewMinMatchConfidence.value = cfg.REVIEW_MIN_MATCH_CONFIDENCE ?? 0.7;
+  el.reviewMinOcrChars.value = cfg.REVIEW_MIN_OCR_CHARS ?? 8;
+  el.reviewMaxBoundaryAdjustSec.value = cfg.REVIEW_MAX_BOUNDARY_ADJUST_SEC ?? 2.5;
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
   el.finalSlideUpscaleDevice.value = cfg.FINAL_SLIDE_UPSCALE_DEVICE || "auto";
@@ -326,6 +333,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   clearHealthStatus("slideUpscale");
   clearHealthStatus("textTranslate");
   clearHealthStatus("tts");
+  clearHealthStatus("review");
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   el.configMeta.textContent = `VIDEO_PATH: ${videoLabel}`;
   syncSettingsFieldState();
@@ -347,6 +355,7 @@ export async function saveConfig(options = {}) {
     ROI_Y0: Number(el.roiY0.value),
     ROI_X1: Number(el.roiX1.value),
     ROI_Y1: Number(el.roiY1.value),
+    RUN_STEP_REVIEW: el.runStepReview.checked ? 1 : 0,
     RUN_STEP_EDIT: el.runStepEdit.checked ? 1 : 0,
     RUN_STEP_TRANSLATE: el.runStepTranslate.checked ? 1 : 0,
     RUN_STEP_UPSCALE: el.runStepUpscale.checked ? 1 : 0,
@@ -396,6 +405,12 @@ export async function saveConfig(options = {}) {
     GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
     GOOGLE_TTS_LANGUAGE_CODE: (getSelectedTtsLanguageOption()?.tts_language_code || "").trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
+    REVIEW_PROVIDER: el.reviewProvider.value,
+    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
+    GOOGLE_VISION_FEATURE: el.googleVisionFeature.value,
+    REVIEW_MIN_MATCH_CONFIDENCE: Number(el.reviewMinMatchConfidence.value),
+    REVIEW_MIN_OCR_CHARS: Number(el.reviewMinOcrChars.value),
+    REVIEW_MAX_BOUNDARY_ADJUST_SEC: Number(el.reviewMaxBoundaryAdjustSec.value),
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
     FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
     FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
@@ -427,6 +442,7 @@ export async function saveConfig(options = {}) {
 
 
 export function syncSettingsFieldState() {
+  const reviewEnabled = el.runStepReview.checked;
   const editEnabled = el.runStepEdit.checked;
   const translateEnabled = el.runStepTranslate.checked;
   const upscaleEnabled = el.runStepUpscale.checked;
@@ -520,6 +536,21 @@ export function syncSettingsFieldState() {
     setHealthStatus("tts", "idle", "Step disabled.", "");
   } else if (el.ttsHealthStatus?.textContent === "Step disabled.") {
     clearHealthStatus("tts");
+  }
+
+  el.reviewProvider.disabled = !reviewEnabled;
+  el.googleVisionProjectId.disabled = !reviewEnabled;
+  el.googleVisionFeature.disabled = !reviewEnabled;
+  el.reviewMinMatchConfidence.disabled = !reviewEnabled;
+  el.reviewMinOcrChars.disabled = !reviewEnabled;
+  el.reviewMaxBoundaryAdjustSec.disabled = !reviewEnabled;
+  if (el.reviewHealthCheck) {
+    el.reviewHealthCheck.disabled = !reviewEnabled;
+  }
+  if (!reviewEnabled) {
+    setHealthStatus("review", "idle", "Step disabled.", "");
+  } else if (el.reviewHealthStatus?.textContent === "Step disabled.") {
+    clearHealthStatus("review");
   }
   updateTtsLanguageHint();
 

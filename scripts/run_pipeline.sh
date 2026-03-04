@@ -94,7 +94,14 @@ RUN_STEP_TRANSLATE="${RUN_STEP_TRANSLATE:-1}"
 RUN_STEP_UPSCALE="${RUN_STEP_UPSCALE:-1}"
 RUN_STEP_TEXT_TRANSLATE="${RUN_STEP_TEXT_TRANSLATE:-1}"
 RUN_STEP_TTS="${RUN_STEP_TTS:-1}"
+RUN_STEP_REVIEW="${RUN_STEP_REVIEW:-1}"
 RUN_STEP_VIDEO_EXPORT="${RUN_STEP_VIDEO_EXPORT:-1}"
+REVIEW_PROVIDER="${REVIEW_PROVIDER:-google_cloud_vision}"
+GOOGLE_VISION_PROJECT_ID="${GOOGLE_VISION_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}"
+GOOGLE_VISION_FEATURE="${GOOGLE_VISION_FEATURE:-DOCUMENT_TEXT_DETECTION}"
+REVIEW_MIN_MATCH_CONFIDENCE="${REVIEW_MIN_MATCH_CONFIDENCE:-0.70}"
+REVIEW_MIN_OCR_CHARS="${REVIEW_MIN_OCR_CHARS:-8}"
+REVIEW_MAX_BOUNDARY_ADJUST_SEC="${REVIEW_MAX_BOUNDARY_ADJUST_SEC:-2.5}"
 REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND="${REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND:-0.000225}"
 VIDEO_EXPORT_MIN_SLIDE_SEC="${VIDEO_EXPORT_MIN_SLIDE_SEC:-1.2}"
 VIDEO_EXPORT_TAIL_PAD_SEC="${VIDEO_EXPORT_TAIL_PAD_SEC:-0.35}"
@@ -128,6 +135,7 @@ RUN_STEP_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TRANSLATE")"
 RUN_STEP_UPSCALE="$(toggle_to_flag "$RUN_STEP_UPSCALE")"
 RUN_STEP_TEXT_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TEXT_TRANSLATE")"
 RUN_STEP_TTS="$(toggle_to_flag "$RUN_STEP_TTS")"
+RUN_STEP_REVIEW="$(toggle_to_flag "$RUN_STEP_REVIEW")"
 RUN_STEP_VIDEO_EXPORT="$(toggle_to_flag "$RUN_STEP_VIDEO_EXPORT")"
 
 emit_step() {
@@ -401,6 +409,13 @@ TTS_MANIFEST_JSON="$OUT_BASE/tts/tts_manifest.json"
 TTS_MANIFEST_CSV="$OUT_BASE/tts/tts_manifest.csv"
 TTS_ALIGNMENT_JSON="$OUT_BASE/tts/segment_alignment.json"
 TTS_ALIGNMENT_CSV="$OUT_BASE/tts/segment_alignment.csv"
+REVIEW_DIR="$OUT_BASE/review"
+REVIEW_SLIDE_OCR_JSON="$REVIEW_DIR/slide_ocr.json"
+REVIEW_SLIDE_OCR_CSV="$REVIEW_DIR/slide_ocr.csv"
+REVIEW_SLIDE_VOICE_ALIGNMENT_JSON="$REVIEW_DIR/slide_voice_alignment.json"
+REVIEW_SLIDE_VOICE_ALIGNMENT_CSV="$REVIEW_DIR/slide_voice_alignment.csv"
+REVIEWED_TIMELINE_JSON="$REVIEW_DIR/reviewed_timeline.json"
+REVIEWED_TIMELINE_CSV="$REVIEW_DIR/reviewed_timeline.csv"
 VIDEO_EXPORT_DIR="$OUT_BASE/video_export"
 VIDEO_EXPORT_TIMELINE_JSON="$VIDEO_EXPORT_DIR/timeline.json"
 VIDEO_EXPORT_TIMELINE_CSV="$VIDEO_EXPORT_DIR/timeline.csv"
@@ -721,6 +736,61 @@ else
   step_skip tts-alignment "disabled"
 fi
 
+REVIEW_IMAGE_DIR=""
+if dir_has_pngs "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"; then
+  REVIEW_IMAGE_DIR="$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
+elif dir_has_pngs "$FINAL_SLIDE_TRANSLATED_DIR"; then
+  REVIEW_IMAGE_DIR="$FINAL_SLIDE_TRANSLATED_DIR"
+fi
+
+if [ "$RUN_STEP_REVIEW" = "1" ]; then
+  if [ "$RUN_STEP_TTS" != "1" ]; then
+    echo "[Step] review: skipped"
+    step_skip review "tts disabled"
+  elif [ ! -f "$TTS_ALIGNMENT_JSON" ]; then
+    echo "[Step] review: skipped"
+    step_skip review "tts alignment missing"
+  elif [ -z "$REVIEW_IMAGE_DIR" ]; then
+    echo "[Step] review: skipped"
+    step_skip review "no translated slide images"
+  else
+    if [ "$REVIEW_PROVIDER" != "google_cloud_vision" ]; then
+      echo "ERROR: REVIEW_PROVIDER must be google_cloud_vision" >&2
+      exit 1
+    fi
+    if [ -z "${GOOGLE_VISION_PROJECT_ID:-}" ]; then
+      echo "ERROR: Review requires GOOGLE_VISION_PROJECT_ID (or GOOGLE_SPEECH_PROJECT_ID) in the environment/config." >&2
+      exit 1
+    fi
+    echo "[Review] Building reviewed slide timeline with $REVIEW_PROVIDER ..."
+    step_start review
+    step_detail review "$REVIEW_PROVIDER"
+    rm -rf "$REVIEW_DIR.__tmp"
+    mkdir -p "$REVIEW_DIR.__tmp"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/review_slide_timing_with_vision.py" \
+      --slide-map-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
+      --image-dir "$REVIEW_IMAGE_DIR" \
+      --tts-alignment-json "$TTS_ALIGNMENT_JSON" \
+      --project-id "$GOOGLE_VISION_PROJECT_ID" \
+      --feature "$GOOGLE_VISION_FEATURE" \
+      --min-match-confidence "$REVIEW_MIN_MATCH_CONFIDENCE" \
+      --min-ocr-chars "$REVIEW_MIN_OCR_CHARS" \
+      --max-boundary-adjust-sec "$REVIEW_MAX_BOUNDARY_ADJUST_SEC" \
+      --out-slide-ocr-json "$REVIEW_DIR.__tmp/slide_ocr.json" \
+      --out-slide-ocr-csv "$REVIEW_DIR.__tmp/slide_ocr.csv" \
+      --out-slide-voice-alignment-json "$REVIEW_DIR.__tmp/slide_voice_alignment.json" \
+      --out-slide-voice-alignment-csv "$REVIEW_DIR.__tmp/slide_voice_alignment.csv" \
+      --out-reviewed-timeline-json "$REVIEW_DIR.__tmp/reviewed_timeline.json" \
+      --out-reviewed-timeline-csv "$REVIEW_DIR.__tmp/reviewed_timeline.csv"
+    publish_dir "$REVIEW_DIR.__tmp" "$REVIEW_DIR"
+    step_done review
+    echo "[Review] Reviewed timeline finished."
+  fi
+else
+  echo "[Step] review: skipped"
+  step_skip review "disabled"
+fi
+
 EXPORT_IMAGE_DIR="$FINAL_SLIDE_DIR"
 EXPORT_IMAGE_LABEL="processed"
 if dir_has_pngs "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"; then
@@ -746,6 +816,10 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
   if [ -f "$TTS_ALIGNMENT_JSON" ]; then
     TTS_ALIGNMENT_ARG+=(--tts-alignment-json "$TTS_ALIGNMENT_JSON")
   fi
+  REVIEWED_TIMELINE_ARG=()
+  if [ -f "$REVIEWED_TIMELINE_JSON" ]; then
+    REVIEWED_TIMELINE_ARG+=(--reviewed-timeline-json "$REVIEWED_TIMELINE_JSON")
+  fi
   rm -rf "$VIDEO_EXPORT_DIR.__tmp"
   mkdir -p "$VIDEO_EXPORT_DIR.__tmp"
   EXPORT_SLIDE_MAP_JSON="$SLIDE_TEXT_MAP_FINAL_JSON"
@@ -756,6 +830,7 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
     --slide-map-json "$EXPORT_SLIDE_MAP_JSON" \
     --image-dir "$EXPORT_IMAGE_DIR" \
     "${TTS_ALIGNMENT_ARG[@]}" \
+    "${REVIEWED_TIMELINE_ARG[@]}" \
     --out-video "$VIDEO_EXPORT_DIR.__tmp/final_${VIDEO_LANG_SLUG}.mp4" \
     --out-timeline-json "$VIDEO_EXPORT_DIR.__tmp/timeline.json" \
     --out-timeline-csv "$VIDEO_EXPORT_DIR.__tmp/timeline.csv" \
@@ -801,6 +876,7 @@ echo "Run step translate: $RUN_STEP_TRANSLATE"
 echo "Run step upscale: $RUN_STEP_UPSCALE"
 echo "Run step text translate: $RUN_STEP_TEXT_TRANSLATE"
 echo "Run step tts: $RUN_STEP_TTS"
+echo "Run step review: $RUN_STEP_REVIEW"
 echo "Run step video export: $RUN_STEP_VIDEO_EXPORT"
 echo "Final slide translated images: $FINAL_SLIDE_TRANSLATED_DIR"
 echo "Final slide translation mode: $FINAL_SLIDE_TRANSLATION_MODE"
@@ -810,5 +886,6 @@ echo "Final slide upscale mode: $FINAL_SLIDE_UPSCALE_MODE"
 echo "Translated text map: $TEXT_TRANSLATED_JSON"
 echo "TTS manifest: $TTS_MANIFEST_JSON"
 echo "TTS alignment: $TTS_ALIGNMENT_JSON"
+echo "Review timeline: $REVIEWED_TIMELINE_JSON"
 echo "Video export image source: $EXPORT_IMAGE_DIR"
 echo "Video export output: $VIDEO_EXPORT_MP4"
