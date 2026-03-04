@@ -1,5 +1,6 @@
 export const el = {
   tabButtons: document.querySelectorAll(".tab-btn"),
+  topbarHome: document.getElementById("topbar-home"),
   panelHome: document.getElementById("panel-home"),
   panelAllRuns: document.getElementById("panel-all-runs"),
   panelImageLab: document.getElementById("panel-image-lab"),
@@ -163,9 +164,11 @@ export const el = {
   exportLabOpenTerminal: document.getElementById("export-lab-open-terminal"),
   exportLabStopRun: document.getElementById("export-lab-stop-run"),
   exportLabRunExport: document.getElementById("export-lab-run-export"),
+  exportLabSelectedRun: document.getElementById("export-lab-selected-run"),
   exportLabVideo: document.getElementById("export-lab-video"),
   exportLabMeta: document.getElementById("export-lab-meta"),
   exportLabDownloads: document.getElementById("export-lab-downloads"),
+  exportLabLog: document.getElementById("export-lab-log"),
   labGeminiEditModel: document.getElementById("lab_gemini_edit_model"),
   labGeminiEditPrompt: document.getElementById("lab_gemini_edit_prompt"),
   labFinalSlideTargetLanguage: document.getElementById("lab_final_slide_target_language"),

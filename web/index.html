@@ -18,12 +18,12 @@
   <body>
     <header class="topbar">
       <div class="topnav-row">
-        <div class="topbar-logo" aria-label="Lecturio">
+        <button id="topbar-home" class="topbar-logo" type="button" aria-label="Go to Control">
           <img src="/lecturio_logo_white_transparent.png" alt="Lecturio" />
-        </div>
+        </button>
         <div class="topnav-main">
           <nav class="topnav" aria-label="Primary">
-            <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
+            <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Control</button>
             <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
             <button id="tab-image-lab" class="tab-btn" data-tab="image-lab" type="button">Image Lab</button>
             <button id="tab-export-lab" class="tab-btn" data-tab="export-lab" type="button">Export Lab</button>
@@ -244,6 +244,7 @@
               <button id="export-lab-stop-run" type="button" disabled>Stop Execution</button>
             </div>
           </div>
+          <div id="export-lab-selected-run" class="muted"></div>
           <div class="lab-preview-grid">
             <section class="lab-preview-panel">
               <div class="slide-compare-label">Export Preview</div>

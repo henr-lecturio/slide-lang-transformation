@@ -3193,13 +3193,61 @@ class Handler(BaseHTTPRequestHandler):
         ctype, _ = mimetypes.guess_type(str(path))
         if not ctype:
             ctype = "application/octet-stream"
-        data = path.read_bytes()
-        self.send_response(200)
+        size = path.stat().st_size
+        start = 0
+        end = size - 1
+        status = 200
+        range_header = str(self.headers.get("Range") or "").strip()
+
+        if range_header.startswith("bytes="):
+            spec = range_header[6:].split(",", 1)[0].strip()
+            try:
+                if "-" not in spec:
+                    raise ValueError("Invalid byte range")
+                start_str, end_str = spec.split("-", 1)
+                if start_str == "":
+                    suffix_len = int(end_str)
+                    if suffix_len <= 0:
+                        raise ValueError("Invalid suffix byte range")
+                    start = max(size - suffix_len, 0)
+                else:
+                    start = int(start_str)
+                if end_str == "":
+                    end = size - 1
+                elif start_str == "":
+                    end = size - 1
+                else:
+                    end = int(end_str)
+                if start < 0 or end < start or start >= size:
+                    raise ValueError("Requested range not satisfiable")
+                end = min(end, size - 1)
+                status = 206
+            except ValueError:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+
+        content_length = max(0, end - start + 1)
+        self.send_response(status)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(content_length))
+        self.send_header("Accept-Ranges", "bytes")
+        if status == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        with path.open("rb") as fh:
+            fh.seek(start)
+            remaining = content_length
+            while remaining > 0:
+                chunk = fh.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _read_json_body(self, optional: bool = False) -> dict:
         raw_len = self.headers.get("Content-Length")

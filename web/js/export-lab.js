@@ -9,6 +9,12 @@ function setNodeText(node, text) {
   if (node) node.textContent = text;
 }
 
+function appendCacheKey(url, cacheKey) {
+  if (!url) return "";
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}v=${encodeURIComponent(cacheKey)}`;
+}
+
 function formatExportLabStatus(status, hasSelection) {
   if (!hasSelection) {
     return { label: "No run selected", iconClass: "", lineClass: "is-idle" };
@@ -217,48 +223,77 @@ export function syncExportLabActionState() {
 export function renderExportLabSelection() {
   const selected = state.exportLabSelectedRun;
   const current = state.exportLabCurrent || null;
+  const currentMatchesSelection = Boolean(
+    selected?.run_id
+      && current?.run_id
+      && selected.run_id === current.run_id,
+  );
+  const visibleCurrent = currentMatchesSelection ? current : null;
   if (!selected) {
+    setNodeText(el.exportLabSelectedRun, "");
     renderExportLabMeta(null, null);
     el.exportLabDownloads.innerHTML = "";
     if (el.exportLabVideo) {
+      el.exportLabVideo.pause();
       el.exportLabVideo.removeAttribute("src");
+      delete el.exportLabVideo.dataset.src;
+      delete el.exportLabVideo.dataset.refreshKey;
       el.exportLabVideo.load();
     }
     syncExportLabActionState();
     return;
   }
 
-  renderExportLabMeta(current, selected);
+  setNodeText(el.exportLabSelectedRun, `selected: ${formatRunIdLabel(selected.run_id)}`);
+  renderExportLabMeta(visibleCurrent, selected);
 
   el.exportLabDownloads.innerHTML = "";
+  const downloadsEnabled = visibleCurrent?.status === "done";
   const links = [
-    { label: "MP4", url: current?.result_url || "" },
-    { label: "Subtitles", url: current?.subtitle_url || "" },
-    { label: "Timeline JSON", url: current?.timeline_json_url || "" },
-    { label: "Timeline CSV", url: current?.timeline_csv_url || "" },
+    { label: "MP4", url: visibleCurrent?.result_url || "" },
+    { label: "Subtitles", url: visibleCurrent?.subtitle_url || "" },
+    { label: "Timeline JSON", url: visibleCurrent?.timeline_json_url || "" },
+    { label: "Timeline CSV", url: visibleCurrent?.timeline_csv_url || "" },
   ].filter((item) => item.url);
   if (links.length > 0) {
     for (const link of links) {
       const a = document.createElement("a");
       a.className = "summary-link";
-      a.href = link.url;
       a.textContent = link.label;
-      a.download = "";
+      if (downloadsEnabled) {
+        a.href = link.url;
+        a.download = "";
+      } else {
+        a.classList.add("is-disabled");
+        a.setAttribute("aria-disabled", "true");
+        a.tabIndex = -1;
+      }
       el.exportLabDownloads.appendChild(a);
     }
   }
 
   if (el.exportLabVideo) {
-    if (current?.result_url) {
-      const nextSrc = current.result_url;
-      if (el.exportLabVideo.dataset.src !== nextSrc) {
-        el.exportLabVideo.dataset.src = nextSrc;
+    if (visibleCurrent?.status === "done" && visibleCurrent?.result_url) {
+      const baseSrc = visibleCurrent.result_url;
+      const refreshKey = [
+        visibleCurrent.job_id || "",
+        visibleCurrent.status || "",
+        visibleCurrent.finished_at || 0,
+        baseSrc,
+      ].join("|");
+      if (el.exportLabVideo.dataset.refreshKey !== refreshKey) {
+        const nextSrc = appendCacheKey(baseSrc, visibleCurrent.finished_at || Date.now());
+        el.exportLabVideo.pause();
+        el.exportLabVideo.dataset.src = baseSrc;
+        el.exportLabVideo.dataset.refreshKey = refreshKey;
         el.exportLabVideo.src = nextSrc;
         el.exportLabVideo.load();
       }
     } else {
+      el.exportLabVideo.pause();
       el.exportLabVideo.removeAttribute("src");
       delete el.exportLabVideo.dataset.src;
+      delete el.exportLabVideo.dataset.refreshKey;
       el.exportLabVideo.load();
     }
   }

@@ -1039,6 +1039,8 @@ def main() -> int:
                     "aac",
                     "-b:a",
                     "192k",
+                    "-movflags",
+                    "+faststart",
                     str(out_video),
                 ]
             )
@@ -1169,6 +1171,8 @@ def main() -> int:
                     str(concat_list),
                     "-c",
                     "copy",
+                    "-movflags",
+                    "+faststart",
                     str(out_video),
                 ]
             )

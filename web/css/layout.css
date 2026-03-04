@@ -45,6 +45,11 @@ main {
   flex: 0 0 auto;
   min-width: 240px;
   min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
 }
 
 .topbar-logo img {
@@ -52,6 +57,10 @@ main {
   width: auto;
   height: 32px;
   max-width: 100%;
+}
+
+.topbar-logo:hover:not(:disabled) {
+  background: transparent;
 }
 
 .tab-btn {

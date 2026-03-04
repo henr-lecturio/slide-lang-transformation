@@ -122,7 +122,9 @@ button:disabled {
   color: #000000;
 }
 
-#stop-run {
+#stop-run,
+#lab-stop-run,
+#export-lab-stop-run {
   border-color: rgba(236, 95, 63, 0.55);
   color: #ffad99;
 }
@@ -131,7 +133,9 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-#stop-run:hover:not(:disabled) {
+#stop-run:hover:not(:disabled),
+#lab-stop-run:hover:not(:disabled),
+#export-lab-stop-run:hover:not(:disabled) {
   background: rgba(236, 95, 63, 0.12);
   border-color: rgba(236, 95, 63, 0.75);
   color: #ffd5ca;

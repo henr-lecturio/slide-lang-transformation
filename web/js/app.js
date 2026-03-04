@@ -156,6 +156,10 @@ function renderRunSteps(current) {
 }
 
 function bindEvents() {
+  if (el.topbarHome) {
+    el.topbarHome.addEventListener("click", () => setActiveTab("home"));
+  }
+
   for (const btn of el.tabButtons) {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   }
