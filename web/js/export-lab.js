@@ -9,6 +9,43 @@ function setNodeText(node, text) {
   if (node) node.textContent = text;
 }
 
+function formatExportLabStatus(status, hasSelection) {
+  if (!hasSelection) {
+    return { label: "No run selected", iconClass: "", lineClass: "is-idle" };
+  }
+  switch (status) {
+    case "running":
+      return { label: "Running", iconClass: "is-running", lineClass: "is-running" };
+    case "stopping":
+      return { label: "Stopping", iconClass: "is-running", lineClass: "is-running" };
+    case "done":
+      return { label: "Done", iconClass: "is-done", lineClass: "is-done" };
+    case "error":
+      return { label: "Error", iconClass: "is-error", lineClass: "is-error" };
+    case "stopped":
+      return { label: "Stopped", iconClass: "is-stopped", lineClass: "is-stopped" };
+    default:
+      return { label: "Ready", iconClass: "", lineClass: "is-ready" };
+  }
+}
+
+function renderExportLabMeta(current, selected) {
+  if (!el.exportLabMeta) return;
+  const meta = formatExportLabStatus(current?.status || "idle", Boolean(selected));
+  el.exportLabMeta.className = `export-lab-status-line ${meta.lineClass}`;
+  el.exportLabMeta.innerHTML = "";
+  const chip = document.createElement("div");
+  chip.className = "export-lab-status-chip";
+  const icon = document.createElement("span");
+  icon.className = meta.iconClass ? `step-icon ${meta.iconClass}` : "step-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.className = "export-lab-status-label";
+  label.textContent = meta.label;
+  chip.append(icon, label);
+  el.exportLabMeta.appendChild(chip);
+}
+
 function readExportLabSettingsFromStorage() {
   try {
     const raw = localStorage.getItem(EXPORT_LAB_TEST_SETTINGS_STORAGE_KEY);
@@ -181,7 +218,7 @@ export function renderExportLabSelection() {
   const selected = state.exportLabSelectedRun;
   const current = state.exportLabCurrent || null;
   if (!selected) {
-    setNodeText(el.exportLabMeta, "No run selected.");
+    renderExportLabMeta(null, null);
     el.exportLabDownloads.innerHTML = "";
     if (el.exportLabVideo) {
       el.exportLabVideo.removeAttribute("src");
@@ -191,17 +228,7 @@ export function renderExportLabSelection() {
     return;
   }
 
-  const parts = [
-    formatRunIdLabel(selected.run_id),
-    selected.run_status || "-",
-    selected.image_dir_name ? `images=${selected.image_dir_name}` : "",
-    selected.export_ready ? "export ready" : `missing=${(selected.missing_requirements || []).join(", ")}`,
-  ].filter(Boolean);
-
-  if (current?.status && current.status !== "idle") {
-    parts.push(`job=${current.status}`);
-  }
-  setNodeText(el.exportLabMeta, parts.join(" | "));
+  renderExportLabMeta(current, selected);
 
   el.exportLabDownloads.innerHTML = "";
   const links = [
@@ -243,6 +270,9 @@ export function setExportLabStatus(current) {
   state.exportLabCurrent = current || null;
   state.exportLabStatus = current?.status || "idle";
   const logs = (current?.log_tail || []).slice(-120);
+  if (logs.length === 0 && current?.message) {
+    logs.push(`[Export Lab] ${current.message}`);
+  }
   const nextLog = logs.join("\n");
   if (el.exportLabLog && el.exportLabLog.textContent !== nextLog) {
     el.exportLabLog.textContent = nextLog;

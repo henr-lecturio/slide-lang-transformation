@@ -1233,6 +1233,8 @@ def start_export_lab_job(run_id: str, overrides: dict | None = None) -> tuple[bo
         EXPORT_LAB_STATE["log_tail"].clear()
         EXPORT_LAB_STATE["log_tail"].append(f"[Export Lab] run={run_id}")
         EXPORT_LAB_STATE["log_tail"].append(f"[Export Lab] image_dir={Path(artifacts['image_dir']).name}")
+        EXPORT_LAB_STATE["log_tail"].append(f"[Export Lab] output={out_video.name}")
+        EXPORT_LAB_STATE["log_tail"].append("[Export Lab] export process starting")
 
         process = subprocess.Popen(
             cmd,
@@ -1297,6 +1299,8 @@ def reconcile_export_lab_state() -> None:
 def _export_lab_worker(process: subprocess.Popen) -> None:
     try:
         assert process.stdout is not None
+        with EXPORT_LAB_LOCK:
+            EXPORT_LAB_STATE["log_tail"].append("[Export Lab] process started")
         for raw_line in process.stdout:
             line = raw_line.rstrip("\n")
             with EXPORT_LAB_LOCK:

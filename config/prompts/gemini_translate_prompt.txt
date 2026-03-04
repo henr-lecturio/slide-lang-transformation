@@ -1,1 +1,1 @@
-Translate all text elements to {{TARGET_LANGUAGE}}. Return only the edited image.
+Translate all text elements to {{TARGET_LANGUAGE}}.

@@ -311,6 +311,45 @@
   background: #000;
 }
 
+.export-lab-status-line {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  margin-top: 8px;
+}
+
+.export-lab-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.export-lab-status-line.is-running .export-lab-status-chip {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.export-lab-status-line.is-done .export-lab-status-chip {
+  border-color: rgba(24, 178, 107, 0.55);
+}
+
+.export-lab-status-line.is-error .export-lab-status-chip,
+.export-lab-status-line.is-stopped .export-lab-status-chip {
+  border-color: rgba(236, 95, 63, 0.55);
+}
+
+.export-lab-status-label {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .log {
   margin-top: 14px;
   max-height: 300px;

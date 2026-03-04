@@ -279,7 +279,10 @@ function bindEvents() {
     initializeExportLabTestSettings();
     openExportLabSettingsModal();
   }));
-  el.exportLabOpenTerminal.addEventListener("click", openExportLabStatusModal);
+  el.exportLabOpenTerminal.addEventListener("click", () => {
+    openExportLabStatusModal();
+    runTaskImmediate(loadExportLabStatus);
+  });
   el.exportLabStopRun.addEventListener("click", () => runTask(stopExportLabJob));
   el.exportLabRunExport.addEventListener("click", () => runTask(async () => {
     await runExportLabAction();
