@@ -50,6 +50,12 @@ OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
 VIDEOS_DIR = ROOT_DIR / "videos"
 VIDEO_THUMB_DIR = OUTPUT_DIR / "ui" / "video_thumbs"
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v"}
+ALLOWED_IMAGE_MODELS = {
+    "gemini-3.1-flash-image-preview",
+    "gemini-3-pro-image-preview",
+    "gemini-2.5-flash-image",
+}
+DEFAULT_IMAGE_MODEL = "gemini-3-pro-image-preview"
 
 VENV_PY = ROOT_DIR / ".venv" / "bin" / "python"
 PYTHON_BIN = str(VENV_PY if VENV_PY.exists() else Path(sys.executable))
@@ -123,6 +129,21 @@ LAB_STATE = {
 
 def run_status_path(run_dir: Path) -> Path:
     return run_dir / "run_status.json"
+
+
+def normalize_image_model(value: str, default: str = DEFAULT_IMAGE_MODEL) -> str:
+    model = str(value or "").strip()
+    return model if model in ALLOWED_IMAGE_MODELS else default
+
+
+def validate_image_model(value: str, field_name: str) -> str:
+    model = str(value or "").strip()
+    if not model:
+        raise ValueError(f"{field_name} must not be empty")
+    if model not in ALLOWED_IMAGE_MODELS:
+        allowed = ", ".join(sorted(ALLOWED_IMAGE_MODELS))
+        raise ValueError(f"{field_name} must be one of: {allowed}")
+    return model
 
 
 def write_run_status(run_dir: Path, payload: dict) -> None:
@@ -1033,10 +1054,11 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         mode = "gemini"
         if not (os.environ.get("GEMINI_API_KEY") or "").strip():
             return False, "GEMINI_API_KEY is not set in the server environment"
-        edit_model = override_str("slide_edit_model", env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview")
+        edit_model = override_str("slide_edit_model", env.get("GEMINI_EDIT_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
         edit_prompt = override_str("slide_edit_prompt", GEMINI_PROMPT_PATH.read_text(encoding="utf-8"))
-        if not edit_model:
-            return False, "Image Lab Slide Edit model must not be empty"
+        if edit_model not in ALLOWED_IMAGE_MODELS:
+            allowed = ", ".join(sorted(ALLOWED_IMAGE_MODELS))
+            return False, f"Image Lab Slide Edit model must be one of: {allowed}"
         if not edit_prompt:
             return False, "Image Lab Slide Edit prompt must not be empty"
     elif action == "translate":
@@ -1044,12 +1066,13 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         if not (os.environ.get("GEMINI_API_KEY") or "").strip():
             return False, "GEMINI_API_KEY is not set in the server environment"
         translate_target_language = override_str("target_language", env.get("FINAL_SLIDE_TARGET_LANGUAGE", ""))
-        translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview") or "gemini-3-pro-image-preview")
+        translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
         translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
         if not translate_target_language:
             return False, "Image Lab target language must not be empty"
-        if not translate_model:
-            return False, "Image Lab Slide Translate model must not be empty"
+        if translate_model not in ALLOWED_IMAGE_MODELS:
+            allowed = ", ".join(sorted(ALLOWED_IMAGE_MODELS))
+            return False, f"Image Lab Slide Translate model must be one of: {allowed}"
         if not translate_prompt:
             return False, "Image Lab Slide Translate prompt must not be empty"
     else:
@@ -1856,8 +1879,7 @@ def run_slide_edit_health_check(payload: dict) -> dict:
             "error_type": "NotApplicable",
             "error_message": "Slide Edit API test is only available for FINAL_SLIDE_POSTPROCESS_MODE=gemini.",
         }
-    if not model:
-        raise ValueError("GEMINI_EDIT_MODEL must not be empty")
+    model = validate_image_model(model, "GEMINI_EDIT_MODEL")
     if not prompt:
         raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
 
@@ -1908,8 +1930,7 @@ def run_slide_translate_health_check(payload: dict) -> dict:
             "error_type": "NotApplicable",
             "error_message": "Slide Translate API test is only available for FINAL_SLIDE_TRANSLATION_MODE=gemini.",
         }
-    if not model:
-        raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
+    model = validate_image_model(model, "GEMINI_TRANSLATE_MODEL")
     if not prompt:
         raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
     if not target_language:
@@ -2236,14 +2257,15 @@ class Handler(BaseHTTPRequestHandler):
                     "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(env.get("SPEAKER_FILTER_MAX_LAPLACIAN_VAR", "80")),
                     "SPEAKER_FILTER_MAX_DURATION_SEC": float(env.get("SPEAKER_FILTER_MAX_DURATION_SEC", "2.5")),
                     "FINAL_SLIDE_POSTPROCESS_MODE": env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local"),
-                    "GEMINI_EDIT_MODEL": env.get("GEMINI_EDIT_MODEL", "gemini-3-pro-image-preview"),
+                    "GEMINI_EDIT_MODEL": normalize_image_model(env.get("GEMINI_EDIT_MODEL", DEFAULT_IMAGE_MODEL)),
                     "GEMINI_EDIT_PROMPT": read_text_file(GEMINI_PROMPT_PATH).rstrip("\n"),
                     "FINAL_SLIDE_TRANSLATION_MODE": env.get("FINAL_SLIDE_TRANSLATION_MODE", "none"),
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
-                    "GEMINI_TRANSLATE_MODEL": env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview"),
+                    "GEMINI_TRANSLATE_MODEL": normalize_image_model(env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL)),
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
                     "GEMINI_TEXT_TRANSLATE_MODEL": env.get("GEMINI_TEXT_TRANSLATE_MODEL", "gemini-2.5-flash"),
                     "GEMINI_TEXT_TRANSLATE_PROMPT": read_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "TRANSLATION_TERMBASE_CSV": read_text_file(TRANSLATION_TERMBASE_PATH).rstrip("\n"),
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
                     "GOOGLE_TTS_PROJECT_ID": env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
@@ -2487,6 +2509,7 @@ class Handler(BaseHTTPRequestHandler):
                 gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
                 gemini_text_translate_prompt = str(data["GEMINI_TEXT_TRANSLATE_PROMPT"])
+                translation_termbase_csv = str(data["TRANSLATION_TERMBASE_CSV"])
                 gemini_tts_prompt = str(data["GEMINI_TTS_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
@@ -2553,8 +2576,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("SPEAKER_FILTER_MAX_DURATION_SEC must be >= 0")
                 if cfg["FINAL_SLIDE_POSTPROCESS_MODE"] not in {"none", "local", "gemini"}:
                     raise ValueError("FINAL_SLIDE_POSTPROCESS_MODE must be none, local, or gemini")
-                if not cfg["GEMINI_EDIT_MODEL"]:
-                    raise ValueError("GEMINI_EDIT_MODEL must not be empty")
+                cfg["GEMINI_EDIT_MODEL"] = validate_image_model(cfg["GEMINI_EDIT_MODEL"], "GEMINI_EDIT_MODEL")
                 if not gemini_edit_prompt.strip():
                     raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] not in {"none", "gemini"}:
@@ -2569,14 +2591,15 @@ class Handler(BaseHTTPRequestHandler):
                 tts_language_option = code_map.get(cfg["GOOGLE_TTS_LANGUAGE_CODE"])
                 if cfg["FINAL_SLIDE_TARGET_LANGUAGE"] and not target_language_option:
                     raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must be selected from the supported Gemini TTS language list")
-                if not cfg["GEMINI_TRANSLATE_MODEL"]:
-                    raise ValueError("GEMINI_TRANSLATE_MODEL must not be empty")
+                cfg["GEMINI_TRANSLATE_MODEL"] = validate_image_model(cfg["GEMINI_TRANSLATE_MODEL"], "GEMINI_TRANSLATE_MODEL")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
                 if not cfg["GEMINI_TEXT_TRANSLATE_MODEL"]:
                     raise ValueError("GEMINI_TEXT_TRANSLATE_MODEL must not be empty")
                 if not gemini_text_translate_prompt.strip():
                     raise ValueError("GEMINI_TEXT_TRANSLATE_PROMPT must not be empty")
+                if not translation_termbase_csv.strip():
+                    raise ValueError("TRANSLATION_TERMBASE_CSV must not be empty")
                 if not cfg["GEMINI_TTS_MODEL"]:
                     raise ValueError("GEMINI_TTS_MODEL must not be empty")
                 if not cfg["GEMINI_TTS_VOICE"]:
@@ -2639,6 +2662,7 @@ class Handler(BaseHTTPRequestHandler):
                 write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
                 write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
                 write_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH, gemini_text_translate_prompt)
+                write_text_file(TRANSLATION_TERMBASE_PATH, translation_termbase_csv)
                 write_text_file(GEMINI_TTS_PROMPT_PATH, gemini_tts_prompt)
                 return self._send_json(
                     200,
@@ -2647,6 +2671,7 @@ class Handler(BaseHTTPRequestHandler):
                         **cfg,
                         "GEMINI_EDIT_PROMPT": gemini_edit_prompt.rstrip("\n"),
                         "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
+                        "TRANSLATION_TERMBASE_CSV": translation_termbase_csv.rstrip("\n"),
                         "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                         "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                     },

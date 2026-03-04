@@ -5,6 +5,13 @@ import { videoThumbUrl } from "./ui-core.js";
 import { clearHealthStatus, setHealthStatus } from "./health-checks.js";
 import { getSelectedTtsLanguageOption, renderTtsLanguageOptions, updateTtsLanguageHint } from "./tts-language.js";
 
+const TERMBASE_COLUMNS = [
+  { key: "source_text", label: "Source Text" },
+  { key: "target_language", label: "Target Language" },
+  { key: "target_text", label: "Target Text" },
+  { key: "case_sensitive", label: "Case Sensitive" },
+];
+
 function isStepSectionEnabled(section) {
   const inputId = section?.dataset?.stepInput || "";
   if (!inputId) return true;
@@ -48,6 +55,146 @@ export function syncStepSections() {
       toggleBtn.setAttribute("aria-label", !forced && !enabled ? "Section disabled" : (showBody ? "Collapse settings section" : "Expand settings section"));
     }
   }
+}
+
+function parseCsvLine(line) {
+  const out = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  out.push(current);
+  return out;
+}
+
+function parseTermbaseCsv(csvText) {
+  const text = String(csvText || "").replace(/\r\n/g, "\n").trim();
+  if (!text) {
+    return [];
+  }
+  const lines = text.split("\n").filter(Boolean);
+  if (lines.length === 0) {
+    return [];
+  }
+  const header = parseCsvLine(lines[0]).map((value) => value.trim());
+  const indexByKey = new Map(header.map((key, index) => [key, index]));
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return {
+      source_text: values[indexByKey.get("source_text") ?? -1] ?? "",
+      target_language: values[indexByKey.get("target_language") ?? -1] ?? "",
+      target_text: values[indexByKey.get("target_text") ?? -1] ?? "",
+      case_sensitive: values[indexByKey.get("case_sensitive") ?? -1] ?? "0",
+    };
+  });
+}
+
+function serializeCsvValue(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function syncTermbaseCsvFromTable() {
+  if (!el.translationTermbaseCsv || !el.termbaseTableBody) return;
+  const rows = [...el.termbaseTableBody.querySelectorAll("tr")].map((row) => ({
+    source_text: row.querySelector('[data-col="source_text"]')?.value ?? "",
+    target_language: row.querySelector('[data-col="target_language"]')?.value ?? "",
+    target_text: row.querySelector('[data-col="target_text"]')?.value ?? "",
+    case_sensitive: row.querySelector('[data-col="case_sensitive"]')?.value ?? "0",
+  }));
+  const header = TERMBASE_COLUMNS.map((column) => column.key).join(",");
+  const body = rows
+    .filter((row) => TERMBASE_COLUMNS.some((column) => String(row[column.key] ?? "").trim() !== ""))
+    .map((row) => TERMBASE_COLUMNS.map((column) => serializeCsvValue(row[column.key])).join(","));
+  el.translationTermbaseCsv.value = [header, ...body].join("\n");
+}
+
+function createTermbaseRow(row = {}) {
+  const tr = document.createElement("tr");
+  for (const column of TERMBASE_COLUMNS) {
+    const td = document.createElement("td");
+    if (column.key === "case_sensitive") {
+      const select = document.createElement("select");
+      select.dataset.col = column.key;
+      for (const value of ["0", "1"]) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value === "1" ? "Yes" : "No";
+        select.appendChild(option);
+      }
+      select.value = String(row[column.key] ?? "0").trim() === "1" ? "1" : "0";
+      select.addEventListener("change", syncTermbaseCsvFromTable);
+      td.appendChild(select);
+    } else {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.dataset.col = column.key;
+      input.value = String(row[column.key] ?? "");
+      input.addEventListener("input", syncTermbaseCsvFromTable);
+      td.appendChild(input);
+    }
+    tr.appendChild(td);
+  }
+  const actions = document.createElement("td");
+  actions.className = "termbase-table-actions";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "termbase-remove-row";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => {
+    tr.remove();
+    syncTermbaseCsvFromTable();
+  });
+  actions.appendChild(remove);
+  tr.appendChild(actions);
+  return tr;
+}
+
+export function renderTermbaseEditor(csvText) {
+  if (!el.termbaseTableBody || !el.translationTermbaseCsv) return;
+  el.translationTermbaseCsv.value = String(csvText || "");
+  el.termbaseTableBody.innerHTML = "";
+  const rows = parseTermbaseCsv(csvText);
+  for (const row of rows) {
+    el.termbaseTableBody.appendChild(createTermbaseRow(row));
+  }
+  if (rows.length === 0) {
+    el.termbaseTableBody.appendChild(createTermbaseRow());
+  }
+  syncTermbaseCsvFromTable();
+}
+
+export function toggleTermbaseEditor() {
+  if (!el.termbaseEditorPanel || !el.termbaseEditorToggle || !el.termbaseEditorBody) return;
+  const nextOpen = !el.termbaseEditorPanel.classList.contains("is-open");
+  el.termbaseEditorPanel.classList.toggle("is-open", nextOpen);
+  el.termbaseEditorToggle.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+  el.termbaseEditorBody.hidden = !nextOpen;
+}
+
+export function addTermbaseRow() {
+  if (!el.termbaseTableBody) return;
+  el.termbaseTableBody.appendChild(createTermbaseRow());
+  syncTermbaseCsvFromTable();
 }
 
 export function renderSelectedVideo(syncActionState = () => {}) {
@@ -112,6 +259,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
   el.geminiTextTranslateModel.value = cfg.GEMINI_TEXT_TRANSLATE_MODEL || "gemini-2.5-flash";
   el.geminiTextTranslatePrompt.value = cfg.GEMINI_TEXT_TRANSLATE_PROMPT || "";
+  renderTermbaseEditor(cfg.TRANSLATION_TERMBASE_CSV || "");
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
   el.googleTtsProjectId.value = cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
@@ -198,6 +346,10 @@ export async function saveConfig(options = {}) {
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
     GEMINI_TEXT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
+    TRANSLATION_TERMBASE_CSV: (() => {
+      syncTermbaseCsvFromTable();
+      return el.translationTermbaseCsv.value;
+    })(),
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
     GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),

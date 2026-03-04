@@ -16,7 +16,14 @@ import {
   syncSelectedTtsLanguage,
   updateTtsLanguageHint,
 } from "./tts-language.js";
-import { loadConfig, saveConfig, syncSettingsFieldState, syncStepSections } from "./settings.js";
+import {
+  addTermbaseRow,
+  loadConfig,
+  saveConfig,
+  syncSettingsFieldState,
+  syncStepSections,
+  toggleTermbaseEditor,
+} from "./settings.js";
 import {
   closeImageModal,
   closeLabImagePicker,
@@ -143,6 +150,12 @@ function bindEvents() {
     await saveConfig({ syncActionState });
     showButtonSuccess(el.saveSettings, "Saved", "Settings saved.");
   }));
+  if (el.termbaseEditorToggle) {
+    el.termbaseEditorToggle.addEventListener("click", toggleTermbaseEditor);
+  }
+  if (el.termbaseAddRow) {
+    el.termbaseAddRow.addEventListener("click", addTermbaseRow);
+  }
 
   el.ttsHealthCheck.addEventListener("click", () => runTask(testTtsHealth));
   if (el.transcriptionHealthCheck) {
@@ -302,6 +315,10 @@ function bindEvents() {
   ]) {
     input.addEventListener("input", () => clearHealthStatus("textTranslate"));
     input.addEventListener("change", () => clearHealthStatus("textTranslate"));
+  }
+  if (el.termbaseTableBody) {
+    el.termbaseTableBody.addEventListener("input", () => clearHealthStatus("textTranslate"));
+    el.termbaseTableBody.addEventListener("change", () => clearHealthStatus("textTranslate"));
   }
 
   for (const input of [

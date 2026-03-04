@@ -5,6 +5,11 @@ import { formatUsd } from "./ui-core.js";
 import { openImageModal } from "./modals.js";
 
 const LAB_TEST_SETTINGS_STORAGE_KEY = "slide-transform-lab-test-settings";
+const ALLOWED_IMAGE_MODELS = new Set([
+  "gemini-3.1-flash-image-preview",
+  "gemini-3-pro-image-preview",
+  "gemini-2.5-flash-image",
+]);
 
 function setNodeText(node, text) {
   if (node) node.textContent = text;
@@ -69,6 +74,12 @@ function normalizeLabTestSettings(raw = {}) {
     replicate_model_ref: String(raw.replicate_model_ref || fallback.replicate_model_ref || "nightmareai/real-esrgan").trim(),
     replicate_version_id: String(raw.replicate_version_id || fallback.replicate_version_id || "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa").trim(),
   };
+  if (!ALLOWED_IMAGE_MODELS.has(next.slide_edit_model)) {
+    next.slide_edit_model = "gemini-3-pro-image-preview";
+  }
+  if (!ALLOWED_IMAGE_MODELS.has(next.slide_translate_model)) {
+    next.slide_translate_model = "gemini-3-pro-image-preview";
+  }
   if (!["swin2sr", "replicate_nightmare_realesrgan"].includes(next.slide_upscale_mode)) {
     next.slide_upscale_mode = "swin2sr";
   }

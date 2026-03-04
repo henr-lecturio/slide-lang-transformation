@@ -33,7 +33,7 @@ function getDownloadLinks(detail, { includeVideo = true, includeNonVideo = true 
     ] : []),
     ...(includeVideo ? [
       { label: "Subtitles", url: detail.exported_srt_url, name: detail.exported_video_name ? detail.exported_video_name.replace(/\.mp4$/i, ".srt") : "final.srt" },
-      { label: "Exported MP4", url: detail.exported_video_url, name: detail.exported_video_name || "final.mp4" },
+      { label: "MP4", url: detail.exported_video_url, name: detail.exported_video_name || "final.mp4" },
     ] : []),
   ].filter((item) => item.url);
 }
@@ -183,7 +183,7 @@ function renderRunsList(runs) {
 
 function shouldAutoPreviewLatest(detail) {
   const status = detail?.run_status || "";
-  return ["running", "error", "stopped"].includes(status);
+  return ["running", "done", "error", "stopped"].includes(status);
 }
 
 function deriveLatestAutoPreview(detail) {
@@ -305,7 +305,7 @@ function createRenderedImageElement(renderedImage, fallbackName) {
   if (renderedImage.url) {
     const img = document.createElement("img");
     img.loading = "lazy";
-    img.src = `${renderedImage.url}?v=${Date.now()}`;
+    img.src = renderedImage.url;
     img.alt = renderedImage.name || fallbackName;
     img.addEventListener("click", () => openImageModal(renderedImage.url, renderedImage.name || fallbackName));
     return img;
@@ -482,7 +482,7 @@ async function renderBaseEvents(runId, target) {
     if (item.image_url) {
       const img = document.createElement("img");
       img.loading = "lazy";
-      img.src = `${item.image_url}?v=${Date.now()}`;
+      img.src = item.image_url;
       img.alt = item.image_name || `event_${item.event_id}`;
       img.addEventListener("click", () => openImageModal(item.image_url, item.image_name || `event_${item.event_id}`));
       media.appendChild(img);
@@ -608,7 +608,7 @@ export async function pollCurrent() {
   try {
     const current = await apiGet("/api/runs/current");
     setStatusHandler(current);
-    if (current.run_id && current.status && current.status !== "idle") {
+    if (current.run_id && ["running", "stopping"].includes(current.status || "")) {
       state.latestRunId = current.run_id;
       await loadLatestRunDetails();
       await loadLatestSlides();
