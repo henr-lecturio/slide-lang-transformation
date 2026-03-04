@@ -233,6 +233,7 @@
             <section class="step-section is-forced" data-step-section="slide-detection">
               <div class="step-section-head">
                 <div class="step-section-title-wrap">
+                  <div class="step-section-note muted">This pipeline step always runs.</div>
                   <div class="step-section-heading">
                     <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Slide Detection is always enabled" /></label>
                     <h3>Slide Detection</h3>
@@ -240,7 +241,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">This pipeline step always runs.</div>
+                  <div class="step-section-subtitle muted">Detects slide changes and exports stable ROI and full-frame keyframes from the source video.</div>
                 </div>
               </div>
               <div id="step-section-body-slide-detection" class="step-section-body">
@@ -264,6 +265,7 @@
             <section class="step-section is-forced" data-step-section="transcription">
               <div class="step-section-head">
                 <div class="step-section-title-wrap">
+                  <div class="step-section-note muted">This pipeline step always runs.</div>
                   <div class="step-section-heading">
                     <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Transcription is always enabled" /></label>
                     <h3>Transcription</h3>
@@ -271,7 +273,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">This pipeline step always runs.</div>
+                  <div class="step-section-subtitle muted">Transcribes the source video into timestamped transcript segments for downstream translation and mapping.</div>
                 </div>
               </div>
               <div id="step-section-body-transcription" class="step-section-body">
@@ -353,9 +355,96 @@
               </div>
             </section>
 
+            <section class="step-section" data-step-section="text-translate" data-step-input="run_step_text_translate">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_text_translate" type="checkbox" aria-label="Enable Transcript Translate" /></label>
+                    <h3>Transcript Translate</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="text-translate" aria-expanded="false" aria-controls="step-section-body-text-translate" aria-label="Toggle Transcript Translate settings">
+                  <span class="step-section-chevron" aria-hidden="true"></span>
+                </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Translates transcript segments 1:1 into the target language before slide mapping.</div>
+                </div>
+              </div>
+              <div id="step-section-body-text-translate" class="step-section-body">
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_text_translate_model">GEMINI_TEXT_TRANSLATE_MODEL</label>
+                    <div class="settings-value"><input id="gemini_text_translate_model" type="text" /></div>
+                  </div>
+                  <div class="settings-row settings-row-textarea">
+                    <label class="settings-key" for="gemini_text_translate_prompt">GEMINI_TEXT_TRANSLATE_PROMPT</label>
+                    <div class="settings-value"><textarea id="gemini_text_translate_prompt" rows="10"></textarea></div>
+                  </div>
+                  <div class="settings-row termbase-settings-row">
+                    <label class="settings-key" for="translation_termbase_csv">TRANSLATION_TERMBASE_CSV</label>
+                    <div class="settings-value">
+                      <div id="termbase-editor-panel" class="output-info-panel termbase-editor-panel">
+                        <button
+                          id="termbase-editor-toggle"
+                          class="output-info-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="termbase-editor-body"
+                        >
+                          <span>Translation Termbase Table</span>
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
+                        <div id="termbase-editor-body" class="output-info-body" hidden>
+                          <div class="termbase-editor-toolbar">
+                            <button id="termbase-add-row" type="button">Add Row</button>
+                          </div>
+                          <div class="termbase-table-wrap">
+                            <table class="termbase-table">
+                              <thead>
+                                <tr>
+                                  <th>Source Text</th>
+                                  <th>Target Language</th>
+                                  <th>Target Text</th>
+                                  <th>Case Sensitive</th>
+                                  <th></th>
+                                </tr>
+                              </thead>
+                              <tbody id="termbase-table-body"></tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                      <textarea id="translation_termbase_csv" rows="12" spellcheck="false" hidden></textarea>
+                    </div>
+                  </div>
+                  <div class="settings-row settings-row-inline">
+                    <div class="settings-key">Transcript Translate API Test</div>
+                    <div class="settings-value">
+                      <div class="settings-inline-actions">
+                        <button id="text-translate-health-check" type="button">Test Transcript Translate API</button>
+                        <span id="text-translate-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="text-translate-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="text-translate-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
+                      </div>
+                      <div id="text-translate-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="text-translate-health-meta" class="health-check-meta muted"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
             <section class="step-section is-forced" data-step-section="transcript-mapping">
               <div class="step-section-head">
                 <div class="step-section-title-wrap">
+                  <div class="step-section-note muted">This pipeline step always runs.</div>
                   <div class="step-section-heading">
                     <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Transcript Mapping is always enabled" /></label>
                     <h3>Transcript Mapping</h3>
@@ -363,7 +452,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">This pipeline step always runs.</div>
+                  <div class="step-section-subtitle muted">Maps transcript segments onto detected slide windows and prepares per-slide text assignments.</div>
                 </div>
               </div>
               <div id="step-section-body-transcript-mapping" class="step-section-body">
@@ -374,6 +463,7 @@
             <section class="step-section is-forced" data-step-section="finalize-slides">
               <div class="step-section-head">
                 <div class="step-section-title-wrap">
+                  <div class="step-section-note muted">This pipeline step always runs.</div>
                   <div class="step-section-heading">
                     <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Finalize Slides is always enabled" /></label>
                     <h3>Finalize Slides</h3>
@@ -663,92 +753,6 @@
                       </div>
                       <div id="slide-upscale-health-meta-wrap" class="health-check-meta-wrap" hidden>
                         <div id="slide-upscale-health-meta" class="health-check-meta muted"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section class="step-section" data-step-section="text-translate" data-step-input="run_step_text_translate">
-              <div class="step-section-head">
-                <div class="step-section-title-wrap">
-                  <div class="step-section-heading">
-                    <label class="step-switch step-switch-icononly"><input id="run_step_text_translate" type="checkbox" aria-label="Enable Transcript Translate" /></label>
-                    <h3>Transcript Translate</h3>
-                    <button type="button" class="step-section-toggle" data-step-toggle="text-translate" aria-expanded="false" aria-controls="step-section-body-text-translate" aria-label="Toggle Transcript Translate settings">
-                  <span class="step-section-chevron" aria-hidden="true"></span>
-                </button>
-                  </div>
-                  <div class="step-section-subtitle muted">Translates transcript segments 1:1 into the target language before slide mapping.</div>
-                </div>
-              </div>
-              <div id="step-section-body-text-translate" class="step-section-body">
-                <div class="settings-list">
-                  <div class="settings-row">
-                    <label class="settings-key" for="gemini_text_translate_model">GEMINI_TEXT_TRANSLATE_MODEL</label>
-                    <div class="settings-value"><input id="gemini_text_translate_model" type="text" /></div>
-                  </div>
-                  <div class="settings-row settings-row-textarea">
-                    <label class="settings-key" for="gemini_text_translate_prompt">GEMINI_TEXT_TRANSLATE_PROMPT</label>
-                    <div class="settings-value"><textarea id="gemini_text_translate_prompt" rows="10"></textarea></div>
-                  </div>
-                  <div class="settings-row termbase-settings-row">
-                    <label class="settings-key" for="translation_termbase_csv">TRANSLATION_TERMBASE_CSV</label>
-                    <div class="settings-value">
-                      <div id="termbase-editor-panel" class="output-info-panel termbase-editor-panel">
-                        <button
-                          id="termbase-editor-toggle"
-                          class="output-info-toggle"
-                          type="button"
-                          aria-expanded="false"
-                          aria-controls="termbase-editor-body"
-                        >
-                          <span>Translation Termbase Table</span>
-                          <span class="step-section-chevron" aria-hidden="true"></span>
-                        </button>
-                        <div id="termbase-editor-body" class="output-info-body" hidden>
-                          <div class="termbase-editor-toolbar">
-                            <button id="termbase-add-row" type="button">Add Row</button>
-                          </div>
-                          <div class="termbase-table-wrap">
-                            <table class="termbase-table">
-                              <thead>
-                                <tr>
-                                  <th>Source Text</th>
-                                  <th>Target Language</th>
-                                  <th>Target Text</th>
-                                  <th>Case Sensitive</th>
-                                  <th></th>
-                                </tr>
-                              </thead>
-                              <tbody id="termbase-table-body"></tbody>
-                            </table>
-                          </div>
-                        </div>
-                      </div>
-                      <textarea id="translation_termbase_csv" rows="12" spellcheck="false" hidden></textarea>
-                    </div>
-                  </div>
-                  <div class="settings-row settings-row-inline">
-                    <div class="settings-key">Transcript Translate API Test</div>
-                    <div class="settings-value">
-                      <div class="settings-inline-actions">
-                        <button id="text-translate-health-check" type="button">Test Transcript Translate API</button>
-                        <span id="text-translate-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
-                        <button
-                          id="text-translate-health-meta-toggle"
-                          class="health-meta-toggle"
-                          type="button"
-                          aria-expanded="false"
-                          aria-controls="text-translate-health-meta-wrap"
-                          disabled
-                        >
-                          <span class="step-section-chevron" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                      <div id="text-translate-health-meta-wrap" class="health-check-meta-wrap" hidden>
-                        <div id="text-translate-health-meta" class="health-check-meta muted"></div>
                       </div>
                     </div>
                   </div>

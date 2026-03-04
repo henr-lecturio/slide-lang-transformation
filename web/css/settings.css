@@ -38,6 +38,11 @@
   margin: 0;
 }
 
+.step-section-note {
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+}
+
 .step-section-subtitle {
   margin-top: 6px;
 }
