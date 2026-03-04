@@ -87,7 +87,8 @@
 }
 
 .lab-settings-dialog {
-  width: min(1080px, 94vw);
+  width: 90vw;
+  max-width: 90vw;
 }
 
 .lab-settings-head {

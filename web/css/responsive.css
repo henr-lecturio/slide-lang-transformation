@@ -80,6 +80,17 @@
     margin-left: 0;
   }
 
+  .lab-preview-label-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .lab-selection-meta {
+    max-width: 100%;
+    text-align: left;
+    white-space: normal;
+  }
+
   .settings-key {
     max-width: none;
     min-width: 0;

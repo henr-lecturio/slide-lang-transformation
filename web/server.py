@@ -1428,6 +1428,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
     source_path = ensure_within(run_dir, run_dir / source_rel)
     env = parse_env(CONFIG_PATH)
     overrides = overrides if isinstance(overrides, dict) else {}
+    lab_slide_translate_styles_override = ""
 
     def override_str(key: str, default: str = "") -> str:
         value = overrides.get(key, default)
@@ -1460,6 +1461,9 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         if not translate_target_language:
             return False, "Image Lab target language must not be empty"
         if mode == "deterministic_glossary":
+            style_override_raw = str(overrides.get("slide_translate_styles_json", "") or "")
+            if style_override_raw.strip():
+                lab_slide_translate_styles_override = normalize_slide_translate_styles_json(style_override_raw)
             vision_project_id = (
                 env.get("GOOGLE_VISION_PROJECT_ID", "")
                 or env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
@@ -1488,13 +1492,14 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
             font_path = Path(font_path_raw) if Path(font_path_raw).is_absolute() else ROOT_DIR / font_path_raw
             if not font_path.exists():
                 return False, f"Image Lab deterministic translate font not found: {font_path}"
-            style_config_raw = (
-                env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
-                or ""
-            ).strip()
-            style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
-            if not style_config_path.exists():
-                return False, f"Image Lab deterministic translate style config not found: {style_config_path}"
+            if not lab_slide_translate_styles_override:
+                style_config_raw = (
+                    env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+                    or ""
+                ).strip()
+                style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
+                if not style_config_path.exists():
+                    return False, f"Image Lab deterministic translate style config not found: {style_config_path}"
         else:
             mode = "gemini"
             if not (os.environ.get("GEMINI_API_KEY") or "").strip():
@@ -1564,6 +1569,9 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                 or ""
             ).strip()
             style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
+            if lab_slide_translate_styles_override:
+                style_config_path = job_dir / "slide_translate_style_override.json"
+                write_text_file(style_config_path, lab_slide_translate_styles_override)
             vision_project_id = (
                 env.get("GOOGLE_VISION_PROJECT_ID", "")
                 or env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
@@ -3089,6 +3097,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/config":
                 data = self._read_json_body()
+                existing_env = parse_env(CONFIG_PATH)
+                slide_style_config_path = str(
+                    existing_env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+                ).strip()
                 video_path = str(data["VIDEO_PATH"]).strip()
                 if video_path:
                     resolve_video_config_path(video_path)
@@ -3135,9 +3147,7 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
                     "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
                     "GOOGLE_VISION_PROJECT_ID": str(data["GOOGLE_VISION_PROJECT_ID"]).strip(),
-                    "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": str(
-                        env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
-                    ).strip(),
+                    "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": slide_style_config_path,
                     "SLIDE_TRANSLATE_STYLES_JSON": str(data["SLIDE_TRANSLATE_STYLES_JSON"]),
                     "GOOGLE_TRANSLATE_PROJECT_ID": str(data["GOOGLE_TRANSLATE_PROJECT_ID"]).strip(),
                     "GOOGLE_TRANSLATE_LOCATION": str(data["GOOGLE_TRANSLATE_LOCATION"]).strip(),

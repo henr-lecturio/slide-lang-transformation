@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 DEFAULT_SLIDE_TRANSLATE_STYLE_CONFIG_REL = "config/slide_translate_styles.json"
@@ -71,8 +72,29 @@ def resolve_style_font_path(
         return fallback_font_path.resolve()
     path = Path(raw)
     if path.is_absolute():
-        return path.resolve()
-    root_candidate = (root_dir / path).resolve()
-    if root_candidate.exists():
-        return root_candidate
-    return (config_path.parent / path).resolve()
+        resolved = path.resolve()
+    else:
+        root_candidate = (root_dir / path).resolve()
+        if root_candidate.exists():
+            resolved = root_candidate
+        else:
+            resolved = (config_path.parent / path).resolve()
+
+    weight = str(style.get("font_weight", "") or "").strip().lower()
+    if weight not in {"regular", "medium", "bold"}:
+        return resolved
+
+    stem = resolved.stem
+    suffix = resolved.suffix
+    target = {"regular": "Regular", "medium": "Medium", "bold": "Bold"}[weight]
+    replaced = re.sub(r"(?i)(regular|medium|bold)", target, stem)
+    candidates: list[Path] = []
+    if replaced != stem:
+        candidates.append(resolved.with_name(f"{replaced}{suffix}"))
+    for sep in ("-", "_", " "):
+        candidates.append(resolved.with_name(f"{stem}{sep}{target}{suffix}"))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return resolved

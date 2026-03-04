@@ -38,7 +38,7 @@ function formatExportLabStatus(status, hasSelection) {
 function renderExportLabMeta(current, selected) {
   if (!el.exportLabMeta) return;
   const meta = formatExportLabStatus(current?.status || "idle", Boolean(selected));
-  el.exportLabMeta.className = `export-lab-status-line ${meta.lineClass}`;
+  el.exportLabMeta.className = `export-lab-status-line lab-toolbar-status ${meta.lineClass}`;
   el.exportLabMeta.innerHTML = "";
   const chip = document.createElement("div");
   chip.className = "export-lab-status-chip";
@@ -244,7 +244,7 @@ export function renderExportLabSelection() {
     return;
   }
 
-  setNodeText(el.exportLabSelectedRun, `selected: ${formatRunIdLabel(selected.run_id)}`);
+  setNodeText(el.exportLabSelectedRun, `| selected: ${formatRunIdLabel(selected.run_id)}`);
   renderExportLabMeta(visibleCurrent, selected);
 
   el.exportLabDownloads.innerHTML = "";

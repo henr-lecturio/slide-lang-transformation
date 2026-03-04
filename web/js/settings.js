@@ -19,6 +19,7 @@ const TERMBASE_COLUMNS = [
 
 const SLIDE_STYLE_COLUMNS = [
   { key: "display_key", label: "Key", type: "readonly" },
+  { key: "font_weight", label: "Weight", type: "select", options: ["Regular", "Medium", "Bold"] },
   { key: "font_size", label: "Font Size", type: "number", min: "1", step: "1" },
   { key: "min_font_size", label: "Min Font", type: "number", min: "1", step: "1" },
   { key: "line_spacing_ratio", label: "Line Spacing", type: "number", min: "0", step: "0.01" },
@@ -225,8 +226,20 @@ function displaySlideStylePadding(style = {}) {
 }
 
 function slideStyleVisibleValuesFromStyle(style = {}, displayKey = "") {
+  const explicitWeight = String(style.font_weight ?? "").trim().toLowerCase();
+  let inferredWeight = "Regular";
+  if (explicitWeight === "medium") inferredWeight = "Medium";
+  else if (explicitWeight === "bold") inferredWeight = "Bold";
+  else if (explicitWeight === "regular") inferredWeight = "Regular";
+  else {
+    const fontPath = String(style.font_path ?? "").toLowerCase();
+    if (fontPath.includes("bold")) inferredWeight = "Bold";
+    else if (fontPath.includes("medium")) inferredWeight = "Medium";
+    else if (fontPath.includes("regular")) inferredWeight = "Regular";
+  }
   return {
     display_key: displayKey,
+    font_weight: inferredWeight,
     font_size: style.font_size === undefined || style.font_size === null ? "" : String(style.font_size),
     min_font_size: style.min_font_size === undefined || style.min_font_size === null ? "" : String(style.min_font_size),
     line_spacing_ratio: style.line_spacing_ratio === undefined || style.line_spacing_ratio === null ? "" : String(style.line_spacing_ratio),
@@ -288,6 +301,14 @@ function syncSlideTranslateStylesJsonFromTable() {
     }
     const initial = JSON.parse(row.dataset.initialVisibleValues || "{}");
 
+    if (String(current.font_weight ?? "") !== String(initial.font_weight ?? "")) {
+      const weightRaw = String(current.font_weight ?? "").trim().toLowerCase();
+      if (["regular", "medium", "bold"].includes(weightRaw)) {
+        style.font_weight = weightRaw;
+      } else {
+        delete style.font_weight;
+      }
+    }
     if (String(current.font_size ?? "") !== String(initial.font_size ?? "")) {
       const value = parseIntegerOrUndefined(current.font_size);
       if (value === undefined) delete style.font_size;
@@ -341,6 +362,19 @@ function createSlideTranslateStyleRow(row) {
       control.type = "text";
       control.readOnly = true;
       control.value = String(visibleValues[column.key] ?? "");
+    } else if (column.type === "select") {
+      control = document.createElement("select");
+      for (const optionValue of column.options || []) {
+        const option = document.createElement("option");
+        option.value = String(optionValue);
+        option.textContent = String(optionValue);
+        control.appendChild(option);
+      }
+      control.value = String(visibleValues[column.key] ?? "Regular");
+      if (!control.value) {
+        control.value = "Regular";
+      }
+      control.addEventListener("change", syncSlideTranslateStylesJsonFromTable);
     } else {
       control = document.createElement("input");
       control.type = column.type;
@@ -380,7 +414,7 @@ export function toggleSlideTranslateStyleEditor() {
 function setSlideTranslateStyleEditorDisabled(disabled) {
   if (el.slideTranslateStyleEditorToggle) el.slideTranslateStyleEditorToggle.disabled = disabled;
   if (el.slideTranslateStyleTableBody) {
-    for (const input of el.slideTranslateStyleTableBody.querySelectorAll("input")) {
+    for (const input of el.slideTranslateStyleTableBody.querySelectorAll("input, select")) {
       input.disabled = disabled;
     }
   }

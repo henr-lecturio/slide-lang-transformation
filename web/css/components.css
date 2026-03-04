@@ -300,6 +300,21 @@
   gap: 2px;
 }
 
+.lab-preview-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lab-selection-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .lab-preview-wrap {
   aspect-ratio: 16 / 9;
   min-height: 0;
@@ -323,6 +338,11 @@
   align-items: center;
   min-height: 28px;
   margin-top: 8px;
+}
+
+.lab-toolbar-status {
+  margin-top: 0;
+  min-height: 34px;
 }
 
 .export-lab-status-chip {

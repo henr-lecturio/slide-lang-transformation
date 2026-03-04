@@ -69,6 +69,7 @@ import {
   syncLabSettingsFieldState,
   syncLabTestSections,
   syncLabActionState,
+  toggleLabSlideTranslateStyleEditor,
 } from "./lab.js";
 import {
   configureRunsModule,
@@ -315,6 +316,9 @@ function bindEvents() {
     showButtonSuccess(el.labSettingsReset, "Reset");
   }));
   el.labFinalSlideUpscaleMode.addEventListener("change", saveLabTestSettings);
+  if (el.labSlideTranslateStyleEditorToggle) {
+    el.labSlideTranslateStyleEditorToggle.addEventListener("click", toggleLabSlideTranslateStyleEditor);
+  }
 
   el.exportLabPickRun.addEventListener("click", () => runTask(() => openExportLabRunPicker({
     runTask,

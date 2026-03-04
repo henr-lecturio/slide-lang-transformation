@@ -209,13 +209,17 @@
               <button id="lab-run-upscale" type="button">Test Slide Upscale</button>
             </div>
             <div class="lab-toolbar-side">
+              <div id="lab-job-status" class="export-lab-status-line lab-toolbar-status is-idle"></div>
               <button id="lab-open-terminal" type="button">Open Terminal</button>
               <button id="lab-stop-run" type="button" disabled>Stop Execution</button>
             </div>
           </div>
           <div class="lab-preview-grid">
             <section class="lab-preview-panel">
-              <div class="slide-compare-label">Original</div>
+              <div class="lab-preview-label-row">
+                <div class="slide-compare-label">Original</div>
+                <div id="lab-selected-image" class="muted lab-selection-meta"></div>
+              </div>
               <div class="image-wrap lab-preview-wrap">
                 <img id="lab-original-image" alt="Selected lab input image" />
               </div>
@@ -240,18 +244,20 @@
               <button id="export-lab-run-export" type="button">Run Export</button>
             </div>
             <div class="lab-toolbar-side">
+              <div id="export-lab-meta" class="export-lab-status-line lab-toolbar-status is-idle"></div>
               <button id="export-lab-open-terminal" type="button">Open Terminal</button>
               <button id="export-lab-stop-run" type="button" disabled>Stop Execution</button>
             </div>
           </div>
-          <div id="export-lab-selected-run" class="muted"></div>
           <div class="lab-preview-grid">
             <section class="lab-preview-panel">
-              <div class="slide-compare-label">Export Preview</div>
+              <div class="lab-preview-label-row">
+                <div class="slide-compare-label">Export Preview</div>
+                <div id="export-lab-selected-run" class="muted lab-selection-meta"></div>
+              </div>
               <div class="image-wrap lab-preview-wrap export-lab-video-wrap">
                 <video id="export-lab-video" controls preload="metadata"></video>
               </div>
-              <div id="export-lab-meta" class="muted"></div>
               <div id="export-lab-downloads" class="summary-links row wrap"></div>
             </section>
           </div>
@@ -766,6 +772,7 @@
                               <thead>
                                 <tr>
                                   <th>Key</th>
+                                  <th>Weight</th>
                                   <th>Font Size</th>
                                   <th>Min Font</th>
                                   <th>Line Spacing</th>
@@ -1170,6 +1177,42 @@
                   <div class="settings-row">
                     <label class="settings-key" for="lab_gemini_translate_prompt">LAB_SLIDE_TRANSLATE_PROMPT</label>
                     <div class="settings-value"><textarea id="lab_gemini_translate_prompt" rows="5"></textarea></div>
+                  </div>
+                  <div class="settings-row termbase-settings-row">
+                    <label class="settings-key" for="lab_slide_translate_styles_json">LAB_SLIDE_TRANSLATE_STYLING</label>
+                    <div class="settings-value">
+                      <div id="lab-slide-translate-style-editor-panel" class="output-info-panel termbase-editor-panel">
+                        <button
+                          id="lab-slide-translate-style-editor-toggle"
+                          class="output-info-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="lab-slide-translate-style-editor-body"
+                        >
+                          <span>Text Styling</span>
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
+                        <div id="lab-slide-translate-style-editor-body" class="output-info-body" hidden>
+                          <div class="termbase-table-wrap">
+                            <table class="termbase-table slide-style-table">
+                              <thead>
+                                <tr>
+                                  <th>Key</th>
+                                  <th>Weight</th>
+                                  <th>Font Size</th>
+                                  <th>Min Font</th>
+                                  <th>Line Spacing</th>
+                                  <th>Color</th>
+                                  <th>Padding</th>
+                                </tr>
+                              </thead>
+                              <tbody id="lab-slide-translate-style-table-body"></tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                      <textarea id="lab_slide_translate_styles_json" rows="12" spellcheck="false" hidden></textarea>
+                    </div>
                   </div>
                 </div>
               </div>
