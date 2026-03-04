@@ -2302,6 +2302,19 @@ class Handler(BaseHTTPRequestHandler):
                     "REPLICATE_UPSCALE_CONCURRENCY": int(env.get("REPLICATE_UPSCALE_CONCURRENCY", "2")),
                     "VIDEO_EXPORT_MIN_SLIDE_SEC": float(env.get("VIDEO_EXPORT_MIN_SLIDE_SEC", "1.2")),
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(env.get("VIDEO_EXPORT_TAIL_PAD_SEC", "0.35")),
+                    "VIDEO_EXPORT_INTRO_WHITE_SEC": float(env.get("VIDEO_EXPORT_INTRO_WHITE_SEC", "1.0")),
+                    "VIDEO_EXPORT_INTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4")),
+                    "VIDEO_EXPORT_INTRO_COLOR": env.get(
+                        "VIDEO_EXPORT_INTRO_COLOR",
+                        env.get("VIDEO_EXPORT_FADE_COLOR", "white"),
+                    ),
+                    "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(env.get("VIDEO_EXPORT_OUTRO_HOLD_SEC", "1.5")),
+                    "VIDEO_EXPORT_OUTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_OUTRO_FADE_SEC", "1.5")),
+                    "VIDEO_EXPORT_OUTRO_FADE_COLOR": env.get(
+                        "VIDEO_EXPORT_OUTRO_FADE_COLOR",
+                        env.get("VIDEO_EXPORT_FADE_COLOR", "black"),
+                    ),
+                    "VIDEO_EXPORT_OUTRO_BLACK_SEC": float(env.get("VIDEO_EXPORT_OUTRO_BLACK_SEC", "2.0")),
                     "VIDEO_EXPORT_WIDTH": int(env.get("VIDEO_EXPORT_WIDTH", "1920")),
                     "VIDEO_EXPORT_HEIGHT": int(env.get("VIDEO_EXPORT_HEIGHT", "1080")),
                     "VIDEO_EXPORT_FPS": int(env.get("VIDEO_EXPORT_FPS", "30")),
@@ -2509,6 +2522,13 @@ class Handler(BaseHTTPRequestHandler):
                     "REPLICATE_UPSCALE_CONCURRENCY": int(data["REPLICATE_UPSCALE_CONCURRENCY"]),
                     "VIDEO_EXPORT_MIN_SLIDE_SEC": float(data["VIDEO_EXPORT_MIN_SLIDE_SEC"]),
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(data["VIDEO_EXPORT_TAIL_PAD_SEC"]),
+                    "VIDEO_EXPORT_INTRO_WHITE_SEC": float(data["VIDEO_EXPORT_INTRO_WHITE_SEC"]),
+                    "VIDEO_EXPORT_INTRO_FADE_SEC": float(data["VIDEO_EXPORT_INTRO_FADE_SEC"]),
+                    "VIDEO_EXPORT_INTRO_COLOR": str(data["VIDEO_EXPORT_INTRO_COLOR"]).strip(),
+                    "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(data["VIDEO_EXPORT_OUTRO_HOLD_SEC"]),
+                    "VIDEO_EXPORT_OUTRO_FADE_SEC": float(data["VIDEO_EXPORT_OUTRO_FADE_SEC"]),
+                    "VIDEO_EXPORT_OUTRO_FADE_COLOR": str(data["VIDEO_EXPORT_OUTRO_FADE_COLOR"]).strip(),
+                    "VIDEO_EXPORT_OUTRO_BLACK_SEC": float(data["VIDEO_EXPORT_OUTRO_BLACK_SEC"]),
                     "VIDEO_EXPORT_WIDTH": int(data["VIDEO_EXPORT_WIDTH"]),
                     "VIDEO_EXPORT_HEIGHT": int(data["VIDEO_EXPORT_HEIGHT"]),
                     "VIDEO_EXPORT_FPS": int(data["VIDEO_EXPORT_FPS"]),
@@ -2660,6 +2680,20 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("VIDEO_EXPORT_MIN_SLIDE_SEC must be > 0")
                 if cfg["VIDEO_EXPORT_TAIL_PAD_SEC"] < 0:
                     raise ValueError("VIDEO_EXPORT_TAIL_PAD_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_INTRO_WHITE_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_INTRO_WHITE_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_INTRO_FADE_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_INTRO_FADE_SEC must be >= 0")
+                if not cfg["VIDEO_EXPORT_INTRO_COLOR"]:
+                    raise ValueError("VIDEO_EXPORT_INTRO_COLOR must not be empty")
+                if cfg["VIDEO_EXPORT_OUTRO_HOLD_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_OUTRO_HOLD_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_OUTRO_FADE_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_OUTRO_FADE_SEC must be >= 0")
+                if not cfg["VIDEO_EXPORT_OUTRO_FADE_COLOR"]:
+                    raise ValueError("VIDEO_EXPORT_OUTRO_FADE_COLOR must not be empty")
+                if cfg["VIDEO_EXPORT_OUTRO_BLACK_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_OUTRO_BLACK_SEC must be >= 0")
                 if cfg["VIDEO_EXPORT_WIDTH"] <= 0 or cfg["VIDEO_EXPORT_HEIGHT"] <= 0:
                     raise ValueError("VIDEO_EXPORT_WIDTH and VIDEO_EXPORT_HEIGHT must be > 0")
                 if cfg["VIDEO_EXPORT_FPS"] <= 0:

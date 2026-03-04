@@ -21,6 +21,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-srt", default="", help="Optional output subtitle path.")
     parser.add_argument("--min-slide-sec", type=float, default=1.2, help="Minimum per-slide duration in seconds.")
     parser.add_argument("--tail-pad-sec", type=float, default=0.35, help="Silence tail added after each voiced slide.")
+    parser.add_argument("--intro-white-sec", type=float, default=1.0, help="Initial white screen duration before the first slide fades in.")
+    parser.add_argument("--intro-fade-sec", type=float, default=0.4, help="Crossfade duration from white intro to the first slide.")
+    parser.add_argument("--intro-color", default="white", help="Color used for the intro still before the first slide fades in.")
+    parser.add_argument("--outro-hold-sec", type=float, default=1.5, help="Hold duration for the last slide after spoken audio ends.")
+    parser.add_argument("--outro-fade-sec", type=float, default=1.5, help="Fade-out duration for the last slide at the end of the export.")
+    parser.add_argument("--outro-fade-color", default="black", help="Color used for the outro fade target.")
+    parser.add_argument("--outro-black-sec", type=float, default=2.0, help="Hold duration for a solid black frame after the outro fade.")
     parser.add_argument("--width", type=int, default=1920, help="Output video width.")
     parser.add_argument("--height", type=int, default=1080, help="Output video height.")
     parser.add_argument("--fps", type=int, default=30, help="Output video frame rate.")
@@ -359,6 +366,41 @@ def build_segmented_timeline_rows(
     return rows
 
 
+def apply_intro_outro_timing(
+    timeline_rows: list[dict[str, Any]],
+    intro_white_sec: float,
+    outro_hold_sec: float,
+    outro_fade_sec: float,
+    outro_black_sec: float,
+) -> list[dict[str, Any]]:
+    if not timeline_rows:
+        return []
+    rows: list[dict[str, Any]] = []
+    intro_offset = max(0.0, float(intro_white_sec))
+    outro_extra = (
+        max(0.0, float(outro_hold_sec))
+        + max(0.0, float(outro_fade_sec))
+        + max(0.0, float(outro_black_sec))
+    )
+    for idx, row in enumerate(timeline_rows, start=1):
+        item = dict(row)
+        item["video_start_sec"] = round(float(item["video_start_sec"]) + intro_offset, 3)
+        item["video_end_sec"] = round(float(item["video_end_sec"]) + intro_offset, 3)
+        audio_clip_duration = float(item.get("audio_clip_duration_sec", 0.0) or 0.0)
+        if audio_clip_duration > 0:
+            item["audio_clip_start_sec"] = round(float(item["audio_clip_start_sec"]) + intro_offset, 3)
+            item["audio_clip_end_sec"] = round(float(item["audio_clip_end_sec"]) + intro_offset, 3)
+            item["audio_clip_duration_sec"] = round(
+                max(0.0, float(item["audio_clip_end_sec"]) - float(item["audio_clip_start_sec"])),
+                3,
+            )
+        if idx == len(timeline_rows):
+            item["video_end_sec"] = round(float(item["video_end_sec"]) + outro_extra, 3)
+        item["duration_sec"] = round(max(0.0, float(item["video_end_sec"]) - float(item["video_start_sec"])), 3)
+        rows.append(item)
+    return rows
+
+
 def write_srt(path: Path | None, timeline_rows: list[dict[str, Any]]) -> None:
     if path is None:
         return
@@ -367,9 +409,15 @@ def write_srt(path: Path | None, timeline_rows: list[dict[str, Any]]) -> None:
         subtitle_text = str(row.get("subtitle_text", "") or "").strip()
         if not subtitle_text:
             continue
+        start_sec = float(row["video_start_sec"])
+        end_sec = float(row["video_end_sec"])
+        audio_clip_duration = float(row.get("audio_clip_duration_sec", 0.0) or 0.0)
+        if audio_clip_duration > 0:
+            start_sec = float(row.get("audio_clip_start_sec", start_sec) or start_sec)
+            end_sec = float(row.get("audio_clip_end_sec", end_sec) or end_sec)
         entries.append(
             f"{len(entries) + 1}\n"
-            f"{seconds_to_srt(float(row['video_start_sec']))} --> {seconds_to_srt(float(row['video_end_sec']))}\n"
+            f"{seconds_to_srt(start_sec)} --> {seconds_to_srt(end_sec)}\n"
             f"{subtitle_text}\n"
         )
     path.write_text("\n".join(entries).rstrip() + "\n", encoding="utf-8")
@@ -383,10 +431,18 @@ def render_segment_videos(
     height: int,
     fps: int,
     bg_color: str,
+    intro_color: str,
+    outro_fade_color: str,
+    intro_white_sec: float,
+    intro_fade_sec: float,
+    outro_hold_sec: float,
+    outro_fade_sec: float,
+    outro_black_sec: float,
     step_label: str,
 ) -> tuple[Path, int]:
     concat_list = tmp_dir / "concat.txt"
     concat_lines: list[str] = []
+    rendered_paths: list[Path] = []
     video_filter = (
         f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={bg_color},"
@@ -422,10 +478,156 @@ def render_segment_videos(
                 str(segment_video),
             ]
         )
-        concat_lines.append(f"file '{segment_video.name}'")
+        rendered_paths.append(segment_video)
         print(f"@@STEP DETAIL {step_label} {image_path.name}", flush=True)
         print(f"[VideoExport] Segment {idx:03d}: {image_path.name} ({clip_duration:.3f}s)", flush=True)
 
+    if not rendered_paths:
+        raise RuntimeError("No slide video segments were rendered.")
+
+    final_paths: list[Path] = []
+    intro_white_sec = max(0.0, float(intro_white_sec))
+    intro_fade_sec = max(0.0, float(intro_fade_sec))
+    outro_hold_sec = max(0.0, float(outro_hold_sec))
+    outro_fade_sec = max(0.0, float(outro_fade_sec))
+    outro_black_sec = max(0.0, float(outro_black_sec))
+
+    if intro_white_sec > 0.0:
+        if intro_fade_sec > 0.0:
+            intro_base = tmp_dir / "intro_base.mp4"
+            run_cmd(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c={intro_color}:s={width}x{height}:r={fps}:d={intro_white_sec + intro_fade_sec:.3f}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(intro_base),
+                ]
+            )
+            intro_transition = tmp_dir / "intro_transition.mp4"
+            run_cmd(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(intro_base),
+                    "-i",
+                    str(rendered_paths[0]),
+                    "-filter_complex",
+                    f"[0:v][1:v]xfade=transition=fade:duration={intro_fade_sec:.3f}:offset={intro_white_sec:.3f},format=yuv420p[v]",
+                    "-map",
+                    "[v]",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    str(intro_transition),
+                ]
+            )
+            final_paths.append(intro_transition)
+        else:
+            intro_still = tmp_dir / "intro_still.mp4"
+            run_cmd(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c={intro_color}:s={width}x{height}:r={fps}:d={intro_white_sec:.3f}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(intro_still),
+                ]
+            )
+            final_paths.append(intro_still)
+            final_paths.append(rendered_paths[0])
+        final_paths.extend(rendered_paths[1:])
+    else:
+        final_paths.extend(rendered_paths)
+
+    if outro_hold_sec > 0.0 or outro_fade_sec > 0.0:
+        last_row = timeline_rows[-1]
+        last_image = image_dir / str(last_row["image_name"])
+        outro_clip = tmp_dir / "outro.mp4"
+        outro_duration = max(0.04, outro_hold_sec + outro_fade_sec)
+        outro_filter = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={bg_color},"
+            "format=yuv420p"
+        )
+        if outro_fade_sec > 0.0:
+            fade_start = max(0.0, outro_duration - outro_fade_sec)
+            outro_filter = f"{outro_filter},fade=t=out:st={fade_start:.3f}:d={outro_fade_sec:.3f}:color={outro_fade_color}"
+        run_cmd(
+            [
+                "ffmpeg",
+                "-y",
+                "-loop",
+                "1",
+                "-i",
+                str(last_image),
+                "-t",
+                f"{outro_duration:.3f}",
+                "-vf",
+                outro_filter,
+                "-r",
+                str(fps),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                str(outro_clip),
+            ]
+        )
+        final_paths.append(outro_clip)
+
+    if outro_black_sec > 0.0:
+        outro_black = tmp_dir / "outro_black.mp4"
+        run_cmd(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=black:s={width}x{height}:r={fps}:d={outro_black_sec:.3f}",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                str(outro_black),
+            ]
+        )
+        final_paths.append(outro_black)
+
+    for path in final_paths:
+        concat_lines.append(f"file '{path.name}'")
     concat_list.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
     video_only = tmp_dir / "video_only.mp4"
     run_cmd(
@@ -485,12 +687,17 @@ def main() -> int:
     fps = int(args.fps)
     min_slide_sec = max(0.1, float(args.min_slide_sec))
     tail_pad_sec = max(0.0, float(args.tail_pad_sec))
+    intro_white_sec = max(0.0, float(args.intro_white_sec))
+    intro_fade_sec = max(0.0, float(args.intro_fade_sec))
+    outro_hold_sec = max(0.0, float(args.outro_hold_sec))
+    outro_fade_sec = max(0.0, float(args.outro_fade_sec))
+    outro_black_sec = max(0.0, float(args.outro_black_sec))
 
     with tempfile.TemporaryDirectory(prefix="slide_export_", dir=str(out_video.parent)) as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
         use_master_audio = bool(alignment_by_segment) and full_audio_path is not None and full_audio_path.exists()
         if use_master_audio:
-            timeline_rows = build_master_audio_timeline_rows(
+            base_timeline_rows = build_master_audio_timeline_rows(
                 events,
                 image_dir,
                 alignment_by_segment,
@@ -498,24 +705,37 @@ def main() -> int:
                 min_slide_sec,
                 tail_pad_sec,
             )
+            timeline_rows = apply_intro_outro_timing(
+                base_timeline_rows,
+                intro_white_sec,
+                outro_hold_sec,
+                outro_fade_sec,
+                outro_black_sec,
+            )
             for row in timeline_rows:
                 row["audio_source_name"] = full_audio_path.name
             video_only, _segment_count = render_segment_videos(
-                timeline_rows,
+                base_timeline_rows,
                 image_dir,
                 tmp_dir,
                 width,
                 height,
                 fps,
                 args.bg_color,
+                args.intro_color,
+                args.outro_fade_color,
+                intro_white_sec,
+                intro_fade_sec,
+                outro_hold_sec,
+                outro_fade_sec,
+                outro_black_sec,
                 "video-export",
             )
-            run_cmd(
+            mux_cmd = ["ffmpeg", "-y", "-i", str(video_only)]
+            if intro_white_sec > 0.0:
+                mux_cmd.extend(["-itsoffset", f"{intro_white_sec:.3f}"])
+            mux_cmd.extend(
                 [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    str(video_only),
                     "-i",
                     str(full_audio_path),
                     "-map",
@@ -531,6 +751,7 @@ def main() -> int:
                     str(out_video),
                 ]
             )
+            run_cmd(mux_cmd)
             total_duration_sec = max((float(row["video_end_sec"]) for row in timeline_rows), default=full_audio_duration)
             audio_mode = "master_track"
         else:
@@ -673,6 +894,13 @@ def main() -> int:
         "video_fps": fps,
         "min_slide_sec": min_slide_sec,
         "tail_pad_sec": tail_pad_sec,
+        "intro_white_sec": intro_white_sec,
+        "intro_fade_sec": intro_fade_sec,
+        "intro_color": str(args.intro_color),
+        "outro_hold_sec": outro_hold_sec,
+        "outro_fade_sec": outro_fade_sec,
+        "outro_fade_color": str(args.outro_fade_color),
+        "outro_black_sec": outro_black_sec,
         "total_duration_sec": round(total_duration_sec, 3),
         "segments": timeline_rows,
     }

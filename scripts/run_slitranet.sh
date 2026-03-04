@@ -753,6 +753,13 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
     --out-srt "$VIDEO_EXPORT_DIR.__tmp/final_${VIDEO_LANG_SLUG}.srt" \
     --min-slide-sec "$VIDEO_EXPORT_MIN_SLIDE_SEC" \
     --tail-pad-sec "$VIDEO_EXPORT_TAIL_PAD_SEC" \
+    --intro-white-sec "$VIDEO_EXPORT_INTRO_WHITE_SEC" \
+    --intro-fade-sec "$VIDEO_EXPORT_INTRO_FADE_SEC" \
+    --intro-color "$VIDEO_EXPORT_INTRO_COLOR" \
+    --outro-hold-sec "$VIDEO_EXPORT_OUTRO_HOLD_SEC" \
+    --outro-fade-sec "$VIDEO_EXPORT_OUTRO_FADE_SEC" \
+    --outro-fade-color "$VIDEO_EXPORT_OUTRO_FADE_COLOR" \
+    --outro-black-sec "$VIDEO_EXPORT_OUTRO_BLACK_SEC" \
     --width "$VIDEO_EXPORT_WIDTH" \
     --height "$VIDEO_EXPORT_HEIGHT" \
     --fps "$VIDEO_EXPORT_FPS" \

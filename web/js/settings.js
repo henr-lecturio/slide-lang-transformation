@@ -307,6 +307,13 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.replicateUpscaleConcurrency.value = cfg.REPLICATE_UPSCALE_CONCURRENCY ?? 2;
   el.videoExportMinSlideSec.value = cfg.VIDEO_EXPORT_MIN_SLIDE_SEC ?? 1.2;
   el.videoExportTailPadSec.value = cfg.VIDEO_EXPORT_TAIL_PAD_SEC ?? 0.35;
+  el.videoExportIntroWhiteSec.value = cfg.VIDEO_EXPORT_INTRO_WHITE_SEC ?? 1.0;
+  el.videoExportIntroFadeSec.value = cfg.VIDEO_EXPORT_INTRO_FADE_SEC ?? 0.4;
+  el.videoExportIntroColor.value = cfg.VIDEO_EXPORT_INTRO_COLOR || "white";
+  el.videoExportOutroHoldSec.value = cfg.VIDEO_EXPORT_OUTRO_HOLD_SEC ?? 1.5;
+  el.videoExportOutroFadeSec.value = cfg.VIDEO_EXPORT_OUTRO_FADE_SEC ?? 1.5;
+  el.videoExportOutroFadeColor.value = cfg.VIDEO_EXPORT_OUTRO_FADE_COLOR || "black";
+  el.videoExportOutroBlackSec.value = cfg.VIDEO_EXPORT_OUTRO_BLACK_SEC ?? 2.0;
   el.videoExportWidth.value = cfg.VIDEO_EXPORT_WIDTH ?? 1920;
   el.videoExportHeight.value = cfg.VIDEO_EXPORT_HEIGHT ?? 1080;
   el.videoExportFps.value = cfg.VIDEO_EXPORT_FPS ?? 30;
@@ -398,6 +405,13 @@ export async function saveConfig(options = {}) {
     REPLICATE_UPSCALE_CONCURRENCY: Number(el.replicateUpscaleConcurrency.value),
     VIDEO_EXPORT_MIN_SLIDE_SEC: Number(el.videoExportMinSlideSec.value),
     VIDEO_EXPORT_TAIL_PAD_SEC: Number(el.videoExportTailPadSec.value),
+    VIDEO_EXPORT_INTRO_WHITE_SEC: Number(el.videoExportIntroWhiteSec.value),
+    VIDEO_EXPORT_INTRO_FADE_SEC: Number(el.videoExportIntroFadeSec.value),
+    VIDEO_EXPORT_INTRO_COLOR: el.videoExportIntroColor.value.trim(),
+    VIDEO_EXPORT_OUTRO_HOLD_SEC: Number(el.videoExportOutroHoldSec.value),
+    VIDEO_EXPORT_OUTRO_FADE_SEC: Number(el.videoExportOutroFadeSec.value),
+    VIDEO_EXPORT_OUTRO_FADE_COLOR: el.videoExportOutroFadeColor.value.trim(),
+    VIDEO_EXPORT_OUTRO_BLACK_SEC: Number(el.videoExportOutroBlackSec.value),
     VIDEO_EXPORT_WIDTH: Number(el.videoExportWidth.value),
     VIDEO_EXPORT_HEIGHT: Number(el.videoExportHeight.value),
     VIDEO_EXPORT_FPS: Number(el.videoExportFps.value),
