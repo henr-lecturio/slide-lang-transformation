@@ -258,6 +258,7 @@ def build_master_audio_timeline_rows(
     full_audio_duration: float,
     min_slide_sec: float,
     tail_pad_sec: float,
+    thumbnail_duration_sec: float,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     alignment_rows = sorted_alignment_rows(alignment_by_segment)
@@ -266,12 +267,19 @@ def build_master_audio_timeline_rows(
     for idx, event in enumerate(events, start=1):
         event_id = int(event.get("event_id", 0) or 0)
         bucket_id = str(event.get("bucket_id", "") or "")
-        translated_text = str(event.get("translated_text", "") or "").strip()
-        original_text = str(event.get("text", "") or "").strip()
-        subtitle_text = translated_text or original_text
+        if idx == 1:
+            translated_text = ""
+            original_text = ""
+            subtitle_text = ""
+        else:
+            translated_text = str(event.get("translated_text", "") or "").strip()
+            original_text = str(event.get("text", "") or "").strip()
+            subtitle_text = translated_text or original_text
         image_path = find_image(image_dir, idx, event_id)
 
-        if idx < len(events):
+        if idx == 1:
+            end_sec = current_start + max(0.04, float(thumbnail_duration_sec))
+        elif idx < len(events):
             source_boundary = float(event.get("slide_end", 0.0) or 0.0)
             projected_end = project_source_time_to_tts(source_boundary, alignment_rows, full_audio_duration)
             if projected_end is None:
@@ -289,6 +297,10 @@ def build_master_audio_timeline_rows(
         audio_clip_start = min(current_start, full_audio_duration)
         audio_clip_end = min(end_sec, full_audio_duration)
         audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
+        if idx == 1:
+            audio_clip_start = 0.0
+            audio_clip_end = 0.0
+            audio_clip_duration = 0.0
         clip_duration = max(0.04, end_sec - current_start)
 
         rows.append(
@@ -321,6 +333,7 @@ def build_segmented_timeline_rows(
     full_audio_name: str,
     min_slide_sec: float,
     tail_pad_sec: float,
+    thumbnail_duration_sec: float,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     current_start = 0.0
@@ -328,19 +341,27 @@ def build_segmented_timeline_rows(
     for idx, event in enumerate(events, start=1):
         event_id = int(event.get("event_id", 0) or 0)
         bucket_id = str(event.get("bucket_id", "") or "")
-        translated_text = str(event.get("translated_text", "") or "").strip()
-        original_text = str(event.get("text", "") or "").strip()
-        subtitle_text = translated_text or original_text
+        if idx == 1:
+            translated_text = ""
+            original_text = ""
+            subtitle_text = ""
+        else:
+            translated_text = str(event.get("translated_text", "") or "").strip()
+            original_text = str(event.get("text", "") or "").strip()
+            subtitle_text = translated_text or original_text
         image_path = find_image(image_dir, idx, event_id)
         audio_window = compute_slide_audio_window(event, alignment_by_segment)
         audio_clip_start = 0.0
         audio_clip_end = 0.0
         audio_clip_duration = 0.0
-        if audio_window is not None:
+        if idx != 1 and audio_window is not None:
             audio_clip_start = max(0.0, float(audio_window[0]))
             audio_clip_end = max(audio_clip_start, float(audio_window[1]))
             audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
-        clip_duration = max(min_slide_sec, audio_clip_duration + tail_pad_sec if audio_clip_duration > 0 else min_slide_sec)
+        if idx == 1:
+            clip_duration = max(0.04, float(thumbnail_duration_sec))
+        else:
+            clip_duration = max(min_slide_sec, audio_clip_duration + tail_pad_sec if audio_clip_duration > 0 else min_slide_sec)
         start_sec = current_start
         end_sec = current_start + clip_duration
         current_start = end_sec
@@ -687,6 +708,7 @@ def main() -> int:
     fps = int(args.fps)
     min_slide_sec = max(0.1, float(args.min_slide_sec))
     tail_pad_sec = max(0.0, float(args.tail_pad_sec))
+    thumbnail_duration_sec = 2.0
     intro_white_sec = max(0.0, float(args.intro_white_sec))
     intro_fade_sec = max(0.0, float(args.intro_fade_sec))
     outro_hold_sec = max(0.0, float(args.outro_hold_sec))
@@ -704,6 +726,7 @@ def main() -> int:
                 full_audio_duration,
                 min_slide_sec,
                 tail_pad_sec,
+                thumbnail_duration_sec,
             )
             timeline_rows = apply_intro_outro_timing(
                 base_timeline_rows,
@@ -714,6 +737,14 @@ def main() -> int:
             )
             for row in timeline_rows:
                 row["audio_source_name"] = full_audio_path.name
+            audio_timeline_offset = next(
+                (
+                    float(row.get("video_start_sec", 0.0) or 0.0)
+                    for row in timeline_rows
+                    if float(row.get("audio_clip_duration_sec", 0.0) or 0.0) > 0.0
+                ),
+                0.0,
+            )
             video_only, _segment_count = render_segment_videos(
                 base_timeline_rows,
                 image_dir,
@@ -732,8 +763,8 @@ def main() -> int:
                 "video-export",
             )
             mux_cmd = ["ffmpeg", "-y", "-i", str(video_only)]
-            if intro_white_sec > 0.0:
-                mux_cmd.extend(["-itsoffset", f"{intro_white_sec:.3f}"])
+            if audio_timeline_offset > 0.0:
+                mux_cmd.extend(["-itsoffset", f"{audio_timeline_offset:.3f}"])
             mux_cmd.extend(
                 [
                     "-i",
@@ -763,6 +794,7 @@ def main() -> int:
                 audio_name,
                 min_slide_sec,
                 tail_pad_sec,
+                thumbnail_duration_sec,
             )
             concat_list = tmp_dir / "concat.txt"
             concat_lines: list[str] = []

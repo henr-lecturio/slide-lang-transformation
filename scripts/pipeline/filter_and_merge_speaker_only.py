@@ -972,6 +972,22 @@ def format_source_ids(ids: list[int]) -> str:
     return ";".join(str(x) for x in sorted(set(ids)))
 
 
+def prepend_text_to_row(
+    row: dict,
+    text_parts: list[str],
+    translated_parts: list[str],
+    source_ids: set[int],
+) -> None:
+    prefix_text = " ".join(x for x in text_parts if x).strip()
+    prefix_translated_text = " ".join(x for x in translated_parts if x).strip()
+    if prefix_text:
+        row["text"] = f"{prefix_text} {str(row.get('text', '')).strip()}".strip()
+    if prefix_translated_text:
+        row["translated_text"] = f"{prefix_translated_text} {str(row.get('translated_text', '')).strip()}".strip()
+    row["source_segment_ids"] = sorted(set(parse_source_segment_ids(row.get("source_segment_ids", []))).union(source_ids))
+    row["segments_count"] = len(row["source_segment_ids"])
+
+
 def copy_kept_images(
     kept_rows: list[dict],
     source_info_by_event: dict[int, dict],
@@ -1244,6 +1260,9 @@ def main() -> int:
     leading_no_slide_parts: list[str] = []
     leading_no_slide_translated_parts: list[str] = []
     leading_no_slide_ids: set[int] = set()
+    post_thumbnail_parts: list[str] = []
+    post_thumbnail_translated_parts: list[str] = []
+    post_thumbnail_ids: set[int] = set()
 
     for row in rows:
         event_id = int(row["event_id"])
@@ -1282,22 +1301,30 @@ def main() -> int:
         merge_target = None
         if is_no_slide or is_speaker_only:
             if kept_rows:
-                target = kept_rows[-1]
-                target["slide_end"] = max(float(target["slide_end"]), float(row["slide_end"]))
-                if text:
-                    if target["text"]:
-                        target["text"] = f"{target['text']} {text}".strip()
-                    else:
-                        target["text"] = text
-                if translated_text:
-                    if target.get("translated_text"):
-                        target["translated_text"] = f"{target['translated_text']} {translated_text}".strip()
-                    else:
-                        target["translated_text"] = translated_text
-                target["source_segment_ids"] = sorted(set(target["source_segment_ids"]).union(src_ids))
-                target["segments_count"] = len(target["source_segment_ids"])
-                merge_target = int(target["event_id"])
-                action = "merged_to_previous"
+                if len(kept_rows) == 1:
+                    if text:
+                        post_thumbnail_parts.append(text)
+                    if translated_text:
+                        post_thumbnail_translated_parts.append(translated_text)
+                    post_thumbnail_ids.update(src_ids)
+                    action = "queued_for_next_after_thumbnail"
+                else:
+                    target = kept_rows[-1]
+                    target["slide_end"] = max(float(target["slide_end"]), float(row["slide_end"]))
+                    if text:
+                        if target["text"]:
+                            target["text"] = f"{target['text']} {text}".strip()
+                        else:
+                            target["text"] = text
+                    if translated_text:
+                        if target.get("translated_text"):
+                            target["translated_text"] = f"{target['translated_text']} {translated_text}".strip()
+                        else:
+                            target["translated_text"] = translated_text
+                    target["source_segment_ids"] = sorted(set(target["source_segment_ids"]).union(src_ids))
+                    target["segments_count"] = len(target["source_segment_ids"])
+                    merge_target = int(target["event_id"])
+                    action = "merged_to_previous"
             else:
                 if text:
                     leading_no_slide_parts.append(text)
@@ -1309,6 +1336,11 @@ def main() -> int:
             keep_row = dict(row)
             keep_row["source_segment_ids"] = sorted(src_ids)
             keep_row["segments_count"] = len(keep_row["source_segment_ids"])
+            if kept_rows and len(kept_rows) == 1 and (post_thumbnail_parts or post_thumbnail_ids):
+                prepend_text_to_row(keep_row, post_thumbnail_parts, post_thumbnail_translated_parts, post_thumbnail_ids)
+                post_thumbnail_parts.clear()
+                post_thumbnail_translated_parts.clear()
+                post_thumbnail_ids.clear()
             kept_rows.append(keep_row)
 
         manifest_rows.append(
@@ -1335,6 +1367,19 @@ def main() -> int:
         slide_keyframes_dir,
         mad_threshold=max(0.0, float(args.duplicate_slide_mad_threshold)),
     )
+
+    if kept_rows:
+        thumbnail_row = kept_rows[0]
+        thumbnail_row["text"] = ""
+        thumbnail_row["translated_text"] = ""
+        thumbnail_row["source_segment_ids"] = []
+        thumbnail_row["segments_count"] = 0
+        if len(kept_rows) >= 2 and (leading_no_slide_parts or leading_no_slide_ids):
+            prepend_text_to_row(kept_rows[1], leading_no_slide_parts, leading_no_slide_translated_parts, leading_no_slide_ids)
+            leading_no_slide_parts.clear()
+            leading_no_slide_translated_parts.clear()
+            leading_no_slide_ids.clear()
+
     if duplicate_targets:
         for manifest in manifest_rows:
             event_id = int(manifest["event_id"])
@@ -1360,7 +1405,7 @@ def main() -> int:
     source_info_by_event = {int(row["event_id"]): row for row in source_rows}
 
     final_rows: list[dict] = []
-    if leading_no_slide_parts or leading_no_slide_ids:
+    if (not kept_rows) and (leading_no_slide_parts or leading_no_slide_ids):
         leading_text = " ".join(x for x in leading_no_slide_parts if x).strip()
         leading_translated_text = " ".join(x for x in leading_no_slide_translated_parts if x).strip()
         ids = sorted(leading_no_slide_ids)
