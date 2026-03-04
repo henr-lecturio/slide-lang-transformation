@@ -1187,6 +1187,8 @@ def start_export_lab_job(run_id: str, overrides: dict | None = None) -> tuple[bo
         str(_export_lab_value_float(overrides, "video_export_intro_white_sec", float(env.get("VIDEO_EXPORT_INTRO_WHITE_SEC", "1.0") or "1.0"))),
         "--intro-fade-sec",
         str(_export_lab_value_float(overrides, "video_export_intro_fade_sec", float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4") or "0.4"))),
+        "--thumbnail-duration-sec",
+        str(_export_lab_value_float(overrides, "video_export_thumbnail_duration_sec", float(env.get("VIDEO_EXPORT_THUMBNAIL_DURATION_SEC", "2.0") or "2.0"))),
         "--thumbnail-fade-sec",
         str(_export_lab_value_float(overrides, "video_export_thumbnail_fade_sec", float(env.get("VIDEO_EXPORT_THUMBNAIL_FADE_SEC", "0.3") or "0.3"))),
         "--intro-color",
@@ -2624,6 +2626,7 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(env.get("VIDEO_EXPORT_TAIL_PAD_SEC", "0.35")),
                     "VIDEO_EXPORT_INTRO_WHITE_SEC": float(env.get("VIDEO_EXPORT_INTRO_WHITE_SEC", "1.0")),
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4")),
+                    "VIDEO_EXPORT_THUMBNAIL_DURATION_SEC": float(env.get("VIDEO_EXPORT_THUMBNAIL_DURATION_SEC", "2.0")),
                     "VIDEO_EXPORT_THUMBNAIL_FADE_SEC": float(env.get("VIDEO_EXPORT_THUMBNAIL_FADE_SEC", "0.3")),
                     "VIDEO_EXPORT_INTRO_COLOR": env.get("VIDEO_EXPORT_INTRO_COLOR", "white"),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(env.get("VIDEO_EXPORT_OUTRO_HOLD_SEC", "1.5")),
@@ -2847,6 +2850,7 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(data["VIDEO_EXPORT_TAIL_PAD_SEC"]),
                     "VIDEO_EXPORT_INTRO_WHITE_SEC": float(data["VIDEO_EXPORT_INTRO_WHITE_SEC"]),
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(data["VIDEO_EXPORT_INTRO_FADE_SEC"]),
+                    "VIDEO_EXPORT_THUMBNAIL_DURATION_SEC": float(data["VIDEO_EXPORT_THUMBNAIL_DURATION_SEC"]),
                     "VIDEO_EXPORT_THUMBNAIL_FADE_SEC": float(data["VIDEO_EXPORT_THUMBNAIL_FADE_SEC"]),
                     "VIDEO_EXPORT_INTRO_COLOR": str(data["VIDEO_EXPORT_INTRO_COLOR"]).strip(),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(data["VIDEO_EXPORT_OUTRO_HOLD_SEC"]),
@@ -3008,6 +3012,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("VIDEO_EXPORT_INTRO_WHITE_SEC must be >= 0")
                 if cfg["VIDEO_EXPORT_INTRO_FADE_SEC"] < 0:
                     raise ValueError("VIDEO_EXPORT_INTRO_FADE_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_THUMBNAIL_DURATION_SEC"] <= 0:
+                    raise ValueError("VIDEO_EXPORT_THUMBNAIL_DURATION_SEC must be > 0")
                 if cfg["VIDEO_EXPORT_THUMBNAIL_FADE_SEC"] < 0:
                     raise ValueError("VIDEO_EXPORT_THUMBNAIL_FADE_SEC must be >= 0")
                 if not cfg["VIDEO_EXPORT_INTRO_COLOR"]:

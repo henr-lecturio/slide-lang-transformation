@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tail-pad-sec", type=float, default=0.35, help="Silence tail added after each voiced slide.")
     parser.add_argument("--intro-white-sec", type=float, default=1.0, help="Initial white screen duration before the first slide fades in.")
     parser.add_argument("--intro-fade-sec", type=float, default=0.4, help="Crossfade duration from white intro to the first slide.")
+    parser.add_argument("--thumbnail-duration-sec", type=float, default=2.0, help="Display duration for slide 1 (thumbnail) before slide 2 appears.")
     parser.add_argument("--thumbnail-fade-sec", type=float, default=0.3, help="Crossfade duration between slide 1 (thumbnail) and slide 2.")
     parser.add_argument("--intro-color", default="white", help="Color used for the intro still before the first slide fades in.")
     parser.add_argument("--outro-hold-sec", type=float, default=1.5, help="Hold duration for the last slide after spoken audio ends.")
@@ -743,7 +744,7 @@ def main() -> int:
     fps = int(args.fps)
     min_slide_sec = max(0.1, float(args.min_slide_sec))
     tail_pad_sec = max(0.0, float(args.tail_pad_sec))
-    thumbnail_duration_sec = 2.0
+    thumbnail_duration_sec = max(0.04, float(args.thumbnail_duration_sec))
     intro_white_sec = max(0.0, float(args.intro_white_sec))
     intro_fade_sec = max(0.0, float(args.intro_fade_sec))
     thumbnail_fade_sec = max(0.0, float(args.thumbnail_fade_sec))
@@ -965,6 +966,7 @@ def main() -> int:
         "tail_pad_sec": tail_pad_sec,
         "intro_white_sec": intro_white_sec,
         "intro_fade_sec": intro_fade_sec,
+        "thumbnail_duration_sec": thumbnail_duration_sec,
         "thumbnail_fade_sec": thumbnail_fade_sec,
         "intro_color": str(args.intro_color),
         "outro_hold_sec": outro_hold_sec,

@@ -193,7 +193,6 @@ function renderExportLabRunPickerList({ runTask, renderExportLabSelection }) {
     el.exportLabRunPickerList.appendChild(empty);
     return;
   }
-
   for (const item of items) {
     const btn = document.createElement("button");
     btn.type = "button";
