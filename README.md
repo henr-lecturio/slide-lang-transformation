@@ -130,8 +130,10 @@ Wichtige Blöcke:
   - `RUN_STEP_TTS`
   - `RUN_STEP_VIDEO_EXPORT`
 - Transcript Translate:
-  - `GEMINI_TEXT_TRANSLATE_MODEL`
-  - `config/prompts/gemini_text_translate_prompt.txt`
+  - `GOOGLE_TRANSLATE_PROJECT_ID`
+  - `GOOGLE_TRANSLATE_LOCATION`
+  - `GOOGLE_TRANSLATE_MODEL`
+  - `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`
 - TTS:
   - `GEMINI_TTS_MODEL`
   - `GEMINI_TTS_VOICE`
@@ -213,6 +215,26 @@ gcloud auth application-default set-quota-project <PROJECT_ID>
 
 Hinweis:
 - Der TTS-Health-Check in der Web-UI ist der schnellste Weg, das Setup zu prüfen.
+
+### Google Cloud Translation LLM (`general/translation-llm`)
+
+Wenn `RUN_STEP_TEXT_TRANSLATE=1` genutzt wird, brauchst du:
+
+1. gültige Application Default Credentials:
+
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project <PROJECT_ID>
+```
+
+2. aktivierte APIs im Google-Cloud-Projekt:
+- `translate.googleapis.com`
+
+3. passende Projektkonfiguration:
+- `GOOGLE_TRANSLATE_PROJECT_ID`
+- `GOOGLE_TRANSLATE_LOCATION`
+- `GOOGLE_TRANSLATE_MODEL`
+- optional `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`
 
 ## Translation Memory und Termbase
 

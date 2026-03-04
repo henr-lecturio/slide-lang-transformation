@@ -26,10 +26,13 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.lib.cloud_translate import (
+    ensure_cloud_translate_client,
+    resolve_target_language_codes,
+    translate_texts_llm,
+)
 from scripts.lib.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
-from scripts.lib.cloud_vision import ensure_cloud_vision_client, detect_image_text_bytes
 from scripts.lib.translation_memory import (
-    append_glossary_to_prompt,
     apply_termbase_placeholders,
     load_termbase_entries,
     restore_termbase_placeholders,
@@ -39,7 +42,6 @@ WEB_DIR = ROOT_DIR / "web"
 CONFIG_PATH = ROOT_DIR / "config" / "pipeline.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
-GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
 GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_tts_prompt.txt"
 GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "language" / "gemini_tts_languages.json"
 TRANSLATION_TERMBASE_PATH = ROOT_DIR / "config" / "language" / "translation_termbase.csv"
@@ -75,7 +77,6 @@ STEP_DEFS = [
     ("upscale", "Slide Upscale"),
     ("tts", "TTS"),
     ("tts-alignment", "TTS Alignment"),
-    ("review", "Review"),
     ("video-export", "Video Export"),
 ]
 STEP_LABELS = {step_id: label for step_id, label in STEP_DEFS}
@@ -241,8 +242,6 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     translated_text_csv = run_dir / "slitranet" / "slide_text_map_final_translated.csv"
     tts_audio_dir = run_dir / "slitranet" / "tts" / "audio"
     tts_alignment_csv = run_dir / "slitranet" / "tts" / "segment_alignment.csv"
-    review_dir = run_dir / "slitranet" / "review"
-    reviewed_timeline_csv = review_dir / "reviewed_timeline.csv"
     video_export_dir = run_dir / "slitranet" / "video_export"
     exported_video = latest_file_in_dir(video_export_dir, ".mp4")
 
@@ -253,7 +252,6 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     translated_upscaled_slides_ready = count_files(translated_upscaled_slide_dir) > 0
     translated_text_ready = translated_text_csv.exists() and csv_event_count(translated_text_csv) > 0
     tts_ready = (tts_alignment_csv.exists() and csv_event_count(tts_alignment_csv) > 0) or count_files(tts_audio_dir) > 0
-    review_ready = reviewed_timeline_csv.exists() and csv_event_count(reviewed_timeline_csv) > 0
     video_export_ready = exported_video is not None
 
     highest_available = "none"
@@ -261,9 +259,6 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     if video_export_ready:
         highest_available = "video_export"
         highest_available_label = "video export"
-    elif review_ready:
-        highest_available = "review"
-        highest_available_label = "reviewed timeline"
     elif tts_ready:
         highest_available = "tts"
         highest_available_label = "tts audio"
@@ -291,7 +286,6 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
         "translated_upscaled_slides_ready": translated_upscaled_slides_ready,
         "translated_text_ready": translated_text_ready,
         "tts_ready": tts_ready,
-        "review_ready": review_ready,
         "video_export_ready": video_export_ready,
         "highest_available": highest_available,
         "highest_available_label": highest_available_label,
@@ -755,13 +749,6 @@ def run_detail(run_id: str) -> dict:
     tts_alignment_json = run_dir / "slitranet" / "tts" / "segment_alignment.json"
     tts_alignment_csv = run_dir / "slitranet" / "tts" / "segment_alignment.csv"
     tts_full_audio = run_dir / "slitranet" / "tts" / "audio" / "full_transcript.wav"
-    review_dir = run_dir / "slitranet" / "review"
-    review_slide_ocr_json = review_dir / "slide_ocr.json"
-    review_slide_ocr_csv = review_dir / "slide_ocr.csv"
-    review_slide_voice_alignment_json = review_dir / "slide_voice_alignment.json"
-    review_slide_voice_alignment_csv = review_dir / "slide_voice_alignment.csv"
-    reviewed_timeline_json = review_dir / "reviewed_timeline.json"
-    reviewed_timeline_csv = review_dir / "reviewed_timeline.csv"
     video_export_dir = run_dir / "slitranet" / "video_export"
     video_timeline_json = video_export_dir / "timeline.json"
     video_timeline_csv = video_export_dir / "timeline.csv"
@@ -801,12 +788,6 @@ def run_detail(run_id: str) -> dict:
         "tts_alignment_json_url": f"/api/runs/{run_id}/file/slitranet/tts/segment_alignment.json" if tts_alignment_json.exists() else "",
         "tts_alignment_csv_url": f"/api/runs/{run_id}/file/slitranet/tts/segment_alignment.csv" if tts_alignment_csv.exists() else "",
         "tts_full_audio_url": f"/api/runs/{run_id}/file/slitranet/tts/audio/full_transcript.wav" if tts_full_audio.exists() else "",
-        "review_slide_ocr_json_url": f"/api/runs/{run_id}/file/slitranet/review/slide_ocr.json" if review_slide_ocr_json.exists() else "",
-        "review_slide_ocr_csv_url": f"/api/runs/{run_id}/file/slitranet/review/slide_ocr.csv" if review_slide_ocr_csv.exists() else "",
-        "review_slide_voice_alignment_json_url": f"/api/runs/{run_id}/file/slitranet/review/slide_voice_alignment.json" if review_slide_voice_alignment_json.exists() else "",
-        "review_slide_voice_alignment_csv_url": f"/api/runs/{run_id}/file/slitranet/review/slide_voice_alignment.csv" if review_slide_voice_alignment_csv.exists() else "",
-        "reviewed_timeline_json_url": f"/api/runs/{run_id}/file/slitranet/review/reviewed_timeline.json" if reviewed_timeline_json.exists() else "",
-        "reviewed_timeline_csv_url": f"/api/runs/{run_id}/file/slitranet/review/reviewed_timeline.csv" if reviewed_timeline_csv.exists() else "",
         "video_timeline_json_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.json" if video_timeline_json.exists() else "",
         "video_timeline_csv_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.csv" if video_timeline_csv.exists() else "",
         "exported_video_name": exported_video.name if exported_video else "",
@@ -1103,8 +1084,6 @@ def export_lab_artifacts_for_run(run_id: str) -> dict:
         slide_map_json = run_dir / "slitranet" / "slide_text_map_final.json"
     tts_alignment_json = run_dir / "slitranet" / "tts" / "segment_alignment.json"
     full_audio_path = run_dir / "slitranet" / "tts" / "audio" / "full_transcript.wav"
-    reviewed_timeline_json = run_dir / "slitranet" / "review" / "reviewed_timeline.json"
-
     missing: list[str] = []
     if not slide_map_json.exists():
         missing.append("slide_text_map_final.json")
@@ -1120,7 +1099,6 @@ def export_lab_artifacts_for_run(run_id: str) -> dict:
         "slide_map_json": slide_map_json if slide_map_json.exists() else None,
         "image_dir": image_dir,
         "tts_alignment_json": tts_alignment_json if tts_alignment_json.exists() else None,
-        "reviewed_timeline_json": reviewed_timeline_json if reviewed_timeline_json.exists() else None,
         "full_audio_path": full_audio_path if full_audio_path.exists() else None,
         "export_ready": len(missing) == 0,
         "missing_requirements": missing,
@@ -1195,7 +1173,6 @@ def start_export_lab_job(run_id: str, overrides: dict | None = None) -> tuple[bo
         str(artifacts["image_dir"]),
         "--tts-alignment-json",
         str(artifacts["tts_alignment_json"]),
-        *(["--reviewed-timeline-json", str(artifacts["reviewed_timeline_json"])] if artifacts.get("reviewed_timeline_json") else []),
         "--out-video",
         str(out_video),
         "--out-timeline-json",
@@ -1935,26 +1912,23 @@ def start_run() -> tuple[bool, str]:
     run_step_translate = (env.get("RUN_STEP_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     run_step_text_translate = (env.get("RUN_STEP_TEXT_TRANSLATE", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     run_step_tts = (env.get("RUN_STEP_TTS", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
-    run_step_review = (env.get("RUN_STEP_REVIEW", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
     if (
         (run_step_edit and final_slide_mode == "gemini")
         or (run_step_translate and translation_mode == "gemini")
-        or run_step_text_translate
     ) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
         return False, "GEMINI_API_KEY is not set in the server environment"
     if transcription_provider == "google_chirp_3" and not (env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip():
         return False, "GOOGLE_SPEECH_PROJECT_ID must be set when TRANSCRIPTION_PROVIDER=google_chirp_3"
+    if run_step_text_translate and not (
+        (env.get("GOOGLE_TRANSLATE_PROJECT_ID", "") or env.get("GOOGLE_TTS_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
+    ):
+        return False, "GOOGLE_TRANSLATE_PROJECT_ID must be set when Transcript Translate is enabled"
     if run_step_tts and not (
         (env.get("GOOGLE_TTS_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
     ):
         return False, "GOOGLE_TTS_PROJECT_ID must be set when TTS is enabled"
-    if run_step_review and not (
-        (env.get("GOOGLE_VISION_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
-    ):
-        return False, "GOOGLE_VISION_PROJECT_ID must be set when Review is enabled"
-
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
         if proc is not None and proc.poll() is None:
@@ -2337,41 +2311,52 @@ def run_slide_translate_health_check(payload: dict) -> dict:
 
 
 def run_text_translate_health_check(payload: dict) -> dict:
-    model = str(payload.get("GEMINI_TEXT_TRANSLATE_MODEL", "") or "").strip()
-    prompt = str(payload.get("GEMINI_TEXT_TRANSLATE_PROMPT", "") or "").strip()
+    project_id = str(payload.get("GOOGLE_TRANSLATE_PROJECT_ID", "") or "").strip()
+    location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip()
+    model = str(payload.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip()
+    source_language_code = str(payload.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
     target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
+    if not project_id:
+        raise ValueError("GOOGLE_TRANSLATE_PROJECT_ID must not be empty")
+    if not location:
+        raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
     if not model:
-        raise ValueError("GEMINI_TEXT_TRANSLATE_MODEL must not be empty")
-    if not prompt:
-        raise ValueError("GEMINI_TEXT_TRANSLATE_PROMPT must not be empty")
+        raise ValueError("GOOGLE_TRANSLATE_MODEL must not be empty")
     if not target_language:
         raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
 
     start = time.perf_counter()
     try:
-        client, _types = ensure_gemini_client()
+        client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
+            project_id,
+            location,
+        )
+        target_language_code, _tts_language_code = resolve_target_language_codes(target_language)
         glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
         source_text = "Code of Conduct and Compliance training starts on Monday."
         protected_text, placeholder_map, term_hits = apply_termbase_placeholders(source_text, glossary_entries)
-        response = client.models.generate_content(
+        translated = translate_texts_llm(
+            client,
+            project_id=resolved_project,
+            location=resolved_location,
             model=model,
-            contents=[
-                f"{append_glossary_to_prompt(inject_target_language(prompt, target_language), glossary_entries)}\n\n"
-                f"Source text:\n{json.dumps(protected_text, ensure_ascii=False)}"
-            ],
-            config={"response_mime_type": "application/json"},
+            contents=[protected_text],
+            target_language_code=target_language_code,
+            source_language_code=source_language_code,
         )
-        raw = strip_code_fences(extract_gemini_response_text(response))
-        parsed = json.loads(raw)
-        translated_text = str(parsed.get("translated_text", "") or "").strip()
-        if not translated_text:
-            raise RuntimeError("Gemini translation JSON did not include translated_text.")
+        if len(translated) != 1:
+            raise RuntimeError("Cloud Translation health check returned an unexpected translation count.")
+        translated_text = str(translated[0] or "").strip()
         translated_text = restore_termbase_placeholders(translated_text, placeholder_map)
         latency_ms = int(round((time.perf_counter() - start) * 1000))
         return {
             "ok": True,
+            "project_id_used": resolved_project,
+            "location": resolved_location,
             "model": model,
             "target_language": target_language,
+            "target_language_code": target_language_code,
+            "source_language_code": source_language_code or "-",
             "latency_ms": latency_ms,
             "translated_text": translated_text,
             "glossary_entries": len(glossary_entries),
@@ -2560,46 +2545,6 @@ def run_tts_health_check(payload: dict) -> dict:
         }
 
 
-def run_review_health_check(payload: dict) -> dict:
-    provider = str(payload.get("REVIEW_PROVIDER", "") or "").strip().lower()
-    if provider != "google_cloud_vision":
-        return {
-            "ok": False,
-            "error_type": "NotApplicable",
-            "error_message": "Review API test is only available for REVIEW_PROVIDER=google_cloud_vision.",
-        }
-    project_id = str(payload.get("GOOGLE_VISION_PROJECT_ID", "") or "").strip() or str(payload.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
-    feature = str(payload.get("GOOGLE_VISION_FEATURE", "") or "").strip() or "DOCUMENT_TEXT_DETECTION"
-    start = time.perf_counter()
-    try:
-        client, vision, resolved_project, default_project = ensure_cloud_vision_client(project_id)
-        image = make_health_slide_image()
-        text = detect_image_text_bytes(client, vision, encode_png(image), feature=feature)
-        latency_ms = int(round((time.perf_counter() - start) * 1000))
-        preview = text[:120].replace("\n", " ").strip()
-        return {
-            "ok": True,
-            "project_id_used": resolved_project,
-            "default_project": default_project or "",
-            "feature": feature,
-            "latency_ms": latency_ms,
-            "ocr_chars": len(text),
-            "sample_preview": preview,
-            "message": "Review API reachable.",
-        }
-    except Exception as exc:  # noqa: BLE001
-        latency_ms = int(round((time.perf_counter() - start) * 1000))
-        return {
-            "ok": False,
-            "project_id_used": project_id,
-            "feature": feature,
-            "latency_ms": latency_ms,
-            "error_type": exc.__class__.__name__,
-            "error_message": str(exc),
-            "message": "Review API check failed.",
-        }
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "SceneDetectionUI/0.1"
 
@@ -2649,7 +2594,6 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_UPSCALE": int(env.get("RUN_STEP_UPSCALE", "1")),
                     "RUN_STEP_TEXT_TRANSLATE": int(env.get("RUN_STEP_TEXT_TRANSLATE", "1")),
                     "RUN_STEP_TTS": int(env.get("RUN_STEP_TTS", "1")),
-                    "RUN_STEP_REVIEW": int(env.get("RUN_STEP_REVIEW", "1")),
                     "RUN_STEP_VIDEO_EXPORT": int(env.get("RUN_STEP_VIDEO_EXPORT", "1")),
                     "FINAL_SOURCE_MODE_AUTO": env.get("FINAL_SOURCE_MODE_AUTO", "auto"),
                     "FULLSLIDE_SAMPLE_FRAMES": int(env.get("FULLSLIDE_SAMPLE_FRAMES", "3")),
@@ -2672,8 +2616,13 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
                     "GEMINI_TRANSLATE_MODEL": normalize_image_model(env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL)),
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
-                    "GEMINI_TEXT_TRANSLATE_MODEL": env.get("GEMINI_TEXT_TRANSLATE_MODEL", "gemini-2.5-flash"),
-                    "GEMINI_TEXT_TRANSLATE_PROMPT": read_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "GOOGLE_TRANSLATE_PROJECT_ID": env.get(
+                        "GOOGLE_TRANSLATE_PROJECT_ID",
+                        env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+                    ),
+                    "GOOGLE_TRANSLATE_LOCATION": env.get("GOOGLE_TRANSLATE_LOCATION", "us-central1"),
+                    "GOOGLE_TRANSLATE_MODEL": env.get("GOOGLE_TRANSLATE_MODEL", "general/translation-llm"),
+                    "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": env.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", ""),
                     "TRANSLATION_TERMBASE_CSV": read_text_file(TRANSLATION_TERMBASE_PATH).rstrip("\n"),
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
@@ -2681,12 +2630,6 @@ class Handler(BaseHTTPRequestHandler):
                     "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "de-DE"),
                     "GEMINI_TTS_LANGUAGE_OPTIONS": load_gemini_tts_language_options(),
                     "GEMINI_TTS_PROMPT": read_text_file(GEMINI_TTS_PROMPT_PATH).rstrip("\n"),
-                    "REVIEW_PROVIDER": env.get("REVIEW_PROVIDER", "google_cloud_vision"),
-                    "GOOGLE_VISION_PROJECT_ID": env.get("GOOGLE_VISION_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
-                    "GOOGLE_VISION_FEATURE": env.get("GOOGLE_VISION_FEATURE", "DOCUMENT_TEXT_DETECTION"),
-                    "REVIEW_MIN_MATCH_CONFIDENCE": float(env.get("REVIEW_MIN_MATCH_CONFIDENCE", "0.70")),
-                    "REVIEW_MIN_OCR_CHARS": int(env.get("REVIEW_MIN_OCR_CHARS", "8")),
-                    "REVIEW_MAX_BOUNDARY_ADJUST_SEC": float(env.get("REVIEW_MAX_BOUNDARY_ADJUST_SEC", "2.5")),
                     "FINAL_SLIDE_UPSCALE_MODE": env.get("FINAL_SLIDE_UPSCALE_MODE", "none"),
                     "FINAL_SLIDE_UPSCALE_MODEL": env.get(
                         "FINAL_SLIDE_UPSCALE_MODEL",
@@ -2891,7 +2834,6 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_UPSCALE": int(data["RUN_STEP_UPSCALE"]),
                     "RUN_STEP_TEXT_TRANSLATE": int(data["RUN_STEP_TEXT_TRANSLATE"]),
                     "RUN_STEP_TTS": int(data["RUN_STEP_TTS"]),
-                    "RUN_STEP_REVIEW": int(data["RUN_STEP_REVIEW"]),
                     "RUN_STEP_VIDEO_EXPORT": int(data["RUN_STEP_VIDEO_EXPORT"]),
                     "FINAL_SOURCE_MODE_AUTO": str(data["FINAL_SOURCE_MODE_AUTO"]).strip(),
                     "FULLSLIDE_SAMPLE_FRAMES": int(data["FULLSLIDE_SAMPLE_FRAMES"]),
@@ -2912,17 +2854,14 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TRANSLATION_MODE": str(data["FINAL_SLIDE_TRANSLATION_MODE"]).strip(),
                     "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
                     "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
-                    "GEMINI_TEXT_TRANSLATE_MODEL": str(data["GEMINI_TEXT_TRANSLATE_MODEL"]).strip(),
+                    "GOOGLE_TRANSLATE_PROJECT_ID": str(data["GOOGLE_TRANSLATE_PROJECT_ID"]).strip(),
+                    "GOOGLE_TRANSLATE_LOCATION": str(data["GOOGLE_TRANSLATE_LOCATION"]).strip(),
+                    "GOOGLE_TRANSLATE_MODEL": str(data["GOOGLE_TRANSLATE_MODEL"]).strip(),
+                    "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": str(data["GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE"]).strip(),
                     "GEMINI_TTS_MODEL": str(data["GEMINI_TTS_MODEL"]).strip(),
                     "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
                     "GOOGLE_TTS_PROJECT_ID": str(data["GOOGLE_TTS_PROJECT_ID"]).strip(),
                     "GOOGLE_TTS_LANGUAGE_CODE": str(data["GOOGLE_TTS_LANGUAGE_CODE"]).strip(),
-                    "REVIEW_PROVIDER": str(data["REVIEW_PROVIDER"]).strip(),
-                    "GOOGLE_VISION_PROJECT_ID": str(data["GOOGLE_VISION_PROJECT_ID"]).strip(),
-                    "GOOGLE_VISION_FEATURE": str(data["GOOGLE_VISION_FEATURE"]).strip(),
-                    "REVIEW_MIN_MATCH_CONFIDENCE": float(data["REVIEW_MIN_MATCH_CONFIDENCE"]),
-                    "REVIEW_MIN_OCR_CHARS": int(data["REVIEW_MIN_OCR_CHARS"]),
-                    "REVIEW_MAX_BOUNDARY_ADJUST_SEC": float(data["REVIEW_MAX_BOUNDARY_ADJUST_SEC"]),
                     "FINAL_SLIDE_UPSCALE_MODE": str(data["FINAL_SLIDE_UPSCALE_MODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODEL": str(data["FINAL_SLIDE_UPSCALE_MODEL"]).strip(),
                     "FINAL_SLIDE_UPSCALE_DEVICE": str(data["FINAL_SLIDE_UPSCALE_DEVICE"]).strip(),
@@ -2956,7 +2895,6 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
-                gemini_text_translate_prompt = str(data["GEMINI_TEXT_TRANSLATE_PROMPT"])
                 translation_termbase_csv = str(data["TRANSLATION_TERMBASE_CSV"])
                 gemini_tts_prompt = str(data["GEMINI_TTS_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
@@ -2967,7 +2905,6 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_UPSCALE",
                     "RUN_STEP_TEXT_TRANSLATE",
                     "RUN_STEP_TTS",
-                    "RUN_STEP_REVIEW",
                     "RUN_STEP_VIDEO_EXPORT",
                 ):
                     if cfg[key] not in {0, 1}:
@@ -3043,10 +2980,16 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["GEMINI_TRANSLATE_MODEL"] = validate_image_model(cfg["GEMINI_TRANSLATE_MODEL"], "GEMINI_TRANSLATE_MODEL")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
-                if not cfg["GEMINI_TEXT_TRANSLATE_MODEL"]:
-                    raise ValueError("GEMINI_TEXT_TRANSLATE_MODEL must not be empty")
-                if not gemini_text_translate_prompt.strip():
-                    raise ValueError("GEMINI_TEXT_TRANSLATE_PROMPT must not be empty")
+                if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and not (
+                    cfg["GOOGLE_TRANSLATE_PROJECT_ID"]
+                    or cfg["GOOGLE_TTS_PROJECT_ID"]
+                    or cfg["GOOGLE_SPEECH_PROJECT_ID"]
+                ):
+                    raise ValueError("GOOGLE_TRANSLATE_PROJECT_ID must not be empty when Transcript Translate is enabled")
+                if not cfg["GOOGLE_TRANSLATE_LOCATION"]:
+                    raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
+                if not cfg["GOOGLE_TRANSLATE_MODEL"]:
+                    raise ValueError("GOOGLE_TRANSLATE_MODEL must not be empty")
                 if not translation_termbase_csv.strip():
                     raise ValueError("TRANSLATION_TERMBASE_CSV must not be empty")
                 if not cfg["GEMINI_TTS_MODEL"]:
@@ -3066,20 +3009,6 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE and GOOGLE_TTS_LANGUAGE_CODE must refer to the same Gemini TTS language entry")
                 if not gemini_tts_prompt.strip():
                     raise ValueError("GEMINI_TTS_PROMPT must not be empty")
-                if cfg["REVIEW_PROVIDER"] not in {"google_cloud_vision"}:
-                    raise ValueError("REVIEW_PROVIDER must be google_cloud_vision")
-                if cfg["RUN_STEP_REVIEW"] == 1 and not (
-                    cfg["GOOGLE_VISION_PROJECT_ID"] or cfg["GOOGLE_SPEECH_PROJECT_ID"]
-                ):
-                    raise ValueError("GOOGLE_VISION_PROJECT_ID must not be empty when Review is enabled")
-                if cfg["GOOGLE_VISION_FEATURE"] not in {"DOCUMENT_TEXT_DETECTION", "TEXT_DETECTION"}:
-                    raise ValueError("GOOGLE_VISION_FEATURE must be DOCUMENT_TEXT_DETECTION or TEXT_DETECTION")
-                if not (0.0 <= cfg["REVIEW_MIN_MATCH_CONFIDENCE"] <= 1.0):
-                    raise ValueError("REVIEW_MIN_MATCH_CONFIDENCE must be in [0, 1]")
-                if cfg["REVIEW_MIN_OCR_CHARS"] < 1:
-                    raise ValueError("REVIEW_MIN_OCR_CHARS must be >= 1")
-                if cfg["REVIEW_MAX_BOUNDARY_ADJUST_SEC"] < 0:
-                    raise ValueError("REVIEW_MAX_BOUNDARY_ADJUST_SEC must be >= 0")
                 if cfg["FINAL_SLIDE_UPSCALE_MODE"] not in {
                     "none",
                     "swin2sr",
@@ -3142,7 +3071,6 @@ class Handler(BaseHTTPRequestHandler):
                 write_config_values(CONFIG_PATH, cfg)
                 write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
                 write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
-                write_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH, gemini_text_translate_prompt)
                 write_text_file(TRANSLATION_TERMBASE_PATH, translation_termbase_csv)
                 write_text_file(GEMINI_TTS_PROMPT_PATH, gemini_tts_prompt)
                 return self._send_json(
@@ -3187,10 +3115,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/text-translate/health":
                 data = self._read_json_body()
                 return self._send_json(200, run_text_translate_health_check(data))
-
-            if path == "/api/review/health":
-                data = self._read_json_body()
-                return self._send_json(200, run_review_health_check(data))
 
             if path == "/api/slide-upscale/health":
                 data = self._read_json_body()

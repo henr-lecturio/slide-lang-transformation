@@ -267,7 +267,7 @@
 
 .video-preview-wrap {
   min-height: 180px;
-  max-width: 560px;
+  width: 100%;
   overflow: hidden;
 }
 

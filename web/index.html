@@ -18,6 +18,7 @@
   <body>
     <header class="topbar">
       <div class="topnav-row">
+        <div class="topbar-logo-placeholder" aria-hidden="true">LOGO PLACEHOLDER</div>
         <div class="topnav-main">
           <nav class="topnav" aria-label="Primary">
             <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
@@ -29,7 +30,6 @@
           </nav>
           <button id="save-settings" class="hidden" type="button">Save Settings</button>
         </div>
-        <div class="topbar-logo-placeholder" aria-hidden="true">LOGO PLACEHOLDER</div>
       </div>
     </header>
 
@@ -43,6 +43,52 @@
               <button id="refresh-runs">Refresh Runs</button>
               <button id="pick-video">Select Video</button>
             </div>
+            <section class="quick-settings-panel" aria-label="Quick Settings">
+              <div class="quick-settings-head">Quick Settings</div>
+              <div class="quick-settings-grid">
+                <label class="quick-setting-field" for="home_transcription_provider">
+                  <span>Transcription Provider</span>
+                  <select id="home_transcription_provider">
+                    <option value="whisper">whisper</option>
+                    <option value="google_chirp_3">google_chirp_3</option>
+                  </select>
+                </label>
+                <label class="quick-setting-field" for="home_target_language">
+                  <span>Target Language</span>
+                  <select id="home_target_language"></select>
+                </label>
+                <label class="quick-setting-field" for="home_gemini_text_translate_model">
+                  <span>Transcript Translate Model</span>
+                  <select id="home_gemini_text_translate_model">
+                    <option value="general/translation-llm">general/translation-llm</option>
+                  </select>
+                </label>
+                <label class="quick-setting-field" for="home_final_slide_upscale_mode">
+                  <span>Slide Upscale Mode</span>
+                  <select id="home_final_slide_upscale_mode">
+                    <option value="none">none</option>
+                    <option value="swin2sr">swin2sr</option>
+                    <option value="replicate_nightmare_realesrgan">replicate_nightmare_realesrgan</option>
+                  </select>
+                </label>
+                <label class="quick-setting-field" for="home_gemini_edit_model">
+                  <span>Slide Edit Model</span>
+                  <select id="home_gemini_edit_model">
+                    <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
+                    <option value="gemini-3-pro-image-preview">gemini-3-pro-image-preview</option>
+                    <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+                  </select>
+                </label>
+                <label class="quick-setting-field" for="home_gemini_translate_model">
+                  <span>Slide Translate Model</span>
+                  <select id="home_gemini_translate_model">
+                    <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
+                    <option value="gemini-3-pro-image-preview">gemini-3-pro-image-preview</option>
+                    <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+                  </select>
+                </label>
+              </div>
+            </section>
             <div class="video-preview-wrap">
               <img id="selected-video-thumb" alt="Selected video thumbnail" />
             </div>
@@ -51,13 +97,15 @@
 
           <section class="card home-top-card status-panel-card">
             <div class="status-card-head">
-              <h2>Status</h2>
+              <div class="status-head-copy">
+                <h2>Status</h2>
+                <div id="status-summary" class="muted">status: idle</div>
+              </div>
               <div class="status-actions">
                 <button id="open-status" type="button">Open Terminal</button>
                 <button id="stop-run" type="button" disabled>Stop Run</button>
               </div>
             </div>
-            <div id="status-summary" class="muted">status: idle</div>
             <div id="run-steps" class="step-list" aria-live="polite"></div>
           </section>
         </div>
@@ -404,12 +452,24 @@
               <div id="step-section-body-text-translate" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
-                    <label class="settings-key" for="gemini_text_translate_model">GEMINI_TEXT_TRANSLATE_MODEL</label>
-                    <div class="settings-value"><input id="gemini_text_translate_model" type="text" /></div>
+                    <label class="settings-key" for="google_translate_project_id">GOOGLE_TRANSLATE_PROJECT_ID</label>
+                    <div class="settings-value"><input id="google_translate_project_id" type="text" /></div>
                   </div>
-                  <div class="settings-row settings-row-textarea">
-                    <label class="settings-key" for="gemini_text_translate_prompt">GEMINI_TEXT_TRANSLATE_PROMPT</label>
-                    <div class="settings-value"><textarea id="gemini_text_translate_prompt" rows="10"></textarea></div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_translate_location">GOOGLE_TRANSLATE_LOCATION</label>
+                    <div class="settings-value"><input id="google_translate_location" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_text_translate_model">GOOGLE_TRANSLATE_MODEL</label>
+                    <div class="settings-value">
+                      <select id="gemini_text_translate_model">
+                        <option value="general/translation-llm">general/translation-llm</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_translate_source_language_code">GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE</label>
+                    <div class="settings-value"><input id="google_translate_source_language_code" type="text" placeholder="Optional, e.g. en" /></div>
                   </div>
                   <div class="settings-row termbase-settings-row">
                     <label class="settings-key" for="translation_termbase_csv">TRANSLATION_TERMBASE_CSV</label>
@@ -731,7 +791,11 @@
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="final_slide_upscale_model">FINAL_SLIDE_UPSCALE_MODEL</label>
-                    <div class="settings-value"><input id="final_slide_upscale_model" type="text" /></div>
+                    <div class="settings-value">
+                      <select id="final_slide_upscale_model">
+                        <option value="caidas/swin2SR-classical-sr-x4-64">caidas/swin2SR-classical-sr-x4-64</option>
+                      </select>
+                    </div>
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="final_slide_upscale_device">FINAL_SLIDE_UPSCALE_DEVICE</label>
@@ -850,80 +914,6 @@
                       </div>
                       <div id="tts-health-meta-wrap" class="health-check-meta-wrap" hidden>
                         <div id="tts-health-meta" class="health-check-meta muted"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section class="step-section" data-step-section="review" data-step-input="run_step_review">
-              <div class="step-section-head">
-                <div class="step-section-title-wrap">
-                  <div class="step-section-heading">
-                    <label class="step-switch step-switch-icononly"><input id="run_step_review" type="checkbox" aria-label="Enable Review" /></label>
-                    <h3>Review</h3>
-                    <button type="button" class="step-section-toggle" data-step-toggle="review" aria-expanded="false" aria-controls="step-section-body-review" aria-label="Toggle Review settings">
-                      <span class="step-section-chevron" aria-hidden="true"></span>
-                    </button>
-                  </div>
-                  <div class="step-section-subtitle muted">Uses OCR on translated slides to review timing against the aligned TTS word stream.</div>
-                </div>
-              </div>
-              <div id="step-section-body-review" class="step-section-body">
-                <div class="settings-list">
-                  <div class="settings-row">
-                    <label class="settings-key" for="review_provider">REVIEW_PROVIDER</label>
-                    <div class="settings-value">
-                      <select id="review_provider">
-                        <option value="google_cloud_vision">google_cloud_vision</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="google_vision_project_id">GOOGLE_VISION_PROJECT_ID</label>
-                    <div class="settings-value"><input id="google_vision_project_id" type="text" /></div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="google_vision_feature">GOOGLE_VISION_FEATURE</label>
-                    <div class="settings-value">
-                      <select id="google_vision_feature">
-                        <option value="DOCUMENT_TEXT_DETECTION">DOCUMENT_TEXT_DETECTION</option>
-                        <option value="TEXT_DETECTION">TEXT_DETECTION</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="review_min_match_confidence">REVIEW_MIN_MATCH_CONFIDENCE</label>
-                    <div class="settings-value"><input id="review_min_match_confidence" type="number" min="0" max="1" step="0.01" /></div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="review_min_ocr_chars">REVIEW_MIN_OCR_CHARS</label>
-                    <div class="settings-value"><input id="review_min_ocr_chars" type="number" min="1" step="1" /></div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="review_max_boundary_adjust_sec">REVIEW_MAX_BOUNDARY_ADJUST_SEC</label>
-                    <div class="settings-value"><input id="review_max_boundary_adjust_sec" type="number" min="0" step="0.1" /></div>
-                  </div>
-                  <div class="settings-row settings-row-inline">
-                    <div class="settings-key">Review API Test</div>
-                    <div class="settings-value">
-                      <div class="settings-inline-actions">
-                        <button id="review-health-check" type="button">Test Review API</button>
-                        <span id="review-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
-                        <button
-                          id="review-health-meta-toggle"
-                          class="health-meta-toggle"
-                          type="button"
-                          aria-expanded="false"
-                          aria-controls="review-health-meta-wrap"
-                          disabled
-                        >
-                          <span class="step-section-chevron" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                      <div id="review-health-meta-wrap" class="health-check-meta-wrap" hidden>
-                        <div id="review-health-meta" class="health-check-meta muted"></div>
                       </div>
                     </div>
                   </div>

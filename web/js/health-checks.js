@@ -39,13 +39,6 @@ const healthUi = {
     wrap: () => el.slideUpscaleHealthMetaWrap,
     meta: () => el.slideUpscaleHealthMeta,
   },
-  review: {
-    button: () => el.reviewHealthCheck,
-    status: () => el.reviewHealthStatus,
-    toggle: () => el.reviewHealthMetaToggle,
-    wrap: () => el.reviewHealthMetaWrap,
-    meta: () => el.reviewHealthMeta,
-  },
   tts: {
     button: () => el.ttsHealthCheck,
     status: () => el.ttsHealthStatus,
@@ -144,9 +137,11 @@ function collectSlideTranslateHealthPayload() {
 
 function collectTextTranslateHealthPayload() {
   return {
+    GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim(),
+    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
+    GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
-    GEMINI_TEXT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
-    GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
   };
 }
 
@@ -160,15 +155,6 @@ function collectSlideUpscaleHealthPayload() {
     REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF: el.replicateNightmareRealesrganModelRef.value.trim(),
     REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID: el.replicateNightmareRealesrganVersionId.value.trim(),
     REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND: Number(el.replicateNightmareRealesrganPricePerSecond.value),
-  };
-}
-
-function collectReviewHealthPayload() {
-  return {
-    REVIEW_PROVIDER: el.reviewProvider.value,
-    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
-    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
-    GOOGLE_VISION_FEATURE: el.googleVisionFeature.value,
   };
 }
 
@@ -243,8 +229,10 @@ export async function testTextTranslateHealth() {
     const translated = String(result.translated_text || "").trim();
     const preview = translated.length > 90 ? `${translated.slice(0, 87)}...` : translated;
     const meta = [
-      `target=${result.target_language || "-"}`,
+      `project=${result.project_id_used || "-"}`,
+      `location=${result.location || "-"}`,
       `model=${result.model || "-"}`,
+      `target=${result.target_language_code || result.target_language || "-"}`,
       result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
       result.termbase_hits != null ? `termbase_hits=${result.termbase_hits}` : "",
       `${result.latency_ms || 0} ms`,
@@ -283,28 +271,6 @@ export async function testSlideUpscaleHealth() {
     .filter(Boolean)
     .join(" | ");
   setHealthStatus("slideUpscale", "error", "Failed", meta);
-}
-
-export async function testReviewHealth() {
-  setHealthStatus("review", "pending", "Testing...", "");
-  const result = await apiPost("/api/review/health", collectReviewHealthPayload());
-  if (result.ok) {
-    const meta = [
-      `project=${result.project_id_used || "-"}`,
-      `feature=${result.feature || "-"}`,
-      `${result.latency_ms || 0} ms`,
-      `ocr_chars=${result.ocr_chars || 0}`,
-      result.sample_preview ? `sample=\"${result.sample_preview}\"` : "",
-    ].filter(Boolean).join(" | ");
-    setHealthStatus("review", "ok", "Reachable", meta);
-    showButtonSuccess(el.reviewHealthCheck, "OK");
-    return;
-  }
-  const meta = [
-    result.error_type || "Error",
-    result.error_message || result.message || "Review API check failed.",
-  ].filter(Boolean).join(" | ");
-  setHealthStatus("review", "error", "Failed", meta);
 }
 
 export async function testTtsHealth() {

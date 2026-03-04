@@ -3,7 +3,12 @@ import { state } from "./state.js";
 import { apiGet, apiPost } from "./api.js";
 import { videoThumbUrl } from "./ui-core.js";
 import { clearHealthStatus, setHealthStatus } from "./health-checks.js";
-import { getSelectedTtsLanguageOption, renderTtsLanguageOptions, updateTtsLanguageHint } from "./tts-language.js";
+import {
+  getSelectedTtsLanguageOption,
+  listTtsLanguageOptions,
+  renderTtsLanguageOptions,
+  updateTtsLanguageHint,
+} from "./tts-language.js";
 
 const TERMBASE_COLUMNS = [
   { key: "source_text", label: "Source Text" },
@@ -241,13 +246,38 @@ export function renderSelectedVideo(syncActionState = () => {}) {
   syncActionState();
 }
 
+function renderHomeQuickLanguageOptions(preferredCode = "", preferredLabel = "") {
+  if (!el.homeTargetLanguage) return;
+  const previousCode = String(preferredCode || el.homeTargetLanguage.value || "").trim();
+  const previousLabel = String(preferredLabel || "").trim();
+  el.homeTargetLanguage.innerHTML = "";
+  const options = listTtsLanguageOptions();
+  if (options.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No languages";
+    el.homeTargetLanguage.appendChild(option);
+    el.homeTargetLanguage.value = "";
+    return;
+  }
+  for (const item of options) {
+    const option = document.createElement("option");
+    option.value = item.tts_language_code;
+    option.textContent = item.label || item.tts_language_code;
+    el.homeTargetLanguage.appendChild(option);
+  }
+  const preferred = options.find((item) => item.tts_language_code === previousCode)
+    || options.find((item) => item.label === previousLabel)
+    || options[0];
+  el.homeTargetLanguage.value = preferred.tts_language_code;
+}
+
 export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   state.selectedVideoPath = cfg.VIDEO_PATH || "";
   el.roiX0.value = cfg.ROI_X0;
   el.roiY0.value = cfg.ROI_Y0;
   el.roiX1.value = cfg.ROI_X1;
   el.roiY1.value = cfg.ROI_Y1;
-  el.runStepReview.checked = Boolean(cfg.RUN_STEP_REVIEW);
   el.runStepEdit.checked = Boolean(cfg.RUN_STEP_EDIT);
   el.runStepTranslate.checked = Boolean(cfg.RUN_STEP_TRANSLATE);
   el.runStepUpscale.checked = Boolean(cfg.RUN_STEP_UPSCALE);
@@ -256,6 +286,9 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.runStepVideoExport.checked = Boolean(cfg.RUN_STEP_VIDEO_EXPORT);
   el.finalSourceModeAuto.value = cfg.FINAL_SOURCE_MODE_AUTO || "auto";
   el.transcriptionProvider.value = cfg.TRANSCRIPTION_PROVIDER || "whisper";
+  if (el.homeTranscriptionProvider) {
+    el.homeTranscriptionProvider.value = cfg.TRANSCRIPTION_PROVIDER || "whisper";
+  }
   el.whisperModel.value = cfg.WHISPER_MODEL || "medium";
   el.whisperDevice.value = cfg.WHISPER_DEVICE || "cuda";
   el.whisperComputeType.value = cfg.WHISPER_COMPUTE_TYPE || "float16";
@@ -288,21 +321,18 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
     el.finalSlideTargetLanguageSearch.value = "";
   }
   renderTtsLanguageOptions("", cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
+  renderHomeQuickLanguageOptions(cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
-  el.geminiTextTranslateModel.value = cfg.GEMINI_TEXT_TRANSLATE_MODEL || "gemini-2.5-flash";
-  el.geminiTextTranslatePrompt.value = cfg.GEMINI_TEXT_TRANSLATE_PROMPT || "";
+  el.googleTranslateProjectId.value = cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.googleTranslateLocation.value = cfg.GOOGLE_TRANSLATE_LOCATION || "us-central1";
+  el.geminiTextTranslateModel.value = cfg.GOOGLE_TRANSLATE_MODEL || "general/translation-llm";
+  el.googleTranslateSourceLanguageCode.value = cfg.GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE || "";
   renderTermbaseEditor(cfg.TRANSLATION_TERMBASE_CSV || "");
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
   el.googleTtsProjectId.value = cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
-  el.reviewProvider.value = cfg.REVIEW_PROVIDER || "google_cloud_vision";
-  el.googleVisionProjectId.value = cfg.GOOGLE_VISION_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
-  el.googleVisionFeature.value = cfg.GOOGLE_VISION_FEATURE || "DOCUMENT_TEXT_DETECTION";
-  el.reviewMinMatchConfidence.value = cfg.REVIEW_MIN_MATCH_CONFIDENCE ?? 0.7;
-  el.reviewMinOcrChars.value = cfg.REVIEW_MIN_OCR_CHARS ?? 8;
-  el.reviewMaxBoundaryAdjustSec.value = cfg.REVIEW_MAX_BOUNDARY_ADJUST_SEC ?? 2.5;
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
   el.finalSlideUpscaleDevice.value = cfg.FINAL_SLIDE_UPSCALE_DEVICE || "auto";
@@ -327,13 +357,24 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.videoExportHeight.value = cfg.VIDEO_EXPORT_HEIGHT ?? 1080;
   el.videoExportFps.value = cfg.VIDEO_EXPORT_FPS ?? 30;
   el.videoExportBgColor.value = cfg.VIDEO_EXPORT_BG_COLOR || "white";
+  if (el.homeGeminiTextTranslateModel) {
+    el.homeGeminiTextTranslateModel.value = cfg.GOOGLE_TRANSLATE_MODEL || "general/translation-llm";
+  }
+  if (el.homeFinalSlideUpscaleMode) {
+    el.homeFinalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
+  }
+  if (el.homeGeminiEditModel) {
+    el.homeGeminiEditModel.value = cfg.GEMINI_EDIT_MODEL || "gemini-3-pro-image-preview";
+  }
+  if (el.homeGeminiTranslateModel) {
+    el.homeGeminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
+  }
   clearHealthStatus("transcription");
   clearHealthStatus("slideEdit");
   clearHealthStatus("slideTranslate");
   clearHealthStatus("slideUpscale");
   clearHealthStatus("textTranslate");
   clearHealthStatus("tts");
-  clearHealthStatus("review");
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   el.configMeta.textContent = `VIDEO_PATH: ${videoLabel}`;
   syncSettingsFieldState();
@@ -355,7 +396,6 @@ export async function saveConfig(options = {}) {
     ROI_Y0: Number(el.roiY0.value),
     ROI_X1: Number(el.roiX1.value),
     ROI_Y1: Number(el.roiY1.value),
-    RUN_STEP_REVIEW: el.runStepReview.checked ? 1 : 0,
     RUN_STEP_EDIT: el.runStepEdit.checked ? 1 : 0,
     RUN_STEP_TRANSLATE: el.runStepTranslate.checked ? 1 : 0,
     RUN_STEP_UPSCALE: el.runStepUpscale.checked ? 1 : 0,
@@ -394,8 +434,10 @@ export async function saveConfig(options = {}) {
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
-    GEMINI_TEXT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
-    GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
+    GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim(),
+    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
+    GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
     TRANSLATION_TERMBASE_CSV: (() => {
       syncTermbaseCsvFromTable();
       return el.translationTermbaseCsv.value;
@@ -405,12 +447,6 @@ export async function saveConfig(options = {}) {
     GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
     GOOGLE_TTS_LANGUAGE_CODE: (getSelectedTtsLanguageOption()?.tts_language_code || "").trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
-    REVIEW_PROVIDER: el.reviewProvider.value,
-    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
-    GOOGLE_VISION_FEATURE: el.googleVisionFeature.value,
-    REVIEW_MIN_MATCH_CONFIDENCE: Number(el.reviewMinMatchConfidence.value),
-    REVIEW_MIN_OCR_CHARS: Number(el.reviewMinOcrChars.value),
-    REVIEW_MAX_BOUNDARY_ADJUST_SEC: Number(el.reviewMaxBoundaryAdjustSec.value),
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
     FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
     FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
@@ -442,7 +478,6 @@ export async function saveConfig(options = {}) {
 
 
 export function syncSettingsFieldState() {
-  const reviewEnabled = el.runStepReview.checked;
   const editEnabled = el.runStepEdit.checked;
   const translateEnabled = el.runStepTranslate.checked;
   const upscaleEnabled = el.runStepUpscale.checked;
@@ -513,8 +548,10 @@ export function syncSettingsFieldState() {
     clearHealthStatus("slideTranslate");
   }
 
+  el.googleTranslateProjectId.disabled = !textTranslateEnabled;
+  el.googleTranslateLocation.disabled = !textTranslateEnabled;
   el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
-  el.geminiTextTranslatePrompt.disabled = !textTranslateEnabled;
+  el.googleTranslateSourceLanguageCode.disabled = !textTranslateEnabled;
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.disabled = !textTranslateEnabled;
   }
@@ -538,20 +575,6 @@ export function syncSettingsFieldState() {
     clearHealthStatus("tts");
   }
 
-  el.reviewProvider.disabled = !reviewEnabled;
-  el.googleVisionProjectId.disabled = !reviewEnabled;
-  el.googleVisionFeature.disabled = !reviewEnabled;
-  el.reviewMinMatchConfidence.disabled = !reviewEnabled;
-  el.reviewMinOcrChars.disabled = !reviewEnabled;
-  el.reviewMaxBoundaryAdjustSec.disabled = !reviewEnabled;
-  if (el.reviewHealthCheck) {
-    el.reviewHealthCheck.disabled = !reviewEnabled;
-  }
-  if (!reviewEnabled) {
-    setHealthStatus("review", "idle", "Step disabled.", "");
-  } else if (el.reviewHealthStatus?.textContent === "Step disabled.") {
-    clearHealthStatus("review");
-  }
   updateTtsLanguageHint();
 
   el.finalSlideUpscaleMode.disabled = !upscaleEnabled;

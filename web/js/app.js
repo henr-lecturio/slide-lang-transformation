@@ -3,7 +3,6 @@ import { state } from "./state.js";
 import { formatRunIdLabel, getInitialActiveTab, setActiveTab, showButtonSuccess, syncSettingsKeyTooltips } from "./ui-core.js";
 import {
   clearHealthStatus,
-  testReviewHealth,
   testSlideEditHealth,
   testSlideTranslateHealth,
   testSlideUpscaleHealth,
@@ -161,6 +160,42 @@ function bindEvents() {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   }
 
+  async function applyHomeQuickSettings() {
+    if (el.homeTranscriptionProvider && el.transcriptionProvider) {
+      el.transcriptionProvider.value = el.homeTranscriptionProvider.value;
+    }
+    if (el.homeTargetLanguage && el.finalSlideTargetLanguage) {
+      el.finalSlideTargetLanguage.value = el.homeTargetLanguage.value;
+      syncSelectedTtsLanguage();
+    }
+    if (el.homeGeminiTextTranslateModel && el.geminiTextTranslateModel) {
+      el.geminiTextTranslateModel.value = el.homeGeminiTextTranslateModel.value;
+    }
+    if (el.homeFinalSlideUpscaleMode && el.finalSlideUpscaleMode) {
+      el.finalSlideUpscaleMode.value = el.homeFinalSlideUpscaleMode.value;
+    }
+    if (el.homeGeminiEditModel && el.geminiEditModel) {
+      el.geminiEditModel.value = el.homeGeminiEditModel.value;
+    }
+    if (el.homeGeminiTranslateModel && el.geminiTranslateModel) {
+      el.geminiTranslateModel.value = el.homeGeminiTranslateModel.value;
+    }
+    syncSettingsFieldState();
+    await saveConfig({ syncActionState });
+  }
+
+  [
+    el.homeTranscriptionProvider,
+    el.homeTargetLanguage,
+    el.homeGeminiTextTranslateModel,
+    el.homeFinalSlideUpscaleMode,
+    el.homeGeminiEditModel,
+    el.homeGeminiTranslateModel,
+  ].forEach((input) => {
+    if (!input) return;
+    input.addEventListener("change", () => runTask(applyHomeQuickSettings));
+  });
+
   el.saveRoi.addEventListener("click", () => runTask(async () => {
     await saveConfig({ syncActionState });
     showButtonSuccess(el.saveRoi, "Saved");
@@ -190,9 +225,6 @@ function bindEvents() {
   if (el.slideUpscaleHealthCheck) {
     el.slideUpscaleHealthCheck.addEventListener("click", () => runTask(testSlideUpscaleHealth));
   }
-  if (el.reviewHealthCheck) {
-    el.reviewHealthCheck.addEventListener("click", () => runTask(testReviewHealth));
-  }
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.addEventListener("click", () => runTask(testTextTranslateHealth));
   }
@@ -201,7 +233,6 @@ function bindEvents() {
     ["slideEdit", el.slideEditHealthMetaToggle],
     ["slideTranslate", el.slideTranslateHealthMetaToggle],
     ["slideUpscale", el.slideUpscaleHealthMetaToggle],
-    ["review", el.reviewHealthMetaToggle],
     ["textTranslate", el.textTranslateHealthMetaToggle],
     ["tts", el.ttsHealthMetaToggle],
   ].forEach(([key, button]) => {
@@ -382,7 +413,9 @@ function bindEvents() {
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
     el.geminiTextTranslateModel,
-    el.geminiTextTranslatePrompt,
+    el.googleTranslateProjectId,
+    el.googleTranslateLocation,
+    el.googleTranslateSourceLanguageCode,
   ]) {
     input.addEventListener("input", () => clearHealthStatus("textTranslate"));
     input.addEventListener("change", () => clearHealthStatus("textTranslate"));

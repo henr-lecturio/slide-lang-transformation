@@ -5,9 +5,11 @@ import argparse
 import bisect
 import csv
 import json
+import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slide-map-json", required=True, help="Input slide text map JSON (translated or original).")
     parser.add_argument("--image-dir", required=True, help="Directory with final slide images to render.")
     parser.add_argument("--tts-alignment-json", default="", help="Optional TTS segment alignment JSON path.")
-    parser.add_argument("--reviewed-timeline-json", default="", help="Optional reviewed timeline JSON path from Review step.")
     parser.add_argument("--out-video", required=True, help="Output MP4 path.")
     parser.add_argument("--out-timeline-json", required=True, help="Output timeline JSON path.")
     parser.add_argument("--out-timeline-csv", required=True, help="Output timeline CSV path.")
@@ -54,38 +55,21 @@ def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_reviewed_timeline(path: Path | None) -> dict[int, dict[str, Any]]:
+def load_alignment(path: Path | None) -> tuple[dict[int, dict[str, Any]], Path | None, list[dict[str, Any]], list[float]]:
     if path is None or not path.exists():
-        return {}
-    payload = load_json(path)
-    items = payload.get("slides") if isinstance(payload, dict) else None
-    if not isinstance(items, list):
-        return {}
-    out: dict[int, dict[str, Any]] = {}
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        slide_index = int(item.get("slide_index", 0) or 0)
-        if slide_index <= 0:
-            continue
-        out[slide_index] = item
-    return out
-
-
-def load_alignment(path: Path | None) -> tuple[dict[int, dict[str, Any]], Path | None, list[float]]:
-    if path is None or not path.exists():
-        return {}, None, []
+        return {}, None, [], []
     payload = load_json(path)
     items = payload.get("segments") if isinstance(payload, dict) else None
     if not isinstance(items, list):
-        return {}, None, []
+        return {}, None, [], []
     full_audio_path = Path(str(payload.get("full_audio_path", "") or "")).resolve() if str(payload.get("full_audio_path", "") or "").strip() else None
     if full_audio_path is not None and not full_audio_path.exists():
         full_audio_path = None
-    words = payload.get("words") if isinstance(payload, dict) else None
+    raw_words = payload.get("words") if isinstance(payload, dict) else None
+    words: list[dict[str, Any]] = []
     word_boundaries: list[float] = []
-    if isinstance(words, list):
-        for word in words:
+    if isinstance(raw_words, list):
+        for idx, word in enumerate(raw_words):
             if not isinstance(word, dict):
                 continue
             try:
@@ -95,6 +79,18 @@ def load_alignment(path: Path | None) -> tuple[dict[int, dict[str, Any]], Path |
                 continue
             if end_sec < start_sec:
                 end_sec = start_sec
+            normalized = str(word.get("normalized", "") or "").strip()
+            if not normalized:
+                normalized = normalize_token(str(word.get("text", "") or ""))
+            words.append(
+                {
+                    "_idx": idx,
+                    "text": str(word.get("text", "") or ""),
+                    "normalized": normalized,
+                    "start_sec": round(start_sec, 3),
+                    "end_sec": round(end_sec, 3),
+                }
+            )
             word_boundaries.append(round(start_sec, 3))
             word_boundaries.append(round(end_sec, 3))
     word_boundaries = sorted(set(word_boundaries))
@@ -106,7 +102,25 @@ def load_alignment(path: Path | None) -> tuple[dict[int, dict[str, Any]], Path |
         if segment_id <= 0:
             continue
         out[segment_id] = item
-    return out, full_audio_path, word_boundaries
+    return out, full_audio_path, words, word_boundaries
+
+
+TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def normalize_token(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).lower()
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"_+", "", text).strip()
+
+
+def text_to_tokens(value: str) -> list[str]:
+    out: list[str] = []
+    for token in TOKEN_RE.findall(str(value or "")):
+        norm = normalize_token(token)
+        if norm:
+            out.append(norm)
+    return out
 
 
 def seconds_to_srt(value: float) -> str:
@@ -207,6 +221,119 @@ def compute_slide_audio_window(
     if not windows:
         return None
     return min(start for start, _ in windows), max(end for _, end in windows)
+
+
+def build_segment_word_candidates(
+    event: dict[str, Any],
+    alignment_by_segment: dict[int, dict[str, Any]],
+    words: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    segment_rows: list[dict[str, Any]] = []
+    for segment_id in event.get("source_segment_ids", []) or []:
+        row = alignment_by_segment.get(int(segment_id))
+        if row:
+            segment_rows.append(row)
+    if not segment_rows:
+        return []
+    tts_start = min(float(row.get("tts_start_sec", 0.0) or 0.0) for row in segment_rows)
+    tts_end = max(float(row.get("tts_end_sec", tts_start) or tts_start) for row in segment_rows)
+    pad = 0.25
+    return [
+        word
+        for word in words
+        if float(word.get("end_sec", 0.0) or 0.0) >= tts_start - pad
+        and float(word.get("start_sec", 0.0) or 0.0) <= tts_end + pad
+    ]
+
+
+def exact_phrase_match(
+    candidates: list[dict[str, Any]],
+    target_tokens: list[str],
+    min_global_idx: int,
+) -> tuple[int, int] | None:
+    target_len = len(target_tokens)
+    if not target_len or len(candidates) < target_len:
+        return None
+    normalized = [str(item.get("normalized", "") or "") for item in candidates]
+    for start_idx in range(0, len(candidates) - target_len + 1):
+        if int(candidates[start_idx].get("_idx", -1)) < min_global_idx:
+            continue
+        if normalized[start_idx : start_idx + target_len] == target_tokens:
+            return start_idx, start_idx + target_len - 1
+    return None
+
+
+def fuzzy_phrase_match(
+    candidates: list[dict[str, Any]],
+    target_tokens: list[str],
+    min_global_idx: int,
+) -> tuple[int, int] | None:
+    from difflib import SequenceMatcher
+
+    target = " ".join(target_tokens).strip()
+    if not target:
+        return None
+    best: tuple[float, int, int] | None = None
+    max_window = max(2, len(target_tokens) + 4)
+    normalized = [str(item.get("normalized", "") or "") for item in candidates]
+    for start_idx in range(len(candidates)):
+        if int(candidates[start_idx].get("_idx", -1)) < min_global_idx:
+            continue
+        max_end = min(len(candidates), start_idx + max_window)
+        for end_idx in range(start_idx + 1, max_end + 1):
+            candidate_text = " ".join(normalized[start_idx:end_idx]).strip()
+            if not candidate_text:
+                continue
+            score = SequenceMatcher(None, candidate_text, target).ratio()
+            if best is None or score > best[0]:
+                best = (score, start_idx, end_idx - 1)
+    if best is None or best[0] < 0.78:
+        return None
+    return best[1], best[2]
+
+
+def build_slide_phrase_matches(
+    events: list[dict[str, Any]],
+    alignment_by_segment: dict[int, dict[str, Any]],
+    words: list[dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    matches: dict[int, dict[str, Any]] = {}
+    min_global_idx = 0
+    for slide_index, event in enumerate(events, start=1):
+        if slide_index == 1:
+            matches[slide_index] = {"matched": False}
+            continue
+        phrase_text = str(event.get("translated_text", "") or "").strip() or str(event.get("text", "") or "").strip()
+        target_tokens = text_to_tokens(phrase_text)
+        if not target_tokens:
+            matches[slide_index] = {"matched": False}
+            continue
+        candidates = build_segment_word_candidates(event, alignment_by_segment, words)
+        if not candidates:
+            matches[slide_index] = {"matched": False}
+            continue
+        match = exact_phrase_match(candidates, target_tokens, min_global_idx)
+        match_mode = "exact"
+        if match is None:
+            match = fuzzy_phrase_match(candidates, target_tokens, min_global_idx)
+            match_mode = "fuzzy"
+        if match is None:
+            matches[slide_index] = {"matched": False}
+            continue
+        start_idx, end_idx = match
+        start_word = candidates[start_idx]
+        end_word = candidates[end_idx]
+        min_global_idx = int(end_word.get("_idx", min_global_idx)) + 1
+        matches[slide_index] = {
+            "matched": True,
+            "match_mode": match_mode,
+            "start_sec": float(start_word.get("start_sec", 0.0) or 0.0),
+            "end_sec": float(end_word.get("end_sec", start_word.get("start_sec", 0.0)) or 0.0),
+            "start_word_index": int(start_word.get("_idx", 0)),
+            "end_word_index": int(end_word.get("_idx", 0)),
+            "tokens_count": len(target_tokens),
+        }
+    return matches
 
 
 def sorted_alignment_rows(alignment_by_segment: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -322,6 +449,7 @@ def build_master_audio_timeline_rows(
     events: list[dict[str, Any]],
     image_dir: Path,
     alignment_by_segment: dict[int, dict[str, Any]],
+    words: list[dict[str, Any]],
     word_boundaries: list[float],
     full_audio_duration: float,
     min_slide_sec: float,
@@ -330,6 +458,7 @@ def build_master_audio_timeline_rows(
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     alignment_rows = sorted_alignment_rows(alignment_by_segment)
+    phrase_matches = build_slide_phrase_matches(events, alignment_by_segment, words)
     current_start = 0.0
 
     for idx, event in enumerate(events, start=1):
@@ -348,107 +477,54 @@ def build_master_audio_timeline_rows(
         if idx == 1:
             end_sec = current_start + max(0.04, float(thumbnail_duration_sec))
         elif idx < len(events):
-            source_boundary = float(event.get("slide_end", 0.0) or 0.0)
-            projected_end = project_source_time_to_tts(source_boundary, alignment_rows, full_audio_duration, word_boundaries)
-            if projected_end is None:
-                audio_window = compute_slide_audio_window(event, alignment_by_segment)
-                projected_end = audio_window[1] if audio_window is not None else current_start + min_slide_sec
-            end_sec = max(current_start + 0.04, float(projected_end))
+            current_match = phrase_matches.get(idx, {})
+            next_match = phrase_matches.get(idx + 1, {})
+            next_start = float(next_match.get("start_sec", 0.0) or 0.0) if next_match.get("matched") else None
+            if next_start is not None:
+                end_sec = max(current_start + 0.04, next_start)
+            elif current_match.get("matched"):
+                end_sec = max(current_start + min_slide_sec, float(current_match.get("end_sec", current_start) or current_start) + tail_pad_sec)
+            else:
+                source_boundary = float(event.get("slide_end", 0.0) or 0.0)
+                projected_end = project_source_time_to_tts(source_boundary, alignment_rows, full_audio_duration, word_boundaries)
+                if projected_end is None:
+                    audio_window = compute_slide_audio_window(event, alignment_by_segment)
+                    projected_end = audio_window[1] if audio_window is not None else current_start + min_slide_sec
+                end_sec = max(current_start + min_slide_sec, float(projected_end))
         else:
+            current_match = phrase_matches.get(idx, {})
+            end_candidates = [current_start + min_slide_sec, full_audio_duration + tail_pad_sec]
+            if current_match.get("matched"):
+                end_candidates.append(float(current_match.get("end_sec", current_start) or current_start) + tail_pad_sec)
             source_boundary = float(event.get("slide_end", event.get("slide_start", 0.0)) or 0.0)
             projected_end = project_source_time_to_tts(source_boundary, alignment_rows, full_audio_duration, word_boundaries)
-            end_candidates = [current_start + min_slide_sec, full_audio_duration + tail_pad_sec]
             if projected_end is not None:
                 end_candidates.append(float(projected_end))
             end_sec = max(end_candidates)
 
-        audio_clip_start = min(current_start, full_audio_duration)
-        audio_clip_end = min(end_sec, full_audio_duration)
-        audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
+        current_match = phrase_matches.get(idx, {})
         if idx == 1:
             audio_clip_start = 0.0
             audio_clip_end = 0.0
             audio_clip_duration = 0.0
-        clip_duration = max(0.04, end_sec - current_start)
-
-        rows.append(
-            {
-                "slide_index": idx,
-                "event_id": event_id,
-                "bucket_id": bucket_id,
-                "video_start_sec": round(current_start, 3),
-                "video_end_sec": round(end_sec, 3),
-                "duration_sec": round(clip_duration, 3),
-                "image_name": image_path.name,
-                "audio_source_name": "",
-                "audio_clip_start_sec": round(audio_clip_start, 3),
-                "audio_clip_end_sec": round(audio_clip_end, 3),
-                "audio_clip_duration_sec": round(audio_clip_duration, 3),
-                "text": original_text,
-                "translated_text": translated_text,
-                "subtitle_text": subtitle_text,
-            }
-        )
-        current_start = end_sec
-
-    return rows
-
-
-def build_reviewed_master_audio_timeline_rows(
-    events: list[dict[str, Any]],
-    image_dir: Path,
-    reviewed_timeline_by_slide: dict[int, dict[str, Any]],
-    full_audio_duration: float,
-    min_slide_sec: float,
-    tail_pad_sec: float,
-    thumbnail_duration_sec: float,
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    current_start = 0.0
-
-    def reviewed_row(slide_index: int) -> dict[str, Any] | None:
-        row = reviewed_timeline_by_slide.get(slide_index)
-        return row if isinstance(row, dict) else None
-
-    for idx, event in enumerate(events, start=1):
-        event_id = int(event.get("event_id", 0) or 0)
-        bucket_id = str(event.get("bucket_id", "") or "")
-        image_path = find_image(image_dir, idx, event_id)
-
-        if idx == 1:
-            translated_text = ""
-            original_text = ""
-            subtitle_text = ""
-            audio_clip_start = 0.0
-            audio_clip_end = 0.0
-            end_sec = current_start + max(0.04, float(thumbnail_duration_sec))
+        elif current_match.get("matched"):
+            audio_clip_start = min(max(0.0, float(current_match.get("start_sec", current_start) or current_start)), full_audio_duration)
+            audio_clip_end = min(max(audio_clip_start, float(current_match.get("end_sec", audio_clip_start) or audio_clip_start)), full_audio_duration)
+            audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
         else:
-            translated_text = str(event.get("translated_text", "") or "").strip()
-            original_text = str(event.get("text", "") or "").strip()
-            subtitle_text = translated_text or original_text
-            current_review = reviewed_row(idx)
-            next_review = reviewed_row(idx + 1) if idx < len(events) else None
-
-            review_start = float(current_review.get("reviewed_start_sec", 0.0) or 0.0) if current_review else current_start
-            review_end = float(current_review.get("reviewed_end_sec", review_start) or review_start) if current_review else review_start
-            if review_end < review_start:
-                review_end = review_start
-
-            if idx < len(events):
-                next_start = float(next_review.get("reviewed_start_sec", review_end) or review_end) if next_review else review_end
-                if next_start < current_start:
-                    next_start = review_end
-                if next_start < current_start:
-                    next_start = current_start + min_slide_sec
-                end_sec = max(current_start + 0.04, next_start)
+            fallback_window = compute_slide_audio_window(event, alignment_by_segment)
+            if fallback_window is not None:
+                audio_clip_start = min(max(0.0, float(fallback_window[0])), full_audio_duration)
+                audio_clip_end = min(max(audio_clip_start, float(fallback_window[1])), full_audio_duration)
+                audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
             else:
-                end_sec = max(current_start + min_slide_sec, review_end + tail_pad_sec, full_audio_duration + tail_pad_sec)
-
-            audio_clip_start = min(max(0.0, review_start), full_audio_duration)
-            audio_clip_end = min(max(audio_clip_start, review_end), full_audio_duration)
-
+                audio_clip_start = min(current_start, full_audio_duration)
+                audio_clip_end = min(end_sec, full_audio_duration)
+                audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
+        if idx == 1:
+            pass
         clip_duration = max(0.04, end_sec - current_start)
-        audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
+
         rows.append(
             {
                 "slide_index": idx,
@@ -856,7 +932,6 @@ def main() -> int:
     slide_map_json = Path(args.slide_map_json).resolve()
     image_dir = Path(args.image_dir).resolve()
     tts_alignment_json = Path(args.tts_alignment_json).resolve() if args.tts_alignment_json else None
-    reviewed_timeline_json = Path(args.reviewed_timeline_json).resolve() if args.reviewed_timeline_json else None
     out_video = Path(args.out_video).resolve()
     out_timeline_json = Path(args.out_timeline_json).resolve()
     out_timeline_csv = Path(args.out_timeline_csv).resolve()
@@ -882,8 +957,7 @@ def main() -> int:
     if not isinstance(events, list):
         raise RuntimeError("slide map JSON must contain an 'events' array")
 
-    alignment_by_segment, full_audio_path, word_boundaries = load_alignment(tts_alignment_json)
-    reviewed_timeline_by_slide = load_reviewed_timeline(reviewed_timeline_json)
+    alignment_by_segment, full_audio_path, words, word_boundaries = load_alignment(tts_alignment_json)
     full_audio_duration = probe_media_duration(full_audio_path) if full_audio_path is not None and full_audio_path.exists() else 0.0
     width = int(args.width)
     height = int(args.height)
@@ -902,27 +976,17 @@ def main() -> int:
         tmp_dir = Path(tmp_dir_str)
         use_master_audio = bool(alignment_by_segment) and full_audio_path is not None and full_audio_path.exists()
         if use_master_audio:
-            if reviewed_timeline_by_slide:
-                base_timeline_rows = build_reviewed_master_audio_timeline_rows(
-                    events,
-                    image_dir,
-                    reviewed_timeline_by_slide,
-                    full_audio_duration,
-                    min_slide_sec,
-                    tail_pad_sec,
-                    thumbnail_duration_sec,
-                )
-            else:
-                base_timeline_rows = build_master_audio_timeline_rows(
-                    events,
-                    image_dir,
-                    alignment_by_segment,
-                    word_boundaries,
-                    full_audio_duration,
-                    min_slide_sec,
-                    tail_pad_sec,
-                    thumbnail_duration_sec,
-                )
+            base_timeline_rows = build_master_audio_timeline_rows(
+                events,
+                image_dir,
+                alignment_by_segment,
+                words,
+                word_boundaries,
+                full_audio_duration,
+                min_slide_sec,
+                tail_pad_sec,
+                thumbnail_duration_sec,
+            )
             timeline_rows = apply_intro_outro_timing(
                 base_timeline_rows,
                 intro_white_sec,
@@ -1115,7 +1179,6 @@ def main() -> int:
         "slide_map_json": str(slide_map_json),
         "image_dir": str(image_dir),
         "tts_alignment_json": str(tts_alignment_json) if tts_alignment_json else "",
-        "reviewed_timeline_json": str(reviewed_timeline_json) if reviewed_timeline_json else "",
         "tts_full_audio_path": str(full_audio_path) if full_audio_path else "",
         "audio_mode": audio_mode,
         "video_width": width,

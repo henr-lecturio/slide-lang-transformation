@@ -13,11 +13,15 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from scripts.lib.cloud_translate import (
+    ensure_cloud_translate_client,
+    resolve_target_language_codes,
+    translate_texts_llm,
+)
 from scripts.lib.translation_memory import (
     DEFAULT_TERMBASE_PATH,
     DEFAULT_TM_DB_PATH,
     apply_termbase_placeholders,
-    append_glossary_to_prompt,
     init_translation_memory,
     load_termbase_entries,
     lookup_tm_exact,
@@ -26,7 +30,6 @@ from scripts.lib.translation_memory import (
 )
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
-DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,8 +37,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-json", required=True, help="Input transcript_segments.json path.")
     parser.add_argument("--out-json", required=True, help="Output JSON path.")
     parser.add_argument("--out-csv", required=True, help="Output CSV path.")
-    parser.add_argument("--model", default="gemini-2.5-flash", help="Gemini text model.")
-    parser.add_argument("--prompt-file", default=str(DEFAULT_PROMPT_PATH), help="Prompt template path.")
+    parser.add_argument("--project-id", required=True, help="Google Cloud project id for Translation LLM.")
+    parser.add_argument("--location", default="us-central1", help="Google Cloud Translation location, e.g. us-central1.")
+    parser.add_argument("--model", default="general/translation-llm", help="Google Cloud Translation LLM model id or full model path.")
+    parser.add_argument("--source-language-code", default="", help="Optional source language code. Leave empty for auto-detect.")
     parser.add_argument("--target-language", required=True, help="Target language label, e.g. French (France).")
     parser.add_argument("--termbase-file", default=str(DEFAULT_TERMBASE_PATH), help="CSV termbase path.")
     parser.add_argument("--tm-db", default=str(DEFAULT_TM_DB_PATH), help="SQLite translation memory path.")
@@ -54,61 +59,6 @@ def load_local_env(path: Path) -> None:
             continue
         key, value = stripped.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-def load_prompt(path: Path, target_language: str) -> str:
-    if not path.exists():
-        raise FileNotFoundError(path)
-    template = path.read_text(encoding="utf-8").strip()
-    if not template:
-        raise RuntimeError(f"Prompt file is empty: {path}")
-    prompt = template.replace("{{TARGET_LANGUAGE}}", target_language.strip())
-    if "{{TARGET_LANGUAGE}}" not in template:
-        prompt = f"Target language: {target_language.strip()}\n\n{prompt}"
-    if "placeholder" not in prompt.lower():
-        prompt = (
-            f"{prompt}\n\n"
-            "If the source text contains placeholders like __TERM_0001__, preserve them exactly and do not translate, rewrite, or remove them."
-        )
-    return prompt
-
-
-def ensure_client():
-    try:
-        from google import genai
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
-            "google-genai is not installed in this environment. "
-            "Run: source .venv/bin/activate && pip install google-genai"
-        ) from exc
-
-    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-    return genai.Client(api_key=api_key)
-
-
-def extract_response_text(response: Any) -> str:
-    text = getattr(response, "text", None)
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            part_text = getattr(part, "text", None)
-            if isinstance(part_text, str) and part_text.strip():
-                return part_text.strip()
-    raise RuntimeError("Gemini response did not contain text.")
-
-
-def strip_code_fences(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("```") and stripped.endswith("```"):
-        lines = stripped.splitlines()
-        if len(lines) >= 3:
-            return "\n".join(lines[1:-1]).strip()
-    return stripped
 
 
 def load_transcript_segments(path: Path) -> list[dict[str, Any]]:
@@ -158,63 +108,36 @@ def build_translation_chunks(segments: list[dict[str, Any]], chunk_size: int, ch
 def translate_chunk(
     client,
     *,
+    project_id: str,
+    location: str,
     model: str,
-    prompt: str,
     target_language: str,
+    target_language_code: str,
+    source_language_code: str,
     pending_segments: list[dict[str, Any]],
 ) -> dict[int, str]:
-    request_segments = [
-        {
-            "segment_id": int(item["segment_id"]),
-            "text": str(item["protected_text"]),
-        }
-        for item in pending_segments
-    ]
-    instruction = (
-        f"{prompt}\n\n"
-        f"Translate the following transcript segments into {target_language}.\n"
-        "Keep each segment aligned to the same segment_id.\n"
-        "Return valid JSON only with this shape:\n"
-        '{"segments":[{"segment_id":123,"translated_text":"..."}]}\n\n'
-        f"Segments:\n{json.dumps(request_segments, ensure_ascii=False)}"
-    )
-    response = client.models.generate_content(
+    translated_list = translate_texts_llm(
+        client,
+        project_id=project_id,
+        location=location,
         model=model,
-        contents=[instruction],
-        config={"response_mime_type": "application/json"},
+        contents=[str(item["protected_text"]) for item in pending_segments],
+        target_language_code=target_language_code,
+        source_language_code=source_language_code,
     )
-    raw = strip_code_fences(extract_response_text(response))
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Failed to parse Gemini transcript translation JSON: {raw[:300]}") from exc
-
-    translated_segments = payload.get("segments")
-    if not isinstance(translated_segments, list):
-        raise RuntimeError("Gemini transcript translation JSON did not include a valid 'segments' array.")
+    if len(translated_list) != len(pending_segments):
+        raise RuntimeError(
+            "Cloud Translation returned a mismatched translation count "
+            f"(expected={len(pending_segments)}, got={len(translated_list)})."
+        )
 
     out: dict[int, str] = {}
-    for item in translated_segments:
-        if not isinstance(item, dict):
-            continue
-        try:
-            segment_id = int(item.get("segment_id"))
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"Gemini transcript translation returned an invalid segment_id: {item!r}") from exc
-        translated_text = str(item.get("translated_text", "") or "").strip()
+    for pending, translated_text in zip(pending_segments, translated_list, strict=True):
+        segment_id = int(pending["segment_id"])
+        translated_text = str(translated_text or "").strip()
         if not translated_text:
-            raise RuntimeError(f"Gemini transcript translation did not include translated_text for segment_id={segment_id}.")
+            raise RuntimeError(f"Cloud Translation did not return translated_text for segment_id={segment_id}.")
         out[segment_id] = translated_text
-
-    expected_ids = {int(item["segment_id"]) for item in pending_segments}
-    returned_ids = set(out)
-    if returned_ids != expected_ids:
-        missing = sorted(expected_ids - returned_ids)
-        extra = sorted(returned_ids - expected_ids)
-        raise RuntimeError(
-            "Gemini transcript translation returned mismatched segment ids "
-            f"(missing={missing[:5]}, extra={extra[:5]})."
-        )
     return out
 
 
@@ -247,7 +170,6 @@ def main() -> int:
     input_json = Path(args.input_json).resolve()
     out_json = Path(args.out_json).resolve()
     out_csv = Path(args.out_csv).resolve()
-    prompt_file = Path(args.prompt_file).resolve()
     termbase_file = Path(args.termbase_file).resolve()
     tm_db_path = Path(args.tm_db).resolve()
 
@@ -259,8 +181,11 @@ def main() -> int:
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     termbase_entries = load_termbase_entries(termbase_file, target_language)
-    prompt = append_glossary_to_prompt(load_prompt(prompt_file, target_language), termbase_entries)
-    client = ensure_client()
+    target_language_code, _tts_language_code = resolve_target_language_codes(target_language)
+    client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
+        str(args.project_id),
+        str(args.location),
+    )
     tm_conn = init_translation_memory(tm_db_path)
 
     translated_rows: list[dict[str, Any]] = []
@@ -310,9 +235,12 @@ def main() -> int:
         )
         translated_map = translate_chunk(
             client,
+            project_id=resolved_project,
+            location=resolved_location,
             model=str(args.model),
-            prompt=prompt,
             target_language=target_language,
+            target_language_code=target_language_code,
+            source_language_code=str(args.source_language_code or "").strip(),
             pending_segments=pending_segments,
         )
         for pending in pending_segments:
@@ -367,8 +295,11 @@ def main() -> int:
     payload = {
         "source_json": str(input_json),
         "target_language": target_language,
+        "target_language_code": target_language_code,
+        "project_id": resolved_project,
+        "location": resolved_location,
         "model": str(args.model),
-        "prompt_file": str(prompt_file),
+        "source_language_code": str(args.source_language_code or "").strip(),
         "segment_count": len(segments),
         "translated_segment_count": len([row for row in translated_rows if row["translated_text"]]),
         "tm_exact_hits": tm_exact_hits_total,

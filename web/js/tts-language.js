@@ -12,6 +12,10 @@ function getTtsLanguageOptions() {
   return Array.isArray(state.ttsLanguageOptions) ? state.ttsLanguageOptions : [];
 }
 
+export function listTtsLanguageOptions() {
+  return getTtsLanguageOptions();
+}
+
 function findTtsLanguageOptionByCode(code) {
   const wanted = String(code || "").trim();
   if (!wanted) return null;

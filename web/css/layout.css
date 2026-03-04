@@ -2,9 +2,10 @@
   position: sticky;
   top: 0;
   z-index: 40;
-  background: rgba(5, 5, 6, 0.92);
+  background: rgba(5, 5, 6, 0.68);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: blur(22px);
 }
 
 .topnav-row,
@@ -15,7 +16,7 @@ main {
 
 .topnav-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
   padding: 14px 0 12px;
@@ -24,7 +25,8 @@ main {
 .topnav-main {
   display: flex;
   align-items: flex-end;
-  flex: 0 1 auto;
+  justify-content: flex-end;
+  flex: 1 1 auto;
   gap: 18px;
   min-width: 0;
 }
@@ -107,7 +109,7 @@ main {
 
 .home-top {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
   gap: 24px;
 }
 
@@ -122,6 +124,64 @@ main {
 
 .run-control-card {
   gap: 16px;
+}
+
+.quick-settings-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.quick-settings-head {
+  color: var(--text-dim);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.quick-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+
+.quick-setting-field,
+.quick-setting-toggle {
+  display: grid;
+  gap: 8px;
+}
+
+.quick-setting-field > span,
+.quick-setting-toggle > span {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.quick-setting-toggle {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 0;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: #07080a;
+}
+
+.quick-setting-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
+.quick-setting-toggle > span {
+  font-size: 0.8rem;
 }
 
 .status-panel-card {
@@ -210,6 +270,16 @@ h3 {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 12px;
+}
+
+.status-head-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.status-head-copy h2 {
+  padding-bottom: 0;
 }
 
 .status-actions {

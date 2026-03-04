@@ -16,6 +16,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .quick-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
   .settings-row {
     grid-template-columns: 260px minmax(0, 1fr);
   }
@@ -35,6 +39,7 @@
   .topnav-main {
     align-items: stretch;
     flex-direction: column;
+    justify-content: flex-start;
   }
 
   .topnav {
