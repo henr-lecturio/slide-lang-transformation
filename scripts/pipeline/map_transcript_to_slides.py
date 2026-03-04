@@ -44,6 +44,26 @@ def load_transcript_segments(path: Path) -> list[dict]:
     return out
 
 
+def load_translated_segments(path: Path) -> dict[int, dict]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    segments = data.get("segments")
+    if not isinstance(segments, list):
+        raise RuntimeError("Translated transcript JSON must contain a 'segments' array.")
+    out: dict[int, dict] = {}
+    for row in segments:
+        if not isinstance(row, dict):
+            continue
+        try:
+            segment_id = int(row.get("segment_id"))
+        except Exception:  # noqa: BLE001
+            continue
+        out[segment_id] = {
+            "translated_text": " ".join(str(row.get("translated_text", "") or "").split()),
+            "target_language": str(row.get("target_language", "") or "").strip(),
+        }
+    return out
+
+
 def load_slide_events(path: Path) -> list[dict]:
     rows: list[dict] = []
     with path.open("r", encoding="utf-8") as f:
@@ -217,6 +237,8 @@ def write_csv(path: Path, rows: list[dict]) -> None:
                 "is_no_slide",
                 "merge_target_event_id",
                 "text",
+                "translated_text",
+                "target_language",
                 "segments_count",
                 "source_segment_ids",
             ],
@@ -230,6 +252,7 @@ def main() -> int:
     parser.add_argument("--video", required=True, help="Input video path.")
     parser.add_argument("--slide-csv", required=True, help="Path to slide_changes.csv.")
     parser.add_argument("--transcript-json", required=True, help="Path to transcript_segments.json.")
+    parser.add_argument("--translated-transcript-json", default="", help="Optional translated transcript JSON path.")
     parser.add_argument("--out-json", required=True, help="Output JSON path.")
     parser.add_argument("--out-csv", required=True, help="Output CSV path.")
     parser.add_argument("--eps", type=float, default=1e-6, help="Overlap epsilon (default: 1e-6).")
@@ -238,6 +261,7 @@ def main() -> int:
     video_path = Path(args.video).resolve()
     slide_csv = Path(args.slide_csv).resolve()
     transcript_json = Path(args.transcript_json).resolve()
+    translated_transcript_json = Path(args.translated_transcript_json).resolve() if str(args.translated_transcript_json).strip() else None
     out_json = Path(args.out_json).resolve()
     out_csv = Path(args.out_csv).resolve()
     eps = max(0.0, float(args.eps))
@@ -248,11 +272,14 @@ def main() -> int:
         raise FileNotFoundError(slide_csv)
     if not transcript_json.exists():
         raise FileNotFoundError(transcript_json)
+    if translated_transcript_json is not None and not translated_transcript_json.exists():
+        raise FileNotFoundError(translated_transcript_json)
 
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     transcript_segments = load_transcript_segments(transcript_json)
+    translated_segments_by_id = load_translated_segments(translated_transcript_json) if translated_transcript_json is not None else {}
     slide_events = load_slide_events(slide_csv)
 
     inferred_duration = 0.0
@@ -270,6 +297,7 @@ def main() -> int:
         b.bucket_id: {
             "bucket": b,
             "text_parts": [],
+            "translated_text_parts": [],
             "source_segment_ids": set(),
             "mapped_fragments": 0,
         }
@@ -296,12 +324,19 @@ def main() -> int:
 
         durations = [item[3] for item in overlaps]
         text_chunks = split_text_by_durations(seg["text"], durations)
+        translated_source_text = str(
+            translated_segments_by_id.get(int(seg["segment_id"]), {}).get("translated_text", "") or ""
+        ).strip()
+        translated_chunks = split_text_by_durations(translated_source_text, durations) if translated_source_text else [""] * len(overlaps)
 
         for idx, (bucket, _ov_start, _ov_end, _ov_dur) in enumerate(overlaps):
             entry = accum[bucket.bucket_id]
             chunk = text_chunks[idx].strip()
+            translated_chunk = translated_chunks[idx].strip()
             if chunk:
                 entry["text_parts"].append(chunk)
+            if translated_chunk:
+                entry["translated_text_parts"].append(translated_chunk)
             entry["source_segment_ids"].add(int(seg["segment_id"]))
             entry["mapped_fragments"] += 1
 
@@ -312,6 +347,15 @@ def main() -> int:
         source_ids = sorted(entry["source_segment_ids"])
         source_ids_text = ";".join(str(x) for x in source_ids)
         text = " ".join(part for part in entry["text_parts"] if part).strip()
+        translated_text = " ".join(part for part in entry["translated_text_parts"] if part).strip()
+        target_language = next(
+            (
+                str(translated_segments_by_id[sid].get("target_language", "") or "").strip()
+                for sid in source_ids
+                if sid in translated_segments_by_id and str(translated_segments_by_id[sid].get("target_language", "") or "").strip()
+            ),
+            "",
+        )
 
         row = {
             "event_id": bucket.event_id,
@@ -321,6 +365,8 @@ def main() -> int:
             "is_no_slide": bool(bucket.is_no_slide),
             "merge_target_event_id": bucket.merge_target_event_id,
             "text": text,
+            "translated_text": translated_text,
+            "target_language": target_language,
             "segments_count": len(source_ids),
             "source_segment_ids": source_ids,
             "mapped_fragments": int(entry["mapped_fragments"]),
@@ -335,6 +381,8 @@ def main() -> int:
                 "is_no_slide": str(row["is_no_slide"]).lower(),
                 "merge_target_event_id": "" if row["merge_target_event_id"] is None else row["merge_target_event_id"],
                 "text": row["text"],
+                "translated_text": row["translated_text"],
+                "target_language": row["target_language"],
                 "segments_count": row["segments_count"],
                 "source_segment_ids": source_ids_text,
             }
@@ -344,8 +392,13 @@ def main() -> int:
         "video_path": str(video_path),
         "video_duration_sec": round(duration_sec, 3),
         "transcript_segment_count": len(transcript_segments),
+        "translated_transcript_segment_count": len(translated_segments_by_id),
         "slide_event_count": len(slide_events),
         "mapped_event_count": len(event_rows),
+        "target_language": next(
+            (str(item.get("target_language", "") or "").strip() for item in translated_segments_by_id.values() if str(item.get("target_language", "") or "").strip()),
+            "",
+        ),
         "events": event_rows,
     }
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

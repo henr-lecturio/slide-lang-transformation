@@ -65,13 +65,14 @@ STEP_MARKER_RE = re.compile(r"^@@STEP\s+(START|DONE|SKIP|DETAIL)\s+([a-z0-9-]+)(
 STEP_DEFS = [
     ("slide-detection", "Slide Detection"),
     ("transcription", "Transcription"),
+    ("text-translate", "Transcript Translate"),
     ("transcript-mapping", "Transcript Mapping"),
     ("finalize-slides", "Finalize Slides"),
     ("edit", "Slide Edit"),
     ("translate", "Slide Translate"),
     ("upscale", "Slide Upscale"),
-    ("text-translate", "Text Translate"),
     ("tts", "TTS"),
+    ("tts-alignment", "TTS Alignment"),
     ("video-export", "Video Export"),
 ]
 STEP_LABELS = {step_id: label for step_id, label in STEP_DEFS}
@@ -216,6 +217,7 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     translated_upscaled_slide_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled"
     translated_text_csv = run_dir / "slitranet" / "slide_text_map_final_translated.csv"
     tts_audio_dir = run_dir / "slitranet" / "tts" / "audio"
+    tts_alignment_csv = run_dir / "slitranet" / "tts" / "segment_alignment.csv"
     video_export_dir = run_dir / "slitranet" / "video_export"
     exported_video = latest_file_in_dir(video_export_dir, ".mp4")
 
@@ -225,7 +227,7 @@ def artifact_availability(run_dir: Path) -> dict[str, object]:
     upscaled_slides_ready = count_files(upscaled_slide_dir) > 0
     translated_upscaled_slides_ready = count_files(translated_upscaled_slide_dir) > 0
     translated_text_ready = translated_text_csv.exists() and csv_event_count(translated_text_csv) > 0
-    tts_ready = count_files(tts_audio_dir) > 0
+    tts_ready = (tts_alignment_csv.exists() and csv_event_count(tts_alignment_csv) > 0) or count_files(tts_audio_dir) > 0
     video_export_ready = exported_video is not None
 
     highest_available = "none"
@@ -697,6 +699,9 @@ def run_detail(run_id: str) -> dict:
     translated_text_json = run_dir / "slitranet" / "slide_text_map_final_translated.json"
     tts_audio_dir = run_dir / "slitranet" / "tts" / "audio"
     tts_manifest_json = run_dir / "slitranet" / "tts" / "tts_manifest.json"
+    tts_alignment_json = run_dir / "slitranet" / "tts" / "segment_alignment.json"
+    tts_alignment_csv = run_dir / "slitranet" / "tts" / "segment_alignment.csv"
+    tts_full_audio = run_dir / "slitranet" / "tts" / "audio" / "full_transcript.wav"
     video_export_dir = run_dir / "slitranet" / "video_export"
     video_timeline_json = video_export_dir / "timeline.json"
     video_timeline_csv = video_export_dir / "timeline.csv"
@@ -731,8 +736,11 @@ def run_detail(run_id: str) -> dict:
         "translated_text_events": csv_event_count(translated_text_csv),
         "translated_text_json_url": f"/api/runs/{run_id}/file/slitranet/slide_text_map_final_translated.json" if translated_text_json.exists() else "",
         "translated_text_csv_url": f"/api/runs/{run_id}/file/slitranet/slide_text_map_final_translated.csv" if translated_text_csv.exists() else "",
-        "tts_segments": count_files(tts_audio_dir),
+        "tts_segments": csv_event_count(tts_alignment_csv) if tts_alignment_csv.exists() else count_files(tts_audio_dir),
         "tts_manifest_url": f"/api/runs/{run_id}/file/slitranet/tts/tts_manifest.json" if tts_manifest_json.exists() else "",
+        "tts_alignment_json_url": f"/api/runs/{run_id}/file/slitranet/tts/segment_alignment.json" if tts_alignment_json.exists() else "",
+        "tts_alignment_csv_url": f"/api/runs/{run_id}/file/slitranet/tts/segment_alignment.csv" if tts_alignment_csv.exists() else "",
+        "tts_full_audio_url": f"/api/runs/{run_id}/file/slitranet/tts/audio/full_transcript.wav" if tts_full_audio.exists() else "",
         "video_timeline_json_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.json" if video_timeline_json.exists() else "",
         "video_timeline_csv_url": f"/api/runs/{run_id}/file/slitranet/video_export/timeline.csv" if video_timeline_csv.exists() else "",
         "exported_video_name": exported_video.name if exported_video else "",
@@ -2012,7 +2020,7 @@ def run_text_translate_health_check(payload: dict) -> dict:
             "translated_text": translated_text,
             "glossary_entries": len(glossary_entries),
             "termbase_hits": len(term_hits),
-            "message": "Text Translate API reachable.",
+            "message": "Transcript Translate API reachable.",
         }
     except Exception as exc:  # noqa: BLE001
         return {

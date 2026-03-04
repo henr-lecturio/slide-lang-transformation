@@ -124,12 +124,12 @@ Wichtige Blöcke:
 - `REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND`
 - `REPLICATE_UPSCALE_CONCURRENCY`
 
-### Text Translate / TTS / Video Export
+### Transcript Translate / TTS / Video Export
 - Step-Toggles:
   - `RUN_STEP_TEXT_TRANSLATE`
   - `RUN_STEP_TTS`
   - `RUN_STEP_VIDEO_EXPORT`
-- Text Translate:
+- Transcript Translate:
   - `GEMINI_TEXT_TRANSLATE_MODEL`
   - `config/prompts/gemini_text_translate_prompt.txt`
 - TTS:
@@ -229,7 +229,7 @@ Das Projekt nutzt zwei getrennte Konzepte:
 - wiederverwendet bereits übersetzte Segmente
 
 Wichtig:
-- **Text Translate** nutzt echtes Translation Memory + Termbase
+- **Transcript Translate** nutzt echtes Translation Memory + Termbase
 - **Slide Translate** nutzt nur die Termbase als Glossarhinweis im Prompt
 
 Bestehende Runs ins TM übernehmen:
@@ -246,6 +246,7 @@ Ein Run erzeugt einen neuen Ordner:
 - `output/runs/<timestamp>/slitranet/slide_changes.csv`
 - `output/runs/<timestamp>/slitranet/keyframes/{slide,full}`
 - `output/runs/<timestamp>/slitranet/transcript_segments.{json,csv}`
+- `output/runs/<timestamp>/slitranet/transcript_segments_translated.{json,csv}`
 - `output/runs/<timestamp>/slitranet/slide_text_map.{json,csv}`
 - `output/runs/<timestamp>/slitranet/slide_text_map_final.{json,csv}`
 - `output/runs/<timestamp>/slitranet/slides_final_manifest.csv`

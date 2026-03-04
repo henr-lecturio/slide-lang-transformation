@@ -70,6 +70,8 @@ def parse_event_row(row: dict) -> dict:
         "is_no_slide": is_no_slide,
         "merge_target_event_id": merge_target_event_id,
         "text": str(row.get("text", "")).strip(),
+        "translated_text": str(row.get("translated_text", "")).strip(),
+        "target_language": str(row.get("target_language", "")).strip(),
         "segments_count": int(row.get("segments_count", 0)),
         "source_segment_ids": parse_source_segment_ids(row.get("source_segment_ids", [])),
     }
@@ -1240,6 +1242,7 @@ def main() -> int:
     manifest_rows: list[dict] = []
     kept_rows: list[dict] = []
     leading_no_slide_parts: list[str] = []
+    leading_no_slide_translated_parts: list[str] = []
     leading_no_slide_ids: set[int] = set()
 
     for row in rows:
@@ -1272,6 +1275,7 @@ def main() -> int:
             reason = "no_slide_bucket"
 
         text = str(row.get("text", "")).strip()
+        translated_text = str(row.get("translated_text", "")).strip()
         src_ids = set(parse_source_segment_ids(row.get("source_segment_ids", [])))
 
         action = "keep"
@@ -1285,6 +1289,11 @@ def main() -> int:
                         target["text"] = f"{target['text']} {text}".strip()
                     else:
                         target["text"] = text
+                if translated_text:
+                    if target.get("translated_text"):
+                        target["translated_text"] = f"{target['translated_text']} {translated_text}".strip()
+                    else:
+                        target["translated_text"] = translated_text
                 target["source_segment_ids"] = sorted(set(target["source_segment_ids"]).union(src_ids))
                 target["segments_count"] = len(target["source_segment_ids"])
                 merge_target = int(target["event_id"])
@@ -1292,6 +1301,8 @@ def main() -> int:
             else:
                 if text:
                     leading_no_slide_parts.append(text)
+                if translated_text:
+                    leading_no_slide_translated_parts.append(translated_text)
                 leading_no_slide_ids.update(src_ids)
                 action = "leading_no_previous"
         else:
@@ -1351,6 +1362,7 @@ def main() -> int:
     final_rows: list[dict] = []
     if leading_no_slide_parts or leading_no_slide_ids:
         leading_text = " ".join(x for x in leading_no_slide_parts if x).strip()
+        leading_translated_text = " ".join(x for x in leading_no_slide_translated_parts if x).strip()
         ids = sorted(leading_no_slide_ids)
         final_rows.append(
             {
@@ -1361,6 +1373,8 @@ def main() -> int:
                 "is_no_slide": True,
                 "merge_target_event_id": None,
                 "text": leading_text,
+                "translated_text": leading_translated_text,
+                "target_language": str(next((str(row.get("target_language", "")).strip() for row in kept_rows if str(row.get("target_language", "")).strip()), "")),
                 "segments_count": len(ids),
                 "source_segment_ids": ids,
                 "source_mode_auto": "",
@@ -1381,6 +1395,8 @@ def main() -> int:
                 "is_no_slide": False,
                 "merge_target_event_id": int(row["event_id"]),
                 "text": str(row.get("text", "")).strip(),
+                "translated_text": str(row.get("translated_text", "")).strip(),
+                "target_language": str(row.get("target_language", "")).strip(),
                 "segments_count": int(row.get("segments_count", 0)),
                 "source_segment_ids": sorted(parse_source_segment_ids(row.get("source_segment_ids", []))),
                 "source_mode_auto": str(source_info.get("source_mode_auto", "slide")),
@@ -1420,6 +1436,8 @@ def main() -> int:
                 "is_no_slide",
                 "merge_target_event_id",
                 "text",
+                "translated_text",
+                "target_language",
                 "segments_count",
                 "source_segment_ids",
                 "source_mode_auto",
@@ -1439,6 +1457,8 @@ def main() -> int:
                     "is_no_slide": str(bool(row["is_no_slide"])).lower(),
                     "merge_target_event_id": "" if row["merge_target_event_id"] is None else row["merge_target_event_id"],
                     "text": row["text"],
+                    "translated_text": row.get("translated_text", ""),
+                    "target_language": row.get("target_language", ""),
                     "segments_count": row["segments_count"],
                     "source_segment_ids": format_source_ids(row["source_segment_ids"]),
                     "source_mode_auto": row.get("source_mode_auto", ""),

@@ -99,11 +99,10 @@ export function updateTtsLanguageHint() {
   if (!el.runStepTextTranslate.checked) {
     setTtsLanguageHint(
       "note",
-      `TTS will use ${selected.label} [${selected.tts_language_code}] for the source mapped text because Text Translate is disabled.`,
+      `TTS will use ${selected.label} [${selected.tts_language_code}] for the source mapped text because Transcript Translate is disabled.`,
     );
     return;
   }
   const readiness = selected.launch_readiness ? ` | ${selected.launch_readiness}` : "";
   setTtsLanguageHint("ok", `Selected Gemini TTS language: ${selected.label} | ${selected.tts_language_code}${readiness}`);
 }
-

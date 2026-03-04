@@ -34,7 +34,7 @@ Open:
   - Slide Edit
   - Slide Translate
   - Slide Upscale
-  - Text Translate
+  - Transcript Translate
   - TTS
 
 ### Image Lab

@@ -674,13 +674,13 @@
               <div class="step-section-head">
                 <div class="step-section-title-wrap">
                   <div class="step-section-heading">
-                    <label class="step-switch step-switch-icononly"><input id="run_step_text_translate" type="checkbox" aria-label="Enable Text Translate" /></label>
-                    <h3>Text Translate</h3>
-                    <button type="button" class="step-section-toggle" data-step-toggle="text-translate" aria-expanded="false" aria-controls="step-section-body-text-translate" aria-label="Toggle Text Translate settings">
+                    <label class="step-switch step-switch-icononly"><input id="run_step_text_translate" type="checkbox" aria-label="Enable Transcript Translate" /></label>
+                    <h3>Transcript Translate</h3>
+                    <button type="button" class="step-section-toggle" data-step-toggle="text-translate" aria-expanded="false" aria-controls="step-section-body-text-translate" aria-label="Toggle Transcript Translate settings">
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Translates the mapped final slide text 1:1 into the target language.</div>
+                  <div class="step-section-subtitle muted">Translates transcript segments 1:1 into the target language before slide mapping.</div>
                 </div>
               </div>
               <div id="step-section-body-text-translate" class="step-section-body">
@@ -731,10 +731,10 @@
                     </div>
                   </div>
                   <div class="settings-row settings-row-inline">
-                    <div class="settings-key">Text Translate API Test</div>
+                    <div class="settings-key">Transcript Translate API Test</div>
                     <div class="settings-value">
                       <div class="settings-inline-actions">
-                        <button id="text-translate-health-check" type="button">Test Text Translate API</button>
+                        <button id="text-translate-health-check" type="button">Test Transcript Translate API</button>
                         <span id="text-translate-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
                         <button
                           id="text-translate-health-meta-toggle"
@@ -766,7 +766,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Generates one voiceover segment per final slide from the translated text.</div>
+                  <div class="step-section-subtitle muted">Generates a continuous transcript voiceover and aligns it back to the slides.</div>
                 </div>
               </div>
               <div id="step-section-body-tts" class="step-section-body">

@@ -274,6 +274,8 @@ step_done slide-detection
 
 TRANSCRIPT_JSON="$OUT_BASE/transcript_segments.json"
 TRANSCRIPT_CSV="$OUT_BASE/transcript_segments.csv"
+TRANSCRIPT_TRANSLATED_JSON="$OUT_BASE/transcript_segments_translated.json"
+TRANSCRIPT_TRANSLATED_CSV="$OUT_BASE/transcript_segments_translated.csv"
 echo "[ASR] Preparing transcription step ..."
 echo "[Step] transcription: run"
 step_start transcription
@@ -320,18 +322,55 @@ esac
 step_done transcription
 echo "[ASR] Transcription step finished."
 
+if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
+  if [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo "ERROR: transcript translation requires GEMINI_API_KEY in the environment." >&2
+    exit 1
+  fi
+  if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
+    echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when transcript translation is enabled." >&2
+    exit 1
+  fi
+  echo "[TranscriptTranslate] Translating transcript segments to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TEXT_TRANSLATE_MODEL ..."
+  step_start text-translate
+  step_detail text-translate "$FINAL_SLIDE_TARGET_LANGUAGE"
+  rm -f "$TRANSCRIPT_TRANSLATED_JSON.__tmp" "$TRANSCRIPT_TRANSLATED_CSV.__tmp"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/translate_transcript_segments.py" \
+    --input-json "$TRANSCRIPT_JSON" \
+    --out-json "$TRANSCRIPT_TRANSLATED_JSON.__tmp" \
+    --out-csv "$TRANSCRIPT_TRANSLATED_CSV.__tmp" \
+    --model "$GEMINI_TEXT_TRANSLATE_MODEL" \
+    --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE" \
+    --termbase-file "$TRANSLATION_TERMBASE_FILE" \
+    --tm-db "$TRANSLATION_MEMORY_DB" \
+    --origin-run-id "$RUN_ID" \
+    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+  publish_file "$TRANSCRIPT_TRANSLATED_JSON.__tmp" "$TRANSCRIPT_TRANSLATED_JSON"
+  publish_file "$TRANSCRIPT_TRANSLATED_CSV.__tmp" "$TRANSCRIPT_TRANSLATED_CSV"
+  step_done text-translate
+  echo "[TranscriptTranslate] Translation finished."
+else
+  echo "[Step] text-translate: skipped"
+  step_skip text-translate "disabled"
+fi
+
 SLIDE_TEXT_MAP_JSON="$OUT_BASE/slide_text_map.json"
 SLIDE_TEXT_MAP_CSV="$OUT_BASE/slide_text_map.csv"
 echo "[ASR] Mapping transcript to slide windows ..."
 echo "[Step] transcript-mapping: run"
 step_start transcript-mapping
 step_detail transcript-mapping "map-transcript-to-slides"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/map_transcript_to_slides.py" \
+MAP_TRANSCRIPT_ARGS=(
   --video "$PHASE_DIR/$VIDEO_NAME" \
   --slide-csv "$OUT_BASE/slide_changes.csv" \
   --transcript-json "$TRANSCRIPT_JSON" \
   --out-json "$SLIDE_TEXT_MAP_JSON" \
   --out-csv "$SLIDE_TEXT_MAP_CSV"
+)
+if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
+  MAP_TRANSCRIPT_ARGS+=(--translated-transcript-json "$TRANSCRIPT_TRANSLATED_JSON")
+fi
+"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/map_transcript_to_slides.py" "${MAP_TRANSCRIPT_ARGS[@]}"
 step_done transcript-mapping
 echo "[ASR] Slide text mapping finished."
 
@@ -351,6 +390,8 @@ TEXT_TRANSLATED_CSV="$OUT_BASE/slide_text_map_final_translated.csv"
 TTS_AUDIO_DIR="$OUT_BASE/tts/audio"
 TTS_MANIFEST_JSON="$OUT_BASE/tts/tts_manifest.json"
 TTS_MANIFEST_CSV="$OUT_BASE/tts/tts_manifest.csv"
+TTS_ALIGNMENT_JSON="$OUT_BASE/tts/segment_alignment.json"
+TTS_ALIGNMENT_CSV="$OUT_BASE/tts/segment_alignment.csv"
 VIDEO_EXPORT_DIR="$OUT_BASE/video_export"
 VIDEO_EXPORT_TIMELINE_JSON="$VIDEO_EXPORT_DIR/timeline.json"
 VIDEO_EXPORT_TIMELINE_CSV="$VIDEO_EXPORT_DIR/timeline.csv"
@@ -437,6 +478,12 @@ publish_file "$FINAL_SOURCE_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV"
 publish_dir "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR"
 publish_dir "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_DIR"
 publish_dir "$FINAL_FULL_DIR.__tmp" "$FINAL_FULL_DIR"
+if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
+  cp "$SLIDE_TEXT_MAP_FINAL_JSON" "$TEXT_TRANSLATED_JSON.__tmp"
+  cp "$SLIDE_TEXT_MAP_FINAL_CSV" "$TEXT_TRANSLATED_CSV.__tmp"
+  publish_file "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_JSON"
+  publish_file "$TEXT_TRANSLATED_CSV.__tmp" "$TEXT_TRANSLATED_CSV"
+fi
 step_done finalize-slides
 if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "local" ]; then
   step_done edit "local cleanup applied within finalize-slides"
@@ -596,43 +643,10 @@ else
   step_skip upscale "disabled"
 fi
 
-TEXT_TRANSLATE_INPUT_JSON="$SLIDE_TEXT_MAP_FINAL_JSON"
-TEXT_TRANSLATE_LANGUAGE="$FINAL_SLIDE_TARGET_LANGUAGE"
-
-if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
-  if [ -z "${GEMINI_API_KEY:-}" ]; then
-    echo "ERROR: text translation requires GEMINI_API_KEY in the environment." >&2
-    exit 1
-  fi
-  if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
-    echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when text translation is enabled." >&2
-    exit 1
-  fi
-  echo "[TextTranslate] Translating mapped slide text to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TEXT_TRANSLATE_MODEL ..."
-  step_start text-translate
-  step_detail text-translate "$FINAL_SLIDE_TARGET_LANGUAGE"
-  rm -f "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_CSV.__tmp"
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/translate_slide_text.py" \
-    --input-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
-    --out-json "$TEXT_TRANSLATED_JSON.__tmp" \
-    --out-csv "$TEXT_TRANSLATED_CSV.__tmp" \
-    --model "$GEMINI_TEXT_TRANSLATE_MODEL" \
-    --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE" \
-    --termbase-file "$TRANSLATION_TERMBASE_FILE" \
-    --tm-db "$TRANSLATION_MEMORY_DB" \
-    --origin-run-id "$RUN_ID" \
-    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
-  publish_file "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_JSON"
-  publish_file "$TEXT_TRANSLATED_CSV.__tmp" "$TEXT_TRANSLATED_CSV"
-  step_done text-translate
-  TEXT_TRANSLATE_INPUT_JSON="$TEXT_TRANSLATED_JSON"
-  echo "[TextTranslate] Translation finished."
-else
-  echo "[Step] text-translate: skipped"
-  step_skip text-translate "disabled"
+TTS_INPUT_JSON="$TRANSCRIPT_JSON"
+if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
+  TTS_INPUT_JSON="$TRANSCRIPT_TRANSLATED_JSON"
 fi
-
-TTS_INPUT_JSON="$TEXT_TRANSLATE_INPUT_JSON"
 TTS_LANGUAGE_LABEL="$FINAL_SLIDE_TARGET_LANGUAGE"
 if [ "$RUN_STEP_TEXT_TRANSLATE" = "0" ]; then
   TTS_LANGUAGE_LABEL="source language of the text"
@@ -652,7 +666,7 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
   step_detail tts "$GEMINI_TTS_VOICE"
   rm -rf "$TTS_AUDIO_DIR.__tmp"
   rm -f "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_CSV.__tmp"
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/generate_slide_tts.py" \
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/generate_transcript_tts.py" \
     --input-json "$TTS_INPUT_JSON" \
     --output-dir "$TTS_AUDIO_DIR.__tmp" \
     --out-manifest-json "$TTS_MANIFEST_JSON.__tmp" \
@@ -662,15 +676,40 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
     --project-id "$GOOGLE_TTS_PROJECT_ID" \
     --language-code "$GOOGLE_TTS_LANGUAGE_CODE" \
     --prompt-file "$GEMINI_TTS_PROMPT_FILE" \
-    --language-label "$TTS_LANGUAGE_LABEL"
+    --language-label "$TTS_LANGUAGE_LABEL" \
+    --max-chars "${TTS_TRANSCRIPT_MAX_CHARS:-3200}" \
+    --max-segments-per-chunk "${TTS_TRANSCRIPT_MAX_SEGMENTS:-40}"
   publish_dir "$TTS_AUDIO_DIR.__tmp" "$TTS_AUDIO_DIR"
   publish_file "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_JSON"
   publish_file "$TTS_MANIFEST_CSV.__tmp" "$TTS_MANIFEST_CSV"
   step_done tts
   echo "[TTS] Voiceover generation finished."
+
+  echo "[TTSAlign] Aligning transcript TTS back to transcript segments ..."
+  step_start tts-alignment
+  step_detail tts-alignment "${TTS_ALIGNMENT_WHISPER_MODEL:-small}"
+  rm -f "$TTS_ALIGNMENT_JSON.__tmp" "$TTS_ALIGNMENT_CSV.__tmp"
+  TTS_ALIGNMENT_LANGUAGE="${TTS_ALIGNMENT_WHISPER_LANGUAGE:-}"
+  if [ -z "$TTS_ALIGNMENT_LANGUAGE" ] && [ -n "${GOOGLE_TTS_LANGUAGE_CODE:-}" ]; then
+    TTS_ALIGNMENT_LANGUAGE="${GOOGLE_TTS_LANGUAGE_CODE%%-*}"
+  fi
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/align_tts_to_segments.py" \
+    --transcript-json "$TTS_INPUT_JSON" \
+    --tts-manifest-json "$TTS_MANIFEST_JSON" \
+    --out-json "$TTS_ALIGNMENT_JSON.__tmp" \
+    --out-csv "$TTS_ALIGNMENT_CSV.__tmp" \
+    --model "${TTS_ALIGNMENT_WHISPER_MODEL:-small}" \
+    --device "${TTS_ALIGNMENT_WHISPER_DEVICE:-$WHISPER_DEVICE}" \
+    --compute-type "${TTS_ALIGNMENT_WHISPER_COMPUTE_TYPE:-$WHISPER_COMPUTE_TYPE}" \
+    --language "$TTS_ALIGNMENT_LANGUAGE"
+  publish_file "$TTS_ALIGNMENT_JSON.__tmp" "$TTS_ALIGNMENT_JSON"
+  publish_file "$TTS_ALIGNMENT_CSV.__tmp" "$TTS_ALIGNMENT_CSV"
+  step_done tts-alignment
+  echo "[TTSAlign] Alignment finished."
 else
   echo "[Step] tts: skipped"
   step_skip tts "disabled"
+  step_skip tts-alignment "disabled"
 fi
 
 EXPORT_IMAGE_DIR="$FINAL_SLIDE_DIR"
@@ -694,16 +733,20 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
   echo "[VideoExport] Building narrated slide video from $EXPORT_IMAGE_LABEL images ..."
   step_start video-export
   step_detail video-export "$EXPORT_IMAGE_LABEL"
-  TTS_MANIFEST_ARG=()
-  if [ -f "$TTS_MANIFEST_JSON" ]; then
-    TTS_MANIFEST_ARG+=(--tts-manifest-json "$TTS_MANIFEST_JSON")
+  TTS_ALIGNMENT_ARG=()
+  if [ -f "$TTS_ALIGNMENT_JSON" ]; then
+    TTS_ALIGNMENT_ARG+=(--tts-alignment-json "$TTS_ALIGNMENT_JSON")
   fi
   rm -rf "$VIDEO_EXPORT_DIR.__tmp"
   mkdir -p "$VIDEO_EXPORT_DIR.__tmp"
+  EXPORT_SLIDE_MAP_JSON="$SLIDE_TEXT_MAP_FINAL_JSON"
+  if [ -f "$TEXT_TRANSLATED_JSON" ]; then
+    EXPORT_SLIDE_MAP_JSON="$TEXT_TRANSLATED_JSON"
+  fi
   "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/export_slide_video.py" \
-    --slide-map-json "$TTS_INPUT_JSON" \
+    --slide-map-json "$EXPORT_SLIDE_MAP_JSON" \
     --image-dir "$EXPORT_IMAGE_DIR" \
-    "${TTS_MANIFEST_ARG[@]}" \
+    "${TTS_ALIGNMENT_ARG[@]}" \
     --out-video "$VIDEO_EXPORT_DIR.__tmp/final_${VIDEO_LANG_SLUG}.mp4" \
     --out-timeline-json "$VIDEO_EXPORT_DIR.__tmp/timeline.json" \
     --out-timeline-csv "$VIDEO_EXPORT_DIR.__tmp/timeline.csv" \
@@ -748,5 +791,6 @@ echo "Final slide translated upscaled images: $FINAL_SLIDE_TRANSLATED_UPSCALED_D
 echo "Final slide upscale mode: $FINAL_SLIDE_UPSCALE_MODE"
 echo "Translated text map: $TEXT_TRANSLATED_JSON"
 echo "TTS manifest: $TTS_MANIFEST_JSON"
+echo "TTS alignment: $TTS_ALIGNMENT_JSON"
 echo "Video export image source: $EXPORT_IMAGE_DIR"
 echo "Video export output: $VIDEO_EXPORT_MP4"

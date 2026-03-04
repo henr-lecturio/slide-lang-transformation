@@ -238,7 +238,7 @@ export async function testTextTranslateHealth() {
     showButtonSuccess(el.textTranslateHealthCheck, "OK");
     return;
   }
-  const meta = [result.error_type || "Error", result.error_message || result.message || "Text Translate API check failed."]
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Transcript Translate API check failed."]
     .filter(Boolean)
     .join(" | ");
   setHealthStatus("textTranslate", "error", "Failed", meta);
