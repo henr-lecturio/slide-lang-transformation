@@ -703,7 +703,7 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Translates the final slide images via image-to-image.</div>
+                  <div class="step-section-subtitle muted">Translates the final slide images via Gemini or deterministic glossary rendering.</div>
                 </div>
               </div>
               <div id="step-section-body-translate" class="step-section-body">
@@ -724,6 +724,7 @@
                       <select id="final_slide_translation_mode">
                         <option value="none">none</option>
                         <option value="gemini">gemini</option>
+                        <option value="deterministic_glossary">deterministic_glossary</option>
                       </select>
                     </div>
                   </div>
@@ -740,6 +741,45 @@
                   <div class="settings-row settings-row-textarea">
                     <label class="settings-key" for="gemini_translate_prompt">GEMINI_TRANSLATE_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_translate_prompt" rows="10"></textarea></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="google_vision_project_id">GOOGLE_VISION_PROJECT_ID</label>
+                    <div class="settings-value"><input id="google_vision_project_id" type="text" placeholder="Google project for Vision OCR" /></div>
+                  </div>
+                  <div class="settings-row termbase-settings-row">
+                    <label class="settings-key" for="slide_translate_styles_json">Slide Translate Styling</label>
+                    <div class="settings-value">
+                      <div id="slide-translate-style-editor-panel" class="output-info-panel termbase-editor-panel">
+                        <button
+                          id="slide-translate-style-editor-toggle"
+                          class="output-info-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="slide-translate-style-editor-body"
+                        >
+                          <span>Text Styling</span>
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
+                        <div id="slide-translate-style-editor-body" class="output-info-body" hidden>
+                          <div class="termbase-table-wrap">
+                            <table class="termbase-table slide-style-table">
+                              <thead>
+                                <tr>
+                                  <th>Key</th>
+                                  <th>Font Size</th>
+                                  <th>Min Font</th>
+                                  <th>Line Spacing</th>
+                                  <th>Color</th>
+                                  <th>Padding</th>
+                                </tr>
+                              </thead>
+                              <tbody id="slide-translate-style-table-body"></tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                      <textarea id="slide_translate_styles_json" rows="12" spellcheck="false" hidden></textarea>
+                    </div>
                   </div>
                   <div class="settings-row settings-row-inline">
                     <div class="settings-key">Slide Translate API Test</div>
@@ -1106,7 +1146,7 @@
                       <span class="step-section-chevron" aria-hidden="true"></span>
                     </button>
                   </div>
-                  <div class="step-section-subtitle muted">Isolated test values for <strong>Image Lab</strong> Slide Translate only.</div>
+                  <div class="step-section-subtitle muted">Uses the current <strong>FINAL_SLIDE_TRANSLATION_MODE</strong> from Settings. Gemini fields are ignored in deterministic mode.</div>
                 </div>
               </div>
               <div id="lab-step-section-body-slide-translate" class="step-section-body" hidden>

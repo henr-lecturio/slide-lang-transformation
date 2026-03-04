@@ -23,6 +23,7 @@ import {
   saveConfig,
   syncSettingsFieldState,
   syncStepSections,
+  toggleSlideTranslateStyleEditor,
   toggleTermbaseEditor,
 } from "./settings.js";
 import {
@@ -65,6 +66,7 @@ import {
   runLabAction,
   saveLabTestSettings,
   stopLabJob,
+  syncLabSettingsFieldState,
   syncLabTestSections,
   syncLabActionState,
 } from "./lab.js";
@@ -215,6 +217,9 @@ function bindEvents() {
   if (el.termbaseAddRow) {
     el.termbaseAddRow.addEventListener("click", addTermbaseRow);
   }
+  if (el.slideTranslateStyleEditorToggle) {
+    el.slideTranslateStyleEditorToggle.addEventListener("click", toggleSlideTranslateStyleEditor);
+  }
 
   el.ttsHealthCheck.addEventListener("click", () => runTask(testTtsHealth));
   if (el.transcriptionHealthCheck) {
@@ -357,6 +362,10 @@ function bindEvents() {
 
   el.transcriptionProvider.addEventListener("change", syncSettingsFieldState);
   el.finalSlideUpscaleMode.addEventListener("change", syncSettingsFieldState);
+  el.finalSlideTranslationMode.addEventListener("change", () => {
+    syncSettingsFieldState();
+    syncLabSettingsFieldState();
+  });
 
   for (const input of [
     el.runStepEdit,
@@ -427,6 +436,18 @@ function bindEvents() {
   if (el.termbaseTableBody) {
     el.termbaseTableBody.addEventListener("input", () => clearHealthStatus("textTranslate"));
     el.termbaseTableBody.addEventListener("change", () => clearHealthStatus("textTranslate"));
+  }
+
+  for (const input of [
+    el.finalSlideTranslationMode,
+  ]) {
+    if (!input) continue;
+    input.addEventListener("input", () => clearHealthStatus("slideTranslate"));
+    input.addEventListener("change", () => clearHealthStatus("slideTranslate"));
+  }
+  if (el.slideTranslateStyleTableBody) {
+    el.slideTranslateStyleTableBody.addEventListener("input", () => clearHealthStatus("slideTranslate"));
+    el.slideTranslateStyleTableBody.addEventListener("change", () => clearHealthStatus("slideTranslate"));
   }
 
   for (const input of [

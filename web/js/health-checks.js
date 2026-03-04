@@ -132,6 +132,11 @@ function collectSlideTranslateHealthPayload() {
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
+    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
+    GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim() || el.googleVisionProjectId.value.trim(),
+    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
+    GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
   };
 }
 
@@ -204,14 +209,25 @@ export async function testSlideTranslateHealth() {
   setHealthStatus("slideTranslate", "pending", "Testing...", "");
   const result = await apiPost("/api/slide-translate/health", collectSlideTranslateHealthPayload());
   if (result.ok) {
-    const meta = [
-      `target=${result.target_language || "-"}`,
-      `model=${result.model || "-"}`,
-      result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
-      `${result.latency_ms || 0} ms`,
-      `${result.image_width || 0}x${result.image_height || 0}`,
-      `${result.image_bytes || 0} bytes`,
-    ].join(" | ");
+    const meta = result.mode === "deterministic_glossary"
+      ? [
+        `target=${result.target_language || "-"}`,
+        `ocr=${result.ocr_provider || "google_vision_document_text_detection"}`,
+        `vision_project=${result.vision_project_id_used || "-"}`,
+        `translate_project=${result.translate_project_id_used || "-"}`,
+        `model=${result.model || "-"}`,
+        `${result.latency_ms || 0} ms`,
+        result.ocr_preview ? `ocr="${result.ocr_preview}"` : "",
+        result.translated_text ? `sample="${String(result.translated_text).slice(0, 90)}"` : "",
+      ].filter(Boolean).join(" | ")
+      : [
+        `target=${result.target_language || "-"}`,
+        `model=${result.model || "-"}`,
+        result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
+        `${result.latency_ms || 0} ms`,
+        `${result.image_width || 0}x${result.image_height || 0}`,
+        `${result.image_bytes || 0} bytes`,
+      ].filter(Boolean).join(" | ");
     setHealthStatus("slideTranslate", "ok", "Reachable", meta);
     showButtonSuccess(el.slideTranslateHealthCheck, "OK");
     return;

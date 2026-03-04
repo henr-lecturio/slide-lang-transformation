@@ -1,5 +1,22 @@
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/fonts/Noto_Sans/NotoSans-VariableFont_wdth,wght.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/fonts/Noto_Sans/NotoSans-Italic-VariableFont_wdth,wght.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
+  --font-sans: "Noto Sans", "Segoe UI Variable", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --bg: #050506;
   --bg-soft: #08090b;
   --surface: #0a0b0d;
@@ -40,7 +57,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: Inter, "Segoe UI Variable", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.45;
   color: var(--text);
   background:#090a0c; 

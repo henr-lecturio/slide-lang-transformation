@@ -459,7 +459,20 @@ def build_master_audio_timeline_rows(
     rows: list[dict[str, Any]] = []
     alignment_rows = sorted_alignment_rows(alignment_by_segment)
     phrase_matches = build_slide_phrase_matches(events, alignment_by_segment, words)
+    audio_time_offset = max(0.0, float(thumbnail_duration_sec))
     current_start = 0.0
+
+    def audio_time_to_video_time(raw_time: float) -> float:
+        bounded = max(0.0, min(full_audio_duration, float(raw_time)))
+        return audio_time_offset + bounded
+
+    def matched_audio_time(match: dict[str, Any], key: str) -> float | None:
+        if not match.get("matched"):
+            return None
+        raw_value = match.get(key)
+        if raw_value is None:
+            return None
+        return float(raw_value)
 
     for idx, event in enumerate(events, start=1):
         event_id = int(event.get("event_id", 0) or 0)
@@ -479,27 +492,34 @@ def build_master_audio_timeline_rows(
         elif idx < len(events):
             current_match = phrase_matches.get(idx, {})
             next_match = phrase_matches.get(idx + 1, {})
-            next_start = float(next_match.get("start_sec", 0.0) or 0.0) if next_match.get("matched") else None
+            next_start_raw = matched_audio_time(next_match, "start_sec")
+            next_start = audio_time_to_video_time(next_start_raw) if next_start_raw is not None else None
             if next_start is not None:
                 end_sec = max(current_start + 0.04, next_start)
             elif current_match.get("matched"):
-                end_sec = max(current_start + min_slide_sec, float(current_match.get("end_sec", current_start) or current_start) + tail_pad_sec)
+                current_end_raw = matched_audio_time(current_match, "end_sec")
+                current_end = audio_time_to_video_time(current_end_raw) if current_end_raw is not None else current_start
+                end_sec = max(current_start + min_slide_sec, current_end + tail_pad_sec)
             else:
                 source_boundary = float(event.get("slide_end", 0.0) or 0.0)
                 projected_end = project_source_time_to_tts(source_boundary, alignment_rows, full_audio_duration, word_boundaries)
                 if projected_end is None:
                     audio_window = compute_slide_audio_window(event, alignment_by_segment)
-                    projected_end = audio_window[1] if audio_window is not None else current_start + min_slide_sec
-                end_sec = max(current_start + min_slide_sec, float(projected_end))
+                    projected_end = audio_window[1] if audio_window is not None else None
+                if projected_end is None:
+                    end_sec = current_start + min_slide_sec
+                else:
+                    end_sec = max(current_start + min_slide_sec, audio_time_to_video_time(projected_end))
         else:
             current_match = phrase_matches.get(idx, {})
-            end_candidates = [current_start + min_slide_sec, full_audio_duration + tail_pad_sec]
-            if current_match.get("matched"):
-                end_candidates.append(float(current_match.get("end_sec", current_start) or current_start) + tail_pad_sec)
+            end_candidates = [current_start + min_slide_sec, audio_time_to_video_time(full_audio_duration) + tail_pad_sec]
+            current_end_raw = matched_audio_time(current_match, "end_sec")
+            if current_end_raw is not None:
+                end_candidates.append(audio_time_to_video_time(current_end_raw) + tail_pad_sec)
             source_boundary = float(event.get("slide_end", event.get("slide_start", 0.0)) or 0.0)
             projected_end = project_source_time_to_tts(source_boundary, alignment_rows, full_audio_duration, word_boundaries)
             if projected_end is not None:
-                end_candidates.append(float(projected_end))
+                end_candidates.append(audio_time_to_video_time(projected_end))
             end_sec = max(end_candidates)
 
         current_match = phrase_matches.get(idx, {})
@@ -508,18 +528,24 @@ def build_master_audio_timeline_rows(
             audio_clip_end = 0.0
             audio_clip_duration = 0.0
         elif current_match.get("matched"):
-            audio_clip_start = min(max(0.0, float(current_match.get("start_sec", current_start) or current_start)), full_audio_duration)
-            audio_clip_end = min(max(audio_clip_start, float(current_match.get("end_sec", audio_clip_start) or audio_clip_start)), full_audio_duration)
+            audio_clip_start_raw = matched_audio_time(current_match, "start_sec")
+            audio_clip_end_raw = matched_audio_time(current_match, "end_sec")
+            if audio_clip_start_raw is None or audio_clip_end_raw is None:
+                audio_clip_start = current_start
+                audio_clip_end = max(audio_clip_start, end_sec)
+            else:
+                audio_clip_start = audio_time_to_video_time(audio_clip_start_raw)
+                audio_clip_end = max(audio_clip_start, audio_time_to_video_time(audio_clip_end_raw))
             audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
         else:
             fallback_window = compute_slide_audio_window(event, alignment_by_segment)
             if fallback_window is not None:
-                audio_clip_start = min(max(0.0, float(fallback_window[0])), full_audio_duration)
-                audio_clip_end = min(max(audio_clip_start, float(fallback_window[1])), full_audio_duration)
+                audio_clip_start = audio_time_to_video_time(fallback_window[0])
+                audio_clip_end = max(audio_clip_start, audio_time_to_video_time(fallback_window[1]))
                 audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
             else:
-                audio_clip_start = min(current_start, full_audio_duration)
-                audio_clip_end = min(end_sec, full_audio_duration)
+                audio_clip_start = current_start
+                audio_clip_end = max(audio_clip_start, end_sec)
                 audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
         if idx == 1:
             pass

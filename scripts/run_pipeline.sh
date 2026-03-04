@@ -71,10 +71,18 @@ GEMINI_EDIT_MODEL="${GEMINI_EDIT_MODEL:-gemini-3-pro-image-preview}"
 FINAL_SLIDE_TRANSLATION_MODE="${FINAL_SLIDE_TRANSLATION_MODE:-none}"
 FINAL_SLIDE_TARGET_LANGUAGE="${FINAL_SLIDE_TARGET_LANGUAGE:-German}"
 GEMINI_TRANSLATE_MODEL="${GEMINI_TRANSLATE_MODEL:-gemini-3-pro-image-preview}"
-GOOGLE_TRANSLATE_PROJECT_ID="${GOOGLE_TRANSLATE_PROJECT_ID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}"
+GOOGLE_VISION_PROJECT_ID="${GOOGLE_VISION_PROJECT_ID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}"
+GOOGLE_TRANSLATE_PROJECT_ID="${GOOGLE_TRANSLATE_PROJECT_ID:-${GOOGLE_VISION_PROJECT_ID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}"
 GOOGLE_TRANSLATE_LOCATION="${GOOGLE_TRANSLATE_LOCATION:-us-central1}"
 GOOGLE_TRANSLATE_MODEL="${GOOGLE_TRANSLATE_MODEL:-general/translation-llm}"
 GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE="${GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE:-}"
+GOOGLE_VISION_LOCATION="${GOOGLE_VISION_LOCATION:-global}"
+GOOGLE_VISION_FEATURE="${GOOGLE_VISION_FEATURE:-DOCUMENT_TEXT_DETECTION}"
+SLIDE_TRANSLATE_BUILD_GLOSSARY="${SLIDE_TRANSLATE_BUILD_GLOSSARY:-1}"
+SLIDE_TRANSLATE_APPLY_GLOSSARY="${SLIDE_TRANSLATE_APPLY_GLOSSARY:-1}"
+SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY="${SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY:-mark_only}"
+SLIDE_TRANSLATE_FONT_PATH="${SLIDE_TRANSLATE_FONT_PATH:-config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf}"
+SLIDE_TRANSLATE_STYLE_CONFIG_PATH="${SLIDE_TRANSLATE_STYLE_CONFIG_PATH:-config/slide_translate_styles.json}"
 GEMINI_TTS_MODEL="${GEMINI_TTS_MODEL:-gemini-2.5-flash-tts}"
 GEMINI_TTS_VOICE="${GEMINI_TTS_VOICE:-Kore}"
 GOOGLE_TTS_PROJECT_ID="${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}"
@@ -131,6 +139,8 @@ RUN_STEP_UPSCALE="$(toggle_to_flag "$RUN_STEP_UPSCALE")"
 RUN_STEP_TEXT_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TEXT_TRANSLATE")"
 RUN_STEP_TTS="$(toggle_to_flag "$RUN_STEP_TTS")"
 RUN_STEP_VIDEO_EXPORT="$(toggle_to_flag "$RUN_STEP_VIDEO_EXPORT")"
+SLIDE_TRANSLATE_BUILD_GLOSSARY="$(toggle_to_flag "$SLIDE_TRANSLATE_BUILD_GLOSSARY")"
+SLIDE_TRANSLATE_APPLY_GLOSSARY="$(toggle_to_flag "$SLIDE_TRANSLATE_APPLY_GLOSSARY")"
 
 emit_step() {
   local action="$1"
@@ -396,6 +406,8 @@ FINAL_SLIDE_RAW_DIR="$OUT_BASE/keyframes/final/slide_raw"
 FINAL_SLIDE_TRANSLATED_DIR="$OUT_BASE/keyframes/final/slide_translated"
 FINAL_SLIDE_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_upscaled"
 FINAL_SLIDE_TRANSLATED_UPSCALED_DIR="$OUT_BASE/keyframes/final/slide_translated_upscaled"
+SLIDE_TRANSLATE_DIR="$OUT_BASE/slide_translate"
+SLIDE_TRANSLATE_GLOSSARY_JSON="$SLIDE_TRANSLATE_DIR/glossary.json"
 UPSCALE_MANIFEST_JSON="$OUT_BASE/keyframes/final/upscale_manifest.json"
 FINAL_FULL_DIR="$OUT_BASE/keyframes/final/full"
 TEXT_TRANSLATED_JSON="$OUT_BASE/slide_text_map_final_translated.json"
@@ -560,8 +572,92 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
       step_done translate
       echo "[Translate] Translation finished."
       ;;
+    deterministic_glossary)
+      if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
+        echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled." >&2
+        exit 1
+      fi
+      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ] && [ -z "${GOOGLE_VISION_PROJECT_ID:-}" ]; then
+        echo "ERROR: deterministic_glossary requires GOOGLE_VISION_PROJECT_ID for OCR." >&2
+        exit 1
+      fi
+      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ] && [ -z "${GOOGLE_TRANSLATE_PROJECT_ID:-}" ]; then
+        echo "ERROR: deterministic_glossary requires GOOGLE_TRANSLATE_PROJECT_ID for glossary translation." >&2
+        exit 1
+      fi
+      if [ "$SLIDE_TRANSLATE_APPLY_GLOSSARY" = "1" ] && [ -z "${GOOGLE_VISION_PROJECT_ID:-}" ]; then
+        echo "ERROR: deterministic_glossary apply pass requires GOOGLE_VISION_PROJECT_ID for OCR." >&2
+        exit 1
+      fi
+      case "$SLIDE_TRANSLATE_FONT_PATH" in
+        /*) SLIDE_TRANSLATE_FONT_PATH_ABS="$SLIDE_TRANSLATE_FONT_PATH" ;;
+        *) SLIDE_TRANSLATE_FONT_PATH_ABS="$ROOT_DIR/$SLIDE_TRANSLATE_FONT_PATH" ;;
+      esac
+      case "$SLIDE_TRANSLATE_STYLE_CONFIG_PATH" in
+        /*) SLIDE_TRANSLATE_STYLE_CONFIG_PATH_ABS="$SLIDE_TRANSLATE_STYLE_CONFIG_PATH" ;;
+        *) SLIDE_TRANSLATE_STYLE_CONFIG_PATH_ABS="$ROOT_DIR/$SLIDE_TRANSLATE_STYLE_CONFIG_PATH" ;;
+      esac
+      if [ "$SLIDE_TRANSLATE_APPLY_GLOSSARY" = "1" ] && [ ! -f "$SLIDE_TRANSLATE_FONT_PATH_ABS" ]; then
+        echo "ERROR: deterministic_glossary font file not found: $SLIDE_TRANSLATE_FONT_PATH_ABS" >&2
+        exit 1
+      fi
+      if [ "$SLIDE_TRANSLATE_APPLY_GLOSSARY" = "1" ] && [ ! -f "$SLIDE_TRANSLATE_STYLE_CONFIG_PATH_ABS" ]; then
+        echo "ERROR: deterministic_glossary style config not found: $SLIDE_TRANSLATE_STYLE_CONFIG_PATH_ABS" >&2
+        exit 1
+      fi
+      if [ "$SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY" != "mark_only" ] && [ "$SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY" != "allow_partial" ]; then
+        echo "ERROR: SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY must be mark_only or allow_partial." >&2
+        exit 1
+      fi
+      echo "[Translate] Deterministic glossary translation to $FINAL_SLIDE_TARGET_LANGUAGE ..."
+      step_start translate
+      rm -rf "$SLIDE_TRANSLATE_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR.__tmp"
+      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ]; then
+        step_detail translate "build-glossary"
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/build_slide_translate_glossary.py" \
+          --input-dir "$FINAL_SLIDE_DIR" \
+          --slide-map-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
+          --out-dir "$SLIDE_TRANSLATE_DIR.__tmp" \
+          --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
+          --termbase-file "$TRANSLATION_TERMBASE_FILE" \
+          --vision-project-id "$GOOGLE_VISION_PROJECT_ID" \
+          --vision-feature "$GOOGLE_VISION_FEATURE" \
+          --translate-project-id "$GOOGLE_TRANSLATE_PROJECT_ID" \
+          --translate-location "$GOOGLE_TRANSLATE_LOCATION" \
+          --translate-model "$GOOGLE_TRANSLATE_MODEL" \
+          --source-language-code "$GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE"
+      elif [ ! -f "$SLIDE_TRANSLATE_GLOSSARY_JSON" ]; then
+        echo "ERROR: glossary build disabled but no existing glossary found at $SLIDE_TRANSLATE_GLOSSARY_JSON" >&2
+        exit 1
+      else
+        mkdir -p "$SLIDE_TRANSLATE_DIR.__tmp"
+        cp "$SLIDE_TRANSLATE_GLOSSARY_JSON" "$SLIDE_TRANSLATE_DIR.__tmp/glossary.json"
+      fi
+      if [ "$SLIDE_TRANSLATE_APPLY_GLOSSARY" = "1" ]; then
+        step_detail translate "apply-glossary"
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/apply_slide_translate_glossary.py" \
+          --input-dir "$FINAL_SLIDE_DIR" \
+          --slide-map-json "$SLIDE_TEXT_MAP_FINAL_JSON" \
+          --glossary-json "$SLIDE_TRANSLATE_DIR.__tmp/glossary.json" \
+          --output-dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" \
+          --manifest-json "$SLIDE_TRANSLATE_DIR.__tmp/apply_manifest.json" \
+          --manifest-csv "$SLIDE_TRANSLATE_DIR.__tmp/apply_manifest.csv" \
+          --needs-review-json "$SLIDE_TRANSLATE_DIR.__tmp/needs_review.json" \
+          --style-manifest-json "$SLIDE_TRANSLATE_DIR.__tmp/style_manifest.json" \
+          --font-path "$SLIDE_TRANSLATE_FONT_PATH_ABS" \
+          --style-config-json "$SLIDE_TRANSLATE_STYLE_CONFIG_PATH_ABS" \
+          --vision-project-id "$GOOGLE_VISION_PROJECT_ID" \
+          --vision-feature "$GOOGLE_VISION_FEATURE" \
+          --needs-review-policy "$SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY" \
+          --debug-dir "$SLIDE_TRANSLATE_DIR.__tmp/debug"
+        publish_dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR"
+      fi
+      publish_dir "$SLIDE_TRANSLATE_DIR.__tmp" "$SLIDE_TRANSLATE_DIR"
+      step_done translate
+      echo "[Translate] Deterministic glossary translation finished."
+      ;;
     *)
-      echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE must be one of: none, gemini" >&2
+      echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE must be one of: none, gemini, deterministic_glossary" >&2
       exit 1
       ;;
   esac
@@ -808,6 +904,7 @@ echo "Run step tts: $RUN_STEP_TTS"
 echo "Run step video export: $RUN_STEP_VIDEO_EXPORT"
 echo "Final slide translated images: $FINAL_SLIDE_TRANSLATED_DIR"
 echo "Final slide translation mode: $FINAL_SLIDE_TRANSLATION_MODE"
+echo "Slide translate artifacts: $SLIDE_TRANSLATE_DIR"
 echo "Final slide upscaled images: $FINAL_SLIDE_UPSCALED_DIR"
 echo "Final slide translated upscaled images: $FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
 echo "Final slide upscale mode: $FINAL_SLIDE_UPSCALE_MODE"

@@ -122,13 +122,21 @@ function renderLabTargetLanguageOptions() {
   el.labFinalSlideTargetLanguage.value = preferred.label;
 }
 
-function syncLabSettingsFieldState() {
+export function syncLabSettingsFieldState() {
   const mode = el.labFinalSlideUpscaleMode.value;
+  const translateMode = String(el.finalSlideTranslationMode?.value || "gemini").trim().toLowerCase();
   const localRows = document.querySelectorAll(".lab-upscale-local-row");
   const replicateRows = document.querySelectorAll(".lab-upscale-replicate-row");
   const isLocal = mode === "swin2sr";
   for (const row of localRows) row.hidden = !isLocal;
   for (const row of replicateRows) row.hidden = isLocal;
+  const geminiTranslateMode = translateMode !== "deterministic_glossary";
+  if (el.labGeminiTranslateModel) {
+    el.labGeminiTranslateModel.disabled = !geminiTranslateMode;
+  }
+  if (el.labGeminiTranslatePrompt) {
+    el.labGeminiTranslatePrompt.disabled = !geminiTranslateMode;
+  }
 }
 
 function applyLabTestSettingsToForm() {
@@ -171,7 +179,7 @@ function buildLabSettingsSummary() {
   const settings = ensureLabTestSettings();
   return [
     `edit=${settings.slide_edit_model || "-"}`,
-    `translate=${settings.target_language || "-"}`,
+    `translate=${settings.target_language || "-"} [${String(el.finalSlideTranslationMode?.value || "gemini").trim() || "gemini"}]`,
     `upscale=${settings.slide_upscale_mode || "-"}`,
   ].join(" | ");
 }

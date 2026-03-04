@@ -283,7 +283,7 @@
 }
 
 #gemini_text_translate_prompt {
-  min-height: 128px;
+  max-height: 128px;
 }
 
 #termbase-editor-panel {
@@ -293,6 +293,8 @@
 .termbase-editor-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 12px;
 }
 
@@ -307,6 +309,10 @@
   width: 100%;
   border-collapse: collapse;
   min-width: 820px;
+}
+
+.slide-style-table {
+  min-width: 860px;
 }
 
 .termbase-table th,

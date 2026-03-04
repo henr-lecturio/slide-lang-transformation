@@ -17,6 +17,22 @@ const TERMBASE_COLUMNS = [
   { key: "case_sensitive", label: "Case Sensitive" },
 ];
 
+const SLIDE_STYLE_COLUMNS = [
+  { key: "display_key", label: "Key", type: "readonly" },
+  { key: "font_size", label: "Font Size", type: "number", min: "1", step: "1" },
+  { key: "min_font_size", label: "Min Font", type: "number", min: "1", step: "1" },
+  { key: "line_spacing_ratio", label: "Line Spacing", type: "number", min: "0", step: "0.01" },
+  { key: "text_color", label: "Color", type: "text", placeholder: "auto or #RRGGBB" },
+  { key: "padding", label: "Padding", type: "text", placeholder: "top right bottom left" },
+];
+
+let slideTranslateStyleEditorModel = {
+  version: 1,
+  defaults: {},
+  roles: {},
+  slots: {},
+};
+
 function isStepSectionEnabled(section) {
   const inputId = section?.dataset?.stepInput || "";
   if (!inputId) return true;
@@ -147,6 +163,227 @@ function syncTermbaseCsvFromTable() {
     .filter((row) => TERMBASE_COLUMNS.some((column) => String(row[column.key] ?? "").trim() !== ""))
     .map((row) => TERMBASE_COLUMNS.map((column) => serializeCsvValue(row[column.key])).join(","));
   el.translationTermbaseCsv.value = [header, ...body].join("\n");
+}
+
+function parseSlideTranslateStylesJson(jsonText) {
+  const text = String(jsonText || "").trim();
+  if (!text) {
+    return { version: 1, defaults: {}, roles: {}, slots: {} };
+  }
+  try {
+    const payload = JSON.parse(text);
+    return {
+      version: Number(payload?.version) > 0 ? Number(payload.version) : 1,
+      defaults: payload && typeof payload.defaults === "object" && payload.defaults ? structuredClone(payload.defaults) : {},
+      roles: payload && typeof payload.roles === "object" && payload.roles ? structuredClone(payload.roles) : {},
+      slots: payload && typeof payload.slots === "object" && payload.slots ? structuredClone(payload.slots) : {},
+    };
+  } catch {
+    return { version: 1, defaults: {}, roles: {}, slots: {} };
+  }
+}
+
+function buildSlideTranslateStyleRows(model) {
+  return [
+    { scope_type: "defaults", scope_key: "defaults", display_key: "defaults", style: model.defaults || {} },
+    ...Object.entries(model.roles || {}).map(([key, value]) => ({
+      scope_type: "role",
+      scope_key: key,
+      display_key: key,
+      style: value || {},
+    })),
+    ...Object.entries(model.slots || {}).map(([key, value]) => ({
+      scope_type: "slot",
+      scope_key: key,
+      display_key: key,
+      style: value || {},
+    })),
+  ];
+}
+
+function displaySlideStyleColor(style = {}) {
+  const mode = String(style.text_color_mode ?? "").trim();
+  const color = String(style.text_color ?? "").trim();
+  if (mode === "fixed" && color) return color;
+  if (color && color.toLowerCase() !== "auto") return color;
+  return "auto";
+}
+
+function displaySlideStylePadding(style = {}) {
+  const padding = String(style.padding ?? "").trim();
+  if (padding) return padding;
+  const top = style.box_padding_top_ratio ?? style.box_padding_y_ratio;
+  const right = style.box_padding_right_ratio ?? style.box_padding_x_ratio;
+  const bottom = style.box_padding_bottom_ratio ?? style.box_padding_y_ratio;
+  const left = style.box_padding_left_ratio ?? style.box_padding_x_ratio;
+  const values = [top, right, bottom, left]
+    .map((value) => (value === undefined || value === null || value === "" ? "" : String(value).trim()));
+  if (values.every((value) => value !== "")) {
+    return values.join(" ");
+  }
+  return "";
+}
+
+function slideStyleVisibleValuesFromStyle(style = {}, displayKey = "") {
+  return {
+    display_key: displayKey,
+    font_size: style.font_size === undefined || style.font_size === null ? "" : String(style.font_size),
+    min_font_size: style.min_font_size === undefined || style.min_font_size === null ? "" : String(style.min_font_size),
+    line_spacing_ratio: style.line_spacing_ratio === undefined || style.line_spacing_ratio === null ? "" : String(style.line_spacing_ratio),
+    text_color: displaySlideStyleColor(style),
+    padding: displaySlideStylePadding(style),
+  };
+}
+
+function normalizePaddingShorthand(value) {
+  const text = String(value ?? "").trim().replace(/,/g, " ");
+  if (!text) return "";
+  const parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length === 0 || parts.length > 4) return text;
+  return parts.join(" ");
+}
+
+function parseIntegerOrUndefined(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  const num = Number(text);
+  return Number.isFinite(num) ? Math.round(num) : undefined;
+}
+
+function parseFloatOrUndefined(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  const num = Number(text);
+  return Number.isFinite(num) ? num : undefined;
+}
+
+function deletePaddingKeys(style) {
+  delete style.padding;
+  delete style.box_padding_x_ratio;
+  delete style.box_padding_y_ratio;
+  delete style.box_padding_top_ratio;
+  delete style.box_padding_right_ratio;
+  delete style.box_padding_bottom_ratio;
+  delete style.box_padding_left_ratio;
+}
+
+function syncSlideTranslateStylesJsonFromTable() {
+  if (!el.slideTranslateStylesJson || !el.slideTranslateStyleTableBody) return;
+  const payload = structuredClone(slideTranslateStyleEditorModel);
+  for (const row of [...el.slideTranslateStyleTableBody.querySelectorAll("tr")]) {
+    const scopeType = row.dataset.scopeType || "";
+    const scopeKey = row.dataset.scopeKey || "";
+    const style =
+      scopeType === "defaults"
+        ? payload.defaults
+        : scopeType === "role"
+          ? payload.roles?.[scopeKey]
+          : payload.slots?.[scopeKey];
+    if (!style || typeof style !== "object") continue;
+
+    const current = {};
+    for (const column of SLIDE_STYLE_COLUMNS) {
+      if (column.type === "readonly") continue;
+      current[column.key] = row.querySelector(`[data-col="${column.key}"]`)?.value ?? "";
+    }
+    const initial = JSON.parse(row.dataset.initialVisibleValues || "{}");
+
+    if (String(current.font_size ?? "") !== String(initial.font_size ?? "")) {
+      const value = parseIntegerOrUndefined(current.font_size);
+      if (value === undefined) delete style.font_size;
+      else style.font_size = value;
+    }
+    if (String(current.min_font_size ?? "") !== String(initial.min_font_size ?? "")) {
+      const value = parseIntegerOrUndefined(current.min_font_size);
+      if (value === undefined) delete style.min_font_size;
+      else style.min_font_size = value;
+    }
+    if (String(current.line_spacing_ratio ?? "") !== String(initial.line_spacing_ratio ?? "")) {
+      const value = parseFloatOrUndefined(current.line_spacing_ratio);
+      if (value === undefined) delete style.line_spacing_ratio;
+      else style.line_spacing_ratio = value;
+    }
+    if (String(current.text_color ?? "") !== String(initial.text_color ?? "")) {
+      const color = String(current.text_color ?? "").trim();
+      if (!color || color.toLowerCase() === "auto" || color.toLowerCase() === "inherit") {
+        delete style.text_color;
+        if (String(style.text_color_mode ?? "").trim() === "fixed") {
+          delete style.text_color_mode;
+        }
+      } else {
+        style.text_color = color;
+        style.text_color_mode = "fixed";
+      }
+    }
+    if (String(current.padding ?? "") !== String(initial.padding ?? "")) {
+      const padding = normalizePaddingShorthand(current.padding);
+      deletePaddingKeys(style);
+      if (padding) {
+        style.padding = padding;
+      }
+    }
+  }
+  el.slideTranslateStylesJson.value = JSON.stringify(payload, null, 2);
+}
+
+function createSlideTranslateStyleRow(row) {
+  const tr = document.createElement("tr");
+  tr.dataset.scopeType = row.scope_type;
+  tr.dataset.scopeKey = row.scope_key;
+  const visibleValues = slideStyleVisibleValuesFromStyle(row.style, row.display_key);
+  tr.dataset.initialVisibleValues = JSON.stringify(visibleValues);
+
+  for (const column of SLIDE_STYLE_COLUMNS) {
+    const td = document.createElement("td");
+    let control;
+    if (column.type === "readonly") {
+      control = document.createElement("input");
+      control.type = "text";
+      control.readOnly = true;
+      control.value = String(visibleValues[column.key] ?? "");
+    } else {
+      control = document.createElement("input");
+      control.type = column.type;
+      if (column.min !== undefined) control.min = column.min;
+      if (column.step !== undefined) control.step = column.step;
+      if (column.placeholder) control.placeholder = column.placeholder;
+      control.value = String(visibleValues[column.key] ?? "");
+      control.addEventListener("input", syncSlideTranslateStylesJsonFromTable);
+      control.addEventListener("change", syncSlideTranslateStylesJsonFromTable);
+    }
+    control.dataset.col = column.key;
+    td.appendChild(control);
+    tr.appendChild(td);
+  }
+  return tr;
+}
+
+export function renderSlideTranslateStyleEditor(jsonText) {
+  if (!el.slideTranslateStyleTableBody || !el.slideTranslateStylesJson) return;
+  slideTranslateStyleEditorModel = parseSlideTranslateStylesJson(jsonText);
+  el.slideTranslateStylesJson.value = String(jsonText || "").trim();
+  el.slideTranslateStyleTableBody.innerHTML = "";
+  for (const row of buildSlideTranslateStyleRows(slideTranslateStyleEditorModel)) {
+    el.slideTranslateStyleTableBody.appendChild(createSlideTranslateStyleRow(row));
+  }
+  syncSlideTranslateStylesJsonFromTable();
+}
+
+export function toggleSlideTranslateStyleEditor() {
+  if (!el.slideTranslateStyleEditorPanel || !el.slideTranslateStyleEditorToggle || !el.slideTranslateStyleEditorBody) return;
+  const nextOpen = !el.slideTranslateStyleEditorPanel.classList.contains("is-open");
+  el.slideTranslateStyleEditorPanel.classList.toggle("is-open", nextOpen);
+  el.slideTranslateStyleEditorToggle.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+  el.slideTranslateStyleEditorBody.hidden = !nextOpen;
+}
+
+function setSlideTranslateStyleEditorDisabled(disabled) {
+  if (el.slideTranslateStyleEditorToggle) el.slideTranslateStyleEditorToggle.disabled = disabled;
+  if (el.slideTranslateStyleTableBody) {
+    for (const input of el.slideTranslateStyleTableBody.querySelectorAll("input")) {
+      input.disabled = disabled;
+    }
+  }
 }
 
 function createTermbaseRow(row = {}) {
@@ -324,6 +561,8 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderHomeQuickLanguageOptions(cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
+  el.googleVisionProjectId.value = cfg.GOOGLE_VISION_PROJECT_ID || cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  renderSlideTranslateStyleEditor(cfg.SLIDE_TRANSLATE_STYLES_JSON || "");
   el.googleTranslateProjectId.value = cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.googleTranslateLocation.value = cfg.GOOGLE_TRANSLATE_LOCATION || "us-central1";
   el.geminiTextTranslateModel.value = cfg.GOOGLE_TRANSLATE_MODEL || "general/translation-llm";
@@ -434,6 +673,11 @@ export async function saveConfig(options = {}) {
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
+    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
+    SLIDE_TRANSLATE_STYLES_JSON: (() => {
+      syncSlideTranslateStylesJsonFromTable();
+      return el.slideTranslateStylesJson.value;
+    })(),
     GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim(),
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
     GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
@@ -529,20 +773,24 @@ export function syncSettingsFieldState() {
 
   el.finalSlideTranslationMode.disabled = !translateEnabled;
   const languageSelectionEnabled = translateEnabled || textTranslateEnabled || ttsEnabled;
+  const geminiSlideTranslate = el.finalSlideTranslationMode.value === "gemini";
+  const deterministicSlideTranslate = el.finalSlideTranslationMode.value === "deterministic_glossary";
   if (el.finalSlideTargetLanguageSearch) {
     el.finalSlideTargetLanguageSearch.disabled = !languageSelectionEnabled;
   }
   el.finalSlideTargetLanguage.disabled = !languageSelectionEnabled;
-  el.geminiTranslateModel.disabled = !translateEnabled;
-  el.geminiTranslatePrompt.disabled = !translateEnabled;
-  const slideTranslateApiEnabled = translateEnabled && el.finalSlideTranslationMode.value === "gemini";
+  el.geminiTranslateModel.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.geminiTranslatePrompt.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.googleVisionProjectId.disabled = !translateEnabled || !deterministicSlideTranslate;
+  setSlideTranslateStyleEditorDisabled(!translateEnabled || !deterministicSlideTranslate);
+  const slideTranslateApiEnabled = translateEnabled && el.finalSlideTranslationMode.value !== "none";
   if (el.slideTranslateHealthCheck) {
     el.slideTranslateHealthCheck.disabled = !slideTranslateApiEnabled;
   }
   if (!slideTranslateApiEnabled) {
-    setHealthStatus("slideTranslate", "idle", translateEnabled ? "Only for gemini mode." : "Step disabled.", "");
+    setHealthStatus("slideTranslate", "idle", translateEnabled ? "Mode none." : "Step disabled.", "");
   } else if (
-    el.slideTranslateHealthStatus?.textContent === "Only for gemini mode."
+    el.slideTranslateHealthStatus?.textContent === "Mode none."
     || el.slideTranslateHealthStatus?.textContent === "Step disabled."
   ) {
     clearHealthStatus("slideTranslate");

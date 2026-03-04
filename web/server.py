@@ -32,6 +32,7 @@ from scripts.lib.cloud_translate import (
     translate_texts_llm,
 )
 from scripts.lib.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
+from scripts.lib.slide_ocr import ensure_cloud_vision_client
 from scripts.lib.translation_memory import (
     apply_termbase_placeholders,
     load_termbase_entries,
@@ -39,6 +40,7 @@ from scripts.lib.translation_memory import (
 )
 
 WEB_DIR = ROOT_DIR / "web"
+FONT_DIR = ROOT_DIR / "config" / "fonts"
 CONFIG_PATH = ROOT_DIR / "config" / "pipeline.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
@@ -60,6 +62,12 @@ ALLOWED_IMAGE_MODELS = {
     "gemini-2.5-flash-image",
 }
 DEFAULT_IMAGE_MODEL = "gemini-3-pro-image-preview"
+FONT_EXTS = {".otf", ".ttf", ".woff", ".woff2"}
+
+mimetypes.add_type("font/otf", ".otf")
+mimetypes.add_type("font/ttf", ".ttf")
+mimetypes.add_type("font/woff", ".woff")
+mimetypes.add_type("font/woff2", ".woff2")
 
 VENV_PY = ROOT_DIR / ".venv" / "bin" / "python"
 PYTHON_BIN = str(VENV_PY if VENV_PY.exists() else Path(sys.executable))
@@ -388,6 +396,53 @@ def write_text_file(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     path.write_text(normalized.rstrip("\n") + "\n", encoding="utf-8")
+
+
+def resolve_slide_translate_style_config_path(raw_path: str) -> Path:
+    path_text = str(raw_path or "").strip() or "config/slide_translate_styles.json"
+    path = Path(path_text)
+    if path.is_absolute():
+        return path.resolve()
+    return (ROOT_DIR / path).resolve()
+
+
+def normalize_slide_translate_styles_json(text: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON must not be empty")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"SLIDE_TRANSLATE_STYLES_JSON is not valid JSON: {exc.msg}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON must be a JSON object")
+    version = payload.get("version", 1)
+    try:
+        version = int(version)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON.version must be an integer") from exc
+    if version < 1:
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON.version must be >= 1")
+    defaults = payload.get("defaults", {})
+    roles = payload.get("roles", {})
+    slots = payload.get("slots", {})
+    if not isinstance(defaults, dict):
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON.defaults must be an object")
+    if not isinstance(roles, dict):
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON.roles must be an object")
+    if not isinstance(slots, dict):
+        raise ValueError("SLIDE_TRANSLATE_STYLES_JSON.slots must be an object")
+    for scope_name, scope_payload in (("roles", roles), ("slots", slots)):
+        for key, value in scope_payload.items():
+            if not isinstance(value, dict):
+                raise ValueError(f"SLIDE_TRANSLATE_STYLES_JSON.{scope_name}.{key} must be an object")
+    normalized = {
+        "version": version,
+        "defaults": defaults,
+        "roles": roles,
+        "slots": slots,
+    }
+    return json.dumps(normalized, ensure_ascii=False, indent=2)
 
 
 def read_json_file(path: Path) -> dict | list | None:
@@ -1398,19 +1453,59 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         if not edit_prompt:
             return False, "Image Lab Slide Edit prompt must not be empty"
     elif action == "translate":
-        mode = "gemini"
-        if not (os.environ.get("GEMINI_API_KEY") or "").strip():
-            return False, "GEMINI_API_KEY is not set in the server environment"
+        mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "gemini") or "gemini").strip().lower()
+        if mode not in {"none", "gemini", "deterministic_glossary"}:
+            mode = "gemini"
         translate_target_language = override_str("target_language", env.get("FINAL_SLIDE_TARGET_LANGUAGE", ""))
-        translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
-        translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
         if not translate_target_language:
             return False, "Image Lab target language must not be empty"
-        if translate_model not in ALLOWED_IMAGE_MODELS:
-            allowed = ", ".join(sorted(ALLOWED_IMAGE_MODELS))
-            return False, f"Image Lab Slide Translate model must be one of: {allowed}"
-        if not translate_prompt:
-            return False, "Image Lab Slide Translate prompt must not be empty"
+        if mode == "deterministic_glossary":
+            vision_project_id = (
+                env.get("GOOGLE_VISION_PROJECT_ID", "")
+                or env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
+                or env.get("GOOGLE_TTS_PROJECT_ID", "")
+                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
+                or ""
+            ).strip()
+            translate_project_id = (
+                env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
+                or env.get("GOOGLE_VISION_PROJECT_ID", "")
+                or env.get("GOOGLE_TTS_PROJECT_ID", "")
+                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
+                or ""
+            ).strip()
+            if not vision_project_id:
+                return False, "Image Lab deterministic translate requires GOOGLE_VISION_PROJECT_ID"
+            if not translate_project_id:
+                return False, "Image Lab deterministic translate requires a Google project id for Translation"
+            font_path_raw = (
+                env.get(
+                    "SLIDE_TRANSLATE_FONT_PATH",
+                    "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
+                )
+                or ""
+            ).strip()
+            font_path = Path(font_path_raw) if Path(font_path_raw).is_absolute() else ROOT_DIR / font_path_raw
+            if not font_path.exists():
+                return False, f"Image Lab deterministic translate font not found: {font_path}"
+            style_config_raw = (
+                env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+                or ""
+            ).strip()
+            style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
+            if not style_config_path.exists():
+                return False, f"Image Lab deterministic translate style config not found: {style_config_path}"
+        else:
+            mode = "gemini"
+            if not (os.environ.get("GEMINI_API_KEY") or "").strip():
+                return False, "GEMINI_API_KEY is not set in the server environment"
+            translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
+            translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
+            if translate_model not in ALLOWED_IMAGE_MODELS:
+                allowed = ", ".join(sorted(ALLOWED_IMAGE_MODELS))
+                return False, f"Image Lab Slide Translate model must be one of: {allowed}"
+            if not translate_prompt:
+                return False, "Image Lab Slide Translate prompt must not be empty"
     else:
         mode = override_str("slide_upscale_mode", env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").lower()
         if mode not in {"swin2sr", "replicate_nightmare_realesrgan"}:
@@ -1452,23 +1547,91 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         ]
         message = "Running Gemini edit on selected final slide."
     elif action == "translate":
-        translate_prompt_path = job_dir / "slide_translate_prompt.txt"
-        translate_prompt_path.write_text(translate_prompt, encoding="utf-8")
-        cmd = [
-            PYTHON_BIN,
-            "scripts/providers/translate_final_slides_gemini.py",
-            "--input-dir",
-            str(input_dir),
-            "--output-dir",
-            str(output_dir),
-            "--model",
-            translate_model,
-            "--prompt-file",
-            str(translate_prompt_path),
-            "--target-language",
-            translate_target_language,
-        ]
-        message = "Running Gemini translate on selected final slide."
+        if mode == "deterministic_glossary":
+            needs_review_policy = (
+                env.get("SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY", "mark_only") or "mark_only"
+            ).strip()
+            font_path_raw = (
+                env.get(
+                    "SLIDE_TRANSLATE_FONT_PATH",
+                    "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
+                )
+                or ""
+            ).strip()
+            font_path = Path(font_path_raw) if Path(font_path_raw).is_absolute() else ROOT_DIR / font_path_raw
+            style_config_raw = (
+                env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+                or ""
+            ).strip()
+            style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
+            vision_project_id = (
+                env.get("GOOGLE_VISION_PROJECT_ID", "")
+                or env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
+                or env.get("GOOGLE_TTS_PROJECT_ID", "")
+                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
+                or ""
+            ).strip()
+            translate_project_id = (
+                env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
+                or env.get("GOOGLE_VISION_PROJECT_ID", "")
+                or env.get("GOOGLE_TTS_PROJECT_ID", "")
+                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
+                or ""
+            ).strip()
+            cmd = [
+                PYTHON_BIN,
+                "scripts/pipeline/translate_single_slide_deterministic.py",
+                "--input-dir",
+                str(input_dir),
+                "--event-id",
+                str(event_id),
+                "--target-language",
+                translate_target_language,
+                "--output-dir",
+                str(output_dir),
+                "--artifacts-dir",
+                str(job_dir / "slide_translate"),
+                "--termbase-file",
+                str(TRANSLATION_TERMBASE_PATH),
+                "--vision-project-id",
+                vision_project_id,
+                "--vision-feature",
+                str(env.get("GOOGLE_VISION_FEATURE", "DOCUMENT_TEXT_DETECTION") or "DOCUMENT_TEXT_DETECTION"),
+                "--translate-project-id",
+                translate_project_id,
+                "--translate-location",
+                str(env.get("GOOGLE_TRANSLATE_LOCATION", "us-central1") or "us-central1"),
+                "--translate-model",
+                str(env.get("GOOGLE_TRANSLATE_MODEL", "general/translation-llm") or "general/translation-llm"),
+                "--font-path",
+                str(font_path),
+                "--style-config-json",
+                str(style_config_path),
+                "--needs-review-policy",
+                needs_review_policy if needs_review_policy in {"mark_only", "allow_partial"} else "mark_only",
+            ]
+            source_language_code = str(env.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
+            if source_language_code:
+                cmd.extend(["--source-language-code", source_language_code])
+            message = "Running deterministic glossary translate on selected final slide."
+        else:
+            translate_prompt_path = job_dir / "slide_translate_prompt.txt"
+            translate_prompt_path.write_text(translate_prompt, encoding="utf-8")
+            cmd = [
+                PYTHON_BIN,
+                "scripts/providers/translate_final_slides_gemini.py",
+                "--input-dir",
+                str(input_dir),
+                "--output-dir",
+                str(output_dir),
+                "--model",
+                translate_model,
+                "--prompt-file",
+                str(translate_prompt_path),
+                "--target-language",
+                translate_target_language,
+            ]
+            message = "Running Gemini translate on selected final slide."
     else:
         if mode == "swin2sr":
             cmd = [
@@ -1536,7 +1699,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         LAB_STATE["finished_at"] = None
         LAB_STATE["job_id"] = job_id
         LAB_STATE["action"] = action
-        LAB_STATE["provider"] = mode if action == "upscale" else ""
+        LAB_STATE["provider"] = mode if action in {"translate", "upscale"} else ""
         LAB_STATE["run_id"] = run_id
         LAB_STATE["event_id"] = event_id
         LAB_STATE["input_name"] = source_path.name
@@ -1554,7 +1717,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         LAB_STATE["message"] = message
         LAB_STATE["log_tail"].clear()
         LAB_STATE["log_tail"].append(f"[Lab] action={action}")
-        if action == "upscale" and mode:
+        if action in {"translate", "upscale"} and mode:
             LAB_STATE["log_tail"].append(f"[Lab] provider={mode}")
         LAB_STATE["log_tail"].append(f"[Lab] input={source_path.name}")
 
@@ -1914,11 +2077,47 @@ def start_run() -> tuple[bool, str]:
     run_step_tts = (env.get("RUN_STEP_TTS", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
+    translate_project_id = (
+        env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
+        or env.get("GOOGLE_VISION_PROJECT_ID", "")
+        or env.get("GOOGLE_TTS_PROJECT_ID", "")
+        or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
+        or ""
+    ).strip()
+    vision_project_id = (
+        env.get("GOOGLE_VISION_PROJECT_ID", "")
+        or translate_project_id
+        or env.get("GOOGLE_TTS_PROJECT_ID", "")
+        or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
+        or ""
+    ).strip()
     if (
         (run_step_edit and final_slide_mode == "gemini")
         or (run_step_translate and translation_mode == "gemini")
     ) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
         return False, "GEMINI_API_KEY is not set in the server environment"
+    if run_step_translate and translation_mode == "deterministic_glossary":
+        if not vision_project_id:
+            return False, "GOOGLE_VISION_PROJECT_ID must be set when FINAL_SLIDE_TRANSLATION_MODE=deterministic_glossary"
+        if not translate_project_id:
+            return False, "A Google project id for Translation must be set when FINAL_SLIDE_TRANSLATION_MODE=deterministic_glossary"
+        font_path_raw = (
+            env.get(
+                "SLIDE_TRANSLATE_FONT_PATH",
+                "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
+            )
+            or ""
+        ).strip()
+        font_path = Path(font_path_raw) if Path(font_path_raw).is_absolute() else ROOT_DIR / font_path_raw
+        if not font_path.exists():
+            return False, f"SLIDE_TRANSLATE_FONT_PATH not found: {font_path}"
+        style_config_raw = (
+            env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+            or ""
+        ).strip()
+        style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
+        if not style_config_path.exists():
+            return False, f"SLIDE_TRANSLATE_STYLE_CONFIG_PATH not found: {style_config_path}"
     if transcription_provider == "google_chirp_3" and not (env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip():
         return False, "GOOGLE_SPEECH_PROJECT_ID must be set when TRANSCRIPTION_PROVIDER=google_chirp_3"
     if run_step_text_translate and not (
@@ -2262,52 +2461,114 @@ def run_slide_translate_health_check(payload: dict) -> dict:
     model = str(payload.get("GEMINI_TRANSLATE_MODEL", "") or "").strip()
     prompt = str(payload.get("GEMINI_TRANSLATE_PROMPT", "") or "").strip()
     target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
-    if mode != "gemini":
-        return {
-            "ok": False,
-            "error_type": "NotApplicable",
-            "error_message": "Slide Translate API test is only available for FINAL_SLIDE_TRANSLATION_MODE=gemini.",
-        }
-    model = validate_image_model(model, "GEMINI_TRANSLATE_MODEL")
-    if not prompt:
-        raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
     if not target_language:
         raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
+    if mode == "gemini":
+        model = validate_image_model(model, "GEMINI_TRANSLATE_MODEL")
+        if not prompt:
+            raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
 
-    start = time.perf_counter()
-    try:
-        client, types = ensure_gemini_client()
-        glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                append_glossary_to_prompt(inject_target_language(prompt, target_language), glossary_entries),
-                types.Part.from_bytes(data=encode_png(make_health_slide_image()), mime_type="image/png"),
-            ],
-            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
-        )
-        image_bytes = extract_gemini_image_bytes(response)
-        if not image_bytes:
-            raise RuntimeError("Gemini response did not include an image.")
-        image = decode_gemini_image_bytes(image_bytes)
-        latency_ms = int(round((time.perf_counter() - start) * 1000))
-        return {
-            "ok": True,
-            "model": model,
-            "target_language": target_language,
-            "latency_ms": latency_ms,
-            "image_width": int(image.shape[1]),
-            "image_height": int(image.shape[0]),
-            "image_bytes": len(image_bytes),
-            "glossary_entries": len(glossary_entries),
-            "message": "Slide Translate API reachable.",
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "ok": False,
-            "error_type": exc.__class__.__name__,
-            "error_message": str(exc),
-        }
+        start = time.perf_counter()
+        try:
+            client, types = ensure_gemini_client()
+            glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    append_glossary_to_prompt(inject_target_language(prompt, target_language), glossary_entries),
+                    types.Part.from_bytes(data=encode_png(make_health_slide_image()), mime_type="image/png"),
+                ],
+                config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+            )
+            image_bytes = extract_gemini_image_bytes(response)
+            if not image_bytes:
+                raise RuntimeError("Gemini response did not include an image.")
+            image = decode_gemini_image_bytes(image_bytes)
+            latency_ms = int(round((time.perf_counter() - start) * 1000))
+            return {
+                "ok": True,
+                "mode": mode,
+                "model": model,
+                "target_language": target_language,
+                "latency_ms": latency_ms,
+                "image_width": int(image.shape[1]),
+                "image_height": int(image.shape[0]),
+                "image_bytes": len(image_bytes),
+                "glossary_entries": len(glossary_entries),
+                "message": "Slide Translate API reachable.",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error_type": exc.__class__.__name__,
+                "error_message": str(exc),
+            }
+
+    if mode == "deterministic_glossary":
+        vision_project_id = str(payload.get("GOOGLE_VISION_PROJECT_ID", "") or "").strip()
+        translate_project_id = str(payload.get("GOOGLE_TRANSLATE_PROJECT_ID", "") or "").strip() or vision_project_id
+        translate_location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip() or "us-central1"
+        translate_model = str(payload.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip() or "general/translation-llm"
+        source_language_code = str(payload.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
+        if not vision_project_id:
+            raise ValueError("GOOGLE_VISION_PROJECT_ID must not be empty")
+        if not translate_project_id:
+            raise ValueError("GOOGLE_TRANSLATE_PROJECT_ID must not be empty")
+
+        start = time.perf_counter()
+        try:
+            vision_client, vision, vision_project_id_used, _default_project = ensure_cloud_vision_client(vision_project_id)
+            health_image = make_health_slide_image()
+            response = vision_client.document_text_detection(image=vision.Image(content=encode_png(health_image)))
+            if getattr(response, "error", None) and getattr(response.error, "message", ""):
+                raise RuntimeError(str(response.error.message))
+            annotation = getattr(response, "full_text_annotation", None)
+            detected_text = str(getattr(annotation, "text", "") or "").strip()
+            if not detected_text:
+                raise RuntimeError("Vision OCR did not return text for the health image.")
+            target_language_code, _tts_code = resolve_target_language_codes(target_language)
+            translate_client, _translate_v3, translate_project_id_used, _default_project, translate_location_used = ensure_cloud_translate_client(
+                translate_project_id,
+                translate_location,
+            )
+            translated = translate_texts_llm(
+                translate_client,
+                project_id=translate_project_id_used,
+                location=translate_location_used,
+                model=translate_model,
+                contents=[detected_text],
+                target_language_code=target_language_code,
+                source_language_code=source_language_code,
+            )
+            latency_ms = int(round((time.perf_counter() - start) * 1000))
+            return {
+                "ok": True,
+                "mode": mode,
+                "target_language": target_language,
+                "target_language_code": target_language_code,
+                "ocr_provider": "google_vision_document_text_detection",
+                "vision_project_id_used": vision_project_id_used,
+                "translate_project_id_used": translate_project_id_used,
+                "location": translate_location_used,
+                "model": translate_model,
+                "latency_ms": latency_ms,
+                "ocr_text_length": len(detected_text),
+                "ocr_preview": detected_text[:120],
+                "translated_text": translated[0] if translated else "",
+                "message": "Slide Translate OCR + Translation APIs reachable.",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error_type": exc.__class__.__name__,
+                "error_message": str(exc),
+            }
+
+    return {
+        "ok": False,
+        "error_type": "NotApplicable",
+        "error_message": "Slide Translate API test is only available for gemini or deterministic_glossary mode.",
+    }
 
 
 def run_text_translate_health_check(payload: dict) -> dict:
@@ -2570,9 +2831,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_static(path.lstrip("/"))
             if path.startswith("/css/"):
                 return self._serve_static(path.lstrip("/"))
+            if path.startswith("/fonts/"):
+                return self._serve_font(path.removeprefix("/fonts/"))
 
             if path == "/api/config":
                 env = parse_env(CONFIG_PATH)
+                slide_translate_style_config_path = resolve_slide_translate_style_config_path(
+                    env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+                )
                 payload = {
                     "VIDEO_PATH": env.get("VIDEO_PATH", ""),
                     "PHASE": env.get("PHASE", "test"),
@@ -2618,6 +2884,18 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
                     "GEMINI_TRANSLATE_MODEL": normalize_image_model(env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL)),
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "GOOGLE_VISION_PROJECT_ID": env.get(
+                        "GOOGLE_VISION_PROJECT_ID",
+                        env.get(
+                            "GOOGLE_TRANSLATE_PROJECT_ID",
+                            env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+                        ),
+                    ),
+                    "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": env.get(
+                        "SLIDE_TRANSLATE_STYLE_CONFIG_PATH",
+                        "config/slide_translate_styles.json",
+                    ),
+                    "SLIDE_TRANSLATE_STYLES_JSON": read_text_file(slide_translate_style_config_path).rstrip("\n"),
                     "GOOGLE_TRANSLATE_PROJECT_ID": env.get(
                         "GOOGLE_TRANSLATE_PROJECT_ID",
                         env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
@@ -2856,6 +3134,11 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TRANSLATION_MODE": str(data["FINAL_SLIDE_TRANSLATION_MODE"]).strip(),
                     "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
                     "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
+                    "GOOGLE_VISION_PROJECT_ID": str(data["GOOGLE_VISION_PROJECT_ID"]).strip(),
+                    "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": str(
+                        env.get("SLIDE_TRANSLATE_STYLE_CONFIG_PATH", "config/slide_translate_styles.json")
+                    ).strip(),
+                    "SLIDE_TRANSLATE_STYLES_JSON": str(data["SLIDE_TRANSLATE_STYLES_JSON"]),
                     "GOOGLE_TRANSLATE_PROJECT_ID": str(data["GOOGLE_TRANSLATE_PROJECT_ID"]).strip(),
                     "GOOGLE_TRANSLATE_LOCATION": str(data["GOOGLE_TRANSLATE_LOCATION"]).strip(),
                     "GOOGLE_TRANSLATE_MODEL": str(data["GOOGLE_TRANSLATE_MODEL"]).strip(),
@@ -2897,6 +3180,8 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
                 gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
+                slide_translate_styles_json = str(data["SLIDE_TRANSLATE_STYLES_JSON"])
+                cfg.pop("SLIDE_TRANSLATE_STYLES_JSON", None)
                 translation_termbase_csv = str(data["TRANSLATION_TERMBASE_CSV"])
                 gemini_tts_prompt = str(data["GEMINI_TTS_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
@@ -2967,10 +3252,10 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["GEMINI_EDIT_MODEL"] = validate_image_model(cfg["GEMINI_EDIT_MODEL"], "GEMINI_EDIT_MODEL")
                 if not gemini_edit_prompt.strip():
                     raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
-                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] not in {"none", "gemini"}:
-                    raise ValueError("FINAL_SLIDE_TRANSLATION_MODE must be none or gemini")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] not in {"none", "gemini", "deterministic_glossary"}:
+                    raise ValueError("FINAL_SLIDE_TRANSLATION_MODE must be none, gemini, or deterministic_glossary")
                 if (
-                    cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini"
+                    cfg["FINAL_SLIDE_TRANSLATION_MODE"] in {"gemini", "deterministic_glossary"}
                     or cfg["RUN_STEP_TEXT_TRANSLATE"] == 1
                 ) and not cfg["FINAL_SLIDE_TARGET_LANGUAGE"]:
                     raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled")
@@ -2982,6 +3267,19 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["GEMINI_TRANSLATE_MODEL"] = validate_image_model(cfg["GEMINI_TRANSLATE_MODEL"], "GEMINI_TRANSLATE_MODEL")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "deterministic_glossary" and not (
+                    cfg["GOOGLE_VISION_PROJECT_ID"]
+                    or cfg["GOOGLE_TRANSLATE_PROJECT_ID"]
+                    or cfg["GOOGLE_TTS_PROJECT_ID"]
+                    or cfg["GOOGLE_SPEECH_PROJECT_ID"]
+                ):
+                    raise ValueError("GOOGLE_VISION_PROJECT_ID must not be empty when deterministic Slide Translate is enabled")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "deterministic_glossary":
+                    if not cfg["SLIDE_TRANSLATE_STYLE_CONFIG_PATH"]:
+                        raise ValueError("SLIDE_TRANSLATE_STYLE_CONFIG_PATH must not be empty when deterministic Slide Translate is enabled")
+                    normalize_slide_translate_styles_json(slide_translate_styles_json)
+                elif cfg["SLIDE_TRANSLATE_STYLE_CONFIG_PATH"]:
+                    normalize_slide_translate_styles_json(slide_translate_styles_json)
                 if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and not (
                     cfg["GOOGLE_TRANSLATE_PROJECT_ID"]
                     or cfg["GOOGLE_TTS_PROJECT_ID"]
@@ -3070,9 +3368,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("VIDEO_EXPORT_FPS must be > 0")
                 if not cfg["VIDEO_EXPORT_BG_COLOR"]:
                     raise ValueError("VIDEO_EXPORT_BG_COLOR must not be empty")
+                normalized_slide_translate_styles_json = normalize_slide_translate_styles_json(slide_translate_styles_json)
                 write_config_values(CONFIG_PATH, cfg)
                 write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
                 write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
+                write_text_file(
+                    resolve_slide_translate_style_config_path(cfg["SLIDE_TRANSLATE_STYLE_CONFIG_PATH"]),
+                    normalized_slide_translate_styles_json,
+                )
                 write_text_file(TRANSLATION_TERMBASE_PATH, translation_termbase_csv)
                 write_text_file(GEMINI_TTS_PROMPT_PATH, gemini_tts_prompt)
                 return self._send_json(
@@ -3082,6 +3385,7 @@ class Handler(BaseHTTPRequestHandler):
                         **cfg,
                         "GEMINI_EDIT_PROMPT": gemini_edit_prompt.rstrip("\n"),
                         "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
+                        "SLIDE_TRANSLATE_STYLES_JSON": normalized_slide_translate_styles_json.rstrip("\n"),
                         "TRANSLATION_TERMBASE_CSV": translation_termbase_csv.rstrip("\n"),
                         "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                         "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
@@ -3184,6 +3488,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_static(self, filename: str) -> None:
         target = ensure_within(WEB_DIR, WEB_DIR / filename)
+        self._serve_file(target)
+
+    def _serve_font(self, filename: str) -> None:
+        target = ensure_within(FONT_DIR, FONT_DIR / filename)
+        if target.suffix.lower() not in FONT_EXTS:
+            raise FileNotFoundError(str(target))
         self._serve_file(target)
 
     def _serve_file(self, path: Path) -> None:
