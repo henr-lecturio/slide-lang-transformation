@@ -21,11 +21,37 @@ main {
   padding: 14px 0 12px;
 }
 
+.topnav-main {
+  display: flex;
+  align-items: flex-end;
+  flex: 1 1 auto;
+  gap: 18px;
+  min-width: 0;
+}
+
 .topnav {
   display: flex;
   flex: 1 1 auto;
   gap: 34px;
   min-width: 0;
+}
+
+.topbar-logo-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 120px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .tab-btn {

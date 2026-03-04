@@ -32,12 +32,21 @@
     align-items: stretch;
   }
 
+  .topnav-main {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .topnav {
     gap: 22px;
     overflow-x: auto;
   }
 
   #save-settings {
+    align-self: flex-start;
+  }
+
+  .topbar-logo-placeholder {
     align-self: flex-start;
   }
 
