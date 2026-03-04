@@ -333,8 +333,20 @@
                       <div class="settings-inline-actions">
                         <button id="transcription-health-check" type="button">Test Transcription API</button>
                         <span id="transcription-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="transcription-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="transcription-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
                       </div>
-                      <div id="transcription-health-meta" class="health-check-meta muted"></div>
+                      <div id="transcription-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="transcription-health-meta" class="health-check-meta muted"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -467,7 +479,7 @@
                   </div>
                   <div class="settings-row settings-row-textarea">
                     <label class="settings-key" for="gemini_edit_prompt">GEMINI_EDIT_PROMPT</label>
-                    <div class="settings-value"><textarea id="gemini_edit_prompt" rows="12"></textarea></div>
+                    <div class="settings-value"><textarea id="gemini_edit_prompt" rows="10"></textarea></div>
                   </div>
                   <div class="settings-row settings-row-inline">
                     <div class="settings-key">Slide Edit API Test</div>
@@ -475,8 +487,20 @@
                       <div class="settings-inline-actions">
                         <button id="slide-edit-health-check" type="button">Test Slide Edit API</button>
                         <span id="slide-edit-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="slide-edit-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="slide-edit-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
                       </div>
-                      <div id="slide-edit-health-meta" class="health-check-meta muted"></div>
+                      <div id="slide-edit-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="slide-edit-health-meta" class="health-check-meta muted"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -537,8 +561,20 @@
                       <div class="settings-inline-actions">
                         <button id="slide-translate-health-check" type="button">Test Slide Translate API</button>
                         <span id="slide-translate-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="slide-translate-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="slide-translate-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
                       </div>
-                      <div id="slide-translate-health-meta" class="health-check-meta muted"></div>
+                      <div id="slide-translate-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="slide-translate-health-meta" class="health-check-meta muted"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -614,8 +650,20 @@
                       <div class="settings-inline-actions">
                         <button id="slide-upscale-health-check" type="button">Test Slide Upscale API</button>
                         <span id="slide-upscale-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="slide-upscale-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="slide-upscale-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
                       </div>
-                      <div id="slide-upscale-health-meta" class="health-check-meta muted"></div>
+                      <div id="slide-upscale-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="slide-upscale-health-meta" class="health-check-meta muted"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -645,7 +693,7 @@
                     <label class="settings-key" for="gemini_text_translate_prompt">GEMINI_TEXT_TRANSLATE_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_text_translate_prompt" rows="10"></textarea></div>
                   </div>
-                  <div class="settings-row settings-row-textarea">
+                  <div class="settings-row termbase-settings-row">
                     <label class="settings-key" for="translation_termbase_csv">TRANSLATION_TERMBASE_CSV</label>
                     <div class="settings-value">
                       <div id="termbase-editor-panel" class="output-info-panel termbase-editor-panel">
@@ -688,8 +736,20 @@
                       <div class="settings-inline-actions">
                         <button id="text-translate-health-check" type="button">Test Text Translate API</button>
                         <span id="text-translate-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="text-translate-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="text-translate-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
                       </div>
-                      <div id="text-translate-health-meta" class="health-check-meta muted"></div>
+                      <div id="text-translate-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="text-translate-health-meta" class="health-check-meta muted"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -740,8 +800,20 @@
                       <div class="settings-inline-actions">
                         <button id="tts-health-check" type="button">Test TTS API</button>
                         <span id="tts-health-status" class="health-check-status is-idle" aria-live="polite">Not tested.</span>
+                        <button
+                          id="tts-health-meta-toggle"
+                          class="health-meta-toggle"
+                          type="button"
+                          aria-expanded="false"
+                          aria-controls="tts-health-meta-wrap"
+                          disabled
+                        >
+                          <span class="step-section-chevron" aria-hidden="true"></span>
+                        </button>
                       </div>
-                      <div id="tts-health-meta" class="health-check-meta muted"></div>
+                      <div id="tts-health-meta-wrap" class="health-check-meta-wrap" hidden>
+                        <div id="tts-health-meta" class="health-check-meta muted"></div>
+                      </div>
                     </div>
                   </div>
                 </div>

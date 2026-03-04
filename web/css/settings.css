@@ -127,7 +127,7 @@
 
 .settings-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   padding-top: 18px;
 }
 
@@ -156,9 +156,15 @@
   align-items: flex-start;
 }
 
+.termbase-settings-row {
+  padding: 0;
+  margin: 0;
+  align-items: center;
+}
+
 .settings-row-inline .settings-value {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .settings-inline-actions {
@@ -166,6 +172,29 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+}
+
+.health-meta-toggle {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.health-meta-toggle .step-section-chevron {
+  width: 10px;
+  height: 10px;
+  transform: rotate(-45deg);
+}
+
+.health-meta-toggle[aria-expanded="true"] .step-section-chevron {
+  transform: rotate(45deg);
+}
+
+.health-check-meta-wrap {
+  padding-top: 0;
 }
 
 .health-check-status {
@@ -248,8 +277,12 @@
   width: 100%;
 }
 
-.termbase-editor-panel {
-  margin-top: 2px;
+#gemini_text_translate_prompt {
+  min-height: 128px;
+}
+
+#termbase-editor-panel {
+  margin-top: 0;
 }
 
 .termbase-editor-toolbar {

@@ -105,6 +105,22 @@ function parseTermbaseCsv(csvText) {
   });
 }
 
+function buildTermbaseLanguageChoices(currentValue = "") {
+  const choices = [{ value: "*", label: "All Languages (*)" }];
+  const seen = new Set(["*"]);
+  for (const item of Array.isArray(state.ttsLanguageOptions) ? state.ttsLanguageOptions : []) {
+    const label = String(item?.label || "").trim();
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    choices.push({ value: label, label });
+  }
+  const fallback = String(currentValue || "").trim();
+  if (fallback && !seen.has(fallback)) {
+    choices.push({ value: fallback, label: `${fallback} (legacy)` });
+  }
+  return choices;
+}
+
 function serializeCsvValue(value) {
   const text = String(value ?? "");
   if (/[",\n]/.test(text)) {
@@ -132,7 +148,23 @@ function createTermbaseRow(row = {}) {
   const tr = document.createElement("tr");
   for (const column of TERMBASE_COLUMNS) {
     const td = document.createElement("td");
-    if (column.key === "case_sensitive") {
+    if (column.key === "target_language") {
+      const select = document.createElement("select");
+      select.dataset.col = column.key;
+      const currentValue = String(row[column.key] ?? "").trim();
+      for (const choice of buildTermbaseLanguageChoices(currentValue)) {
+        const option = document.createElement("option");
+        option.value = choice.value;
+        option.textContent = choice.label;
+        select.appendChild(option);
+      }
+      select.value = currentValue || "*";
+      if (!select.value) {
+        select.value = "*";
+      }
+      select.addEventListener("change", syncTermbaseCsvFromTable);
+      td.appendChild(select);
+    } else if (column.key === "case_sensitive") {
       const select = document.createElement("select");
       select.dataset.col = column.key;
       for (const value of ["0", "1"]) {

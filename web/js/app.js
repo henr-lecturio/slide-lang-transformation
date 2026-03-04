@@ -9,6 +9,7 @@ import {
   testTextTranslateHealth,
   testTranscriptionHealth,
   testTtsHealth,
+  toggleHealthMeta,
 } from "./health-checks.js";
 import {
   getSelectedTtsLanguageOption,
@@ -173,6 +174,18 @@ function bindEvents() {
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.addEventListener("click", () => runTask(testTextTranslateHealth));
   }
+  [
+    ["transcription", el.transcriptionHealthMetaToggle],
+    ["slideEdit", el.slideEditHealthMetaToggle],
+    ["slideTranslate", el.slideTranslateHealthMetaToggle],
+    ["slideUpscale", el.slideUpscaleHealthMetaToggle],
+    ["textTranslate", el.textTranslateHealthMetaToggle],
+    ["tts", el.ttsHealthMetaToggle],
+  ].forEach(([key, button]) => {
+    if (button) {
+      button.addEventListener("click", () => toggleHealthMeta(key));
+    }
+  });
 
   el.regenOverlay.addEventListener("click", () => runTask(async () => {
     await regenerateOverlay();

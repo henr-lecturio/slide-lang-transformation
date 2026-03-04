@@ -7,39 +7,75 @@ const healthUi = {
   transcription: {
     button: () => el.transcriptionHealthCheck,
     status: () => el.transcriptionHealthStatus,
+    toggle: () => el.transcriptionHealthMetaToggle,
+    wrap: () => el.transcriptionHealthMetaWrap,
     meta: () => el.transcriptionHealthMeta,
   },
   slideEdit: {
     button: () => el.slideEditHealthCheck,
     status: () => el.slideEditHealthStatus,
+    toggle: () => el.slideEditHealthMetaToggle,
+    wrap: () => el.slideEditHealthMetaWrap,
     meta: () => el.slideEditHealthMeta,
   },
   slideTranslate: {
     button: () => el.slideTranslateHealthCheck,
     status: () => el.slideTranslateHealthStatus,
+    toggle: () => el.slideTranslateHealthMetaToggle,
+    wrap: () => el.slideTranslateHealthMetaWrap,
     meta: () => el.slideTranslateHealthMeta,
   },
   textTranslate: {
     button: () => el.textTranslateHealthCheck,
     status: () => el.textTranslateHealthStatus,
+    toggle: () => el.textTranslateHealthMetaToggle,
+    wrap: () => el.textTranslateHealthMetaWrap,
     meta: () => el.textTranslateHealthMeta,
   },
   slideUpscale: {
     button: () => el.slideUpscaleHealthCheck,
     status: () => el.slideUpscaleHealthStatus,
+    toggle: () => el.slideUpscaleHealthMetaToggle,
+    wrap: () => el.slideUpscaleHealthMetaWrap,
     meta: () => el.slideUpscaleHealthMeta,
   },
   tts: {
     button: () => el.ttsHealthCheck,
     status: () => el.ttsHealthStatus,
+    toggle: () => el.ttsHealthMetaToggle,
+    wrap: () => el.ttsHealthMetaWrap,
     meta: () => el.ttsHealthMeta,
   },
 };
+
+function setMetaOpen(ui, open) {
+  const toggleEl = ui.toggle?.();
+  const wrapEl = ui.wrap?.();
+  if (toggleEl) {
+    toggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  if (wrapEl) {
+    wrapEl.hidden = !open;
+    wrapEl.classList.toggle("is-open", open);
+  }
+}
+
+export function toggleHealthMeta(key) {
+  const ui = healthUi[key];
+  if (!ui) return;
+  const toggleEl = ui.toggle?.();
+  const wrapEl = ui.wrap?.();
+  if (!toggleEl || !wrapEl || toggleEl.disabled) return;
+  const nextOpen = toggleEl.getAttribute("aria-expanded") !== "true";
+  setMetaOpen(ui, nextOpen);
+}
 
 export function setHealthStatus(key, kind, text, meta = "") {
   const ui = healthUi[key];
   if (!ui) return;
   const statusEl = ui.status();
+  const toggleEl = ui.toggle?.();
+  const wrapEl = ui.wrap?.();
   const metaEl = ui.meta();
   if (statusEl) {
     statusEl.className = `health-check-status is-${kind}`;
@@ -47,6 +83,13 @@ export function setHealthStatus(key, kind, text, meta = "") {
   }
   if (metaEl) {
     metaEl.textContent = meta;
+  }
+  const hasMeta = Boolean(String(meta || "").trim());
+  if (toggleEl) {
+    toggleEl.disabled = !hasMeta;
+  }
+  if (!hasMeta && wrapEl) {
+    setMetaOpen(ui, false);
   }
 }
 
