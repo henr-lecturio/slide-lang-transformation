@@ -2304,6 +2304,7 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(env.get("VIDEO_EXPORT_TAIL_PAD_SEC", "0.35")),
                     "VIDEO_EXPORT_INTRO_WHITE_SEC": float(env.get("VIDEO_EXPORT_INTRO_WHITE_SEC", "1.0")),
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4")),
+                    "VIDEO_EXPORT_THUMBNAIL_FADE_SEC": float(env.get("VIDEO_EXPORT_THUMBNAIL_FADE_SEC", "0.3")),
                     "VIDEO_EXPORT_INTRO_COLOR": env.get("VIDEO_EXPORT_INTRO_COLOR", "white"),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(env.get("VIDEO_EXPORT_OUTRO_HOLD_SEC", "1.5")),
                     "VIDEO_EXPORT_OUTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_OUTRO_FADE_SEC", "1.5")),
@@ -2518,6 +2519,7 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(data["VIDEO_EXPORT_TAIL_PAD_SEC"]),
                     "VIDEO_EXPORT_INTRO_WHITE_SEC": float(data["VIDEO_EXPORT_INTRO_WHITE_SEC"]),
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(data["VIDEO_EXPORT_INTRO_FADE_SEC"]),
+                    "VIDEO_EXPORT_THUMBNAIL_FADE_SEC": float(data["VIDEO_EXPORT_THUMBNAIL_FADE_SEC"]),
                     "VIDEO_EXPORT_INTRO_COLOR": str(data["VIDEO_EXPORT_INTRO_COLOR"]).strip(),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(data["VIDEO_EXPORT_OUTRO_HOLD_SEC"]),
                     "VIDEO_EXPORT_OUTRO_FADE_SEC": float(data["VIDEO_EXPORT_OUTRO_FADE_SEC"]),
@@ -2678,6 +2680,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("VIDEO_EXPORT_INTRO_WHITE_SEC must be >= 0")
                 if cfg["VIDEO_EXPORT_INTRO_FADE_SEC"] < 0:
                     raise ValueError("VIDEO_EXPORT_INTRO_FADE_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_THUMBNAIL_FADE_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_THUMBNAIL_FADE_SEC must be >= 0")
                 if not cfg["VIDEO_EXPORT_INTRO_COLOR"]:
                     raise ValueError("VIDEO_EXPORT_INTRO_COLOR must not be empty")
                 if cfg["VIDEO_EXPORT_OUTRO_HOLD_SEC"] < 0:

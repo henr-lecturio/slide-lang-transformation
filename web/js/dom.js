@@ -112,6 +112,7 @@ export const el = {
   videoExportTailPadSec: document.getElementById("video_export_tail_pad_sec"),
   videoExportIntroWhiteSec: document.getElementById("video_export_intro_white_sec"),
   videoExportIntroFadeSec: document.getElementById("video_export_intro_fade_sec"),
+  videoExportThumbnailFadeSec: document.getElementById("video_export_thumbnail_fade_sec"),
   videoExportIntroColor: document.getElementById("video_export_intro_color"),
   videoExportOutroHoldSec: document.getElementById("video_export_outro_hold_sec"),
   videoExportOutroFadeSec: document.getElementById("video_export_outro_fade_sec"),

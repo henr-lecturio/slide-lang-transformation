@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tail-pad-sec", type=float, default=0.35, help="Silence tail added after each voiced slide.")
     parser.add_argument("--intro-white-sec", type=float, default=1.0, help="Initial white screen duration before the first slide fades in.")
     parser.add_argument("--intro-fade-sec", type=float, default=0.4, help="Crossfade duration from white intro to the first slide.")
+    parser.add_argument("--thumbnail-fade-sec", type=float, default=0.3, help="Crossfade duration between slide 1 (thumbnail) and slide 2.")
     parser.add_argument("--intro-color", default="white", help="Color used for the intro still before the first slide fades in.")
     parser.add_argument("--outro-hold-sec", type=float, default=1.5, help="Hold duration for the last slide after spoken audio ends.")
     parser.add_argument("--outro-fade-sec", type=float, default=1.5, help="Fade-out duration for the last slide at the end of the export.")
@@ -456,6 +457,7 @@ def render_segment_videos(
     outro_fade_color: str,
     intro_white_sec: float,
     intro_fade_sec: float,
+    thumbnail_fade_sec: float,
     outro_hold_sec: float,
     outro_fade_sec: float,
     outro_black_sec: float,
@@ -505,6 +507,39 @@ def render_segment_videos(
 
     if not rendered_paths:
         raise RuntimeError("No slide video segments were rendered.")
+
+    if len(rendered_paths) >= 2:
+        thumb_duration = max(0.0, float(timeline_rows[0]["duration_sec"]))
+        next_duration = max(0.0, float(timeline_rows[1]["duration_sec"]))
+        fade_sec = min(max(0.0, float(thumbnail_fade_sec)), max(0.0, thumb_duration - 0.04), next_duration)
+        if fade_sec > 0.0:
+            thumb_transition = tmp_dir / "thumb_transition.mp4"
+            run_cmd(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(rendered_paths[0]),
+                    "-i",
+                    str(rendered_paths[1]),
+                    "-filter_complex",
+                    (
+                        f"[1:v]tpad=stop_mode=clone:stop_duration={fade_sec:.3f}[v1];"
+                        f"[0:v][v1]xfade=transition=fade:duration={fade_sec:.3f}:offset={thumb_duration - fade_sec:.3f},"
+                        "format=yuv420p[v]"
+                    ),
+                    "-map",
+                    "[v]",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    str(thumb_transition),
+                ]
+            )
+            rendered_paths = [thumb_transition, *rendered_paths[2:]]
 
     final_paths: list[Path] = []
     intro_white_sec = max(0.0, float(intro_white_sec))
@@ -711,6 +746,7 @@ def main() -> int:
     thumbnail_duration_sec = 2.0
     intro_white_sec = max(0.0, float(args.intro_white_sec))
     intro_fade_sec = max(0.0, float(args.intro_fade_sec))
+    thumbnail_fade_sec = max(0.0, float(args.thumbnail_fade_sec))
     outro_hold_sec = max(0.0, float(args.outro_hold_sec))
     outro_fade_sec = max(0.0, float(args.outro_fade_sec))
     outro_black_sec = max(0.0, float(args.outro_black_sec))
@@ -757,6 +793,7 @@ def main() -> int:
                 args.outro_fade_color,
                 intro_white_sec,
                 intro_fade_sec,
+                thumbnail_fade_sec,
                 outro_hold_sec,
                 outro_fade_sec,
                 outro_black_sec,
@@ -928,6 +965,7 @@ def main() -> int:
         "tail_pad_sec": tail_pad_sec,
         "intro_white_sec": intro_white_sec,
         "intro_fade_sec": intro_fade_sec,
+        "thumbnail_fade_sec": thumbnail_fade_sec,
         "intro_color": str(args.intro_color),
         "outro_hold_sec": outro_hold_sec,
         "outro_fade_sec": outro_fade_sec,

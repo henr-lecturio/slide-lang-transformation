@@ -309,6 +309,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.videoExportTailPadSec.value = cfg.VIDEO_EXPORT_TAIL_PAD_SEC ?? 0.35;
   el.videoExportIntroWhiteSec.value = cfg.VIDEO_EXPORT_INTRO_WHITE_SEC ?? 1.0;
   el.videoExportIntroFadeSec.value = cfg.VIDEO_EXPORT_INTRO_FADE_SEC ?? 0.4;
+  el.videoExportThumbnailFadeSec.value = cfg.VIDEO_EXPORT_THUMBNAIL_FADE_SEC ?? 0.3;
   el.videoExportIntroColor.value = cfg.VIDEO_EXPORT_INTRO_COLOR || "white";
   el.videoExportOutroHoldSec.value = cfg.VIDEO_EXPORT_OUTRO_HOLD_SEC ?? 1.5;
   el.videoExportOutroFadeSec.value = cfg.VIDEO_EXPORT_OUTRO_FADE_SEC ?? 1.5;
@@ -407,6 +408,7 @@ export async function saveConfig(options = {}) {
     VIDEO_EXPORT_TAIL_PAD_SEC: Number(el.videoExportTailPadSec.value),
     VIDEO_EXPORT_INTRO_WHITE_SEC: Number(el.videoExportIntroWhiteSec.value),
     VIDEO_EXPORT_INTRO_FADE_SEC: Number(el.videoExportIntroFadeSec.value),
+    VIDEO_EXPORT_THUMBNAIL_FADE_SEC: Number(el.videoExportThumbnailFadeSec.value),
     VIDEO_EXPORT_INTRO_COLOR: el.videoExportIntroColor.value.trim(),
     VIDEO_EXPORT_OUTRO_HOLD_SEC: Number(el.videoExportOutroHoldSec.value),
     VIDEO_EXPORT_OUTRO_FADE_SEC: Number(el.videoExportOutroFadeSec.value),
