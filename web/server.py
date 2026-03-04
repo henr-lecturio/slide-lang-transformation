@@ -2560,6 +2560,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_static("favicon.ico")
             if path == "/favicon.png":
                 return self._serve_static("favicon.png")
+            if path == "/lecturio_logo_white_transparent.png":
+                return self._serve_static("lecturio_logo_white_transparent.png")
             if path == "/styles.css":
                 return self._serve_static("styles.css")
             if path == "/app.js":
