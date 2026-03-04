@@ -35,7 +35,7 @@ from scripts.lib.translation_memory import (
 )
 
 WEB_DIR = ROOT_DIR / "web"
-CONFIG_PATH = ROOT_DIR / "config" / "slitranet.env"
+CONFIG_PATH = ROOT_DIR / "config" / "pipeline.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
 GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
@@ -1618,7 +1618,7 @@ def start_run() -> tuple[bool, str]:
         RUN_STATE["error_step"] = None
 
         process = subprocess.Popen(
-            ["bash", "scripts/run_slitranet.sh"],
+            ["bash", "scripts/run_pipeline.sh"],
             cwd=str(ROOT_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -2304,16 +2304,10 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_TAIL_PAD_SEC": float(env.get("VIDEO_EXPORT_TAIL_PAD_SEC", "0.35")),
                     "VIDEO_EXPORT_INTRO_WHITE_SEC": float(env.get("VIDEO_EXPORT_INTRO_WHITE_SEC", "1.0")),
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4")),
-                    "VIDEO_EXPORT_INTRO_COLOR": env.get(
-                        "VIDEO_EXPORT_INTRO_COLOR",
-                        env.get("VIDEO_EXPORT_FADE_COLOR", "white"),
-                    ),
+                    "VIDEO_EXPORT_INTRO_COLOR": env.get("VIDEO_EXPORT_INTRO_COLOR", "white"),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(env.get("VIDEO_EXPORT_OUTRO_HOLD_SEC", "1.5")),
                     "VIDEO_EXPORT_OUTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_OUTRO_FADE_SEC", "1.5")),
-                    "VIDEO_EXPORT_OUTRO_FADE_COLOR": env.get(
-                        "VIDEO_EXPORT_OUTRO_FADE_COLOR",
-                        env.get("VIDEO_EXPORT_FADE_COLOR", "black"),
-                    ),
+                    "VIDEO_EXPORT_OUTRO_FADE_COLOR": env.get("VIDEO_EXPORT_OUTRO_FADE_COLOR", "black"),
                     "VIDEO_EXPORT_OUTRO_BLACK_SEC": float(env.get("VIDEO_EXPORT_OUTRO_BLACK_SEC", "2.0")),
                     "VIDEO_EXPORT_WIDTH": int(env.get("VIDEO_EXPORT_WIDTH", "1920")),
                     "VIDEO_EXPORT_HEIGHT": int(env.get("VIDEO_EXPORT_HEIGHT", "1080")),

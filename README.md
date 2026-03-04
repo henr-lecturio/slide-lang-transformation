@@ -9,7 +9,7 @@ Dieses Projekt nutzt das originale SliTraNet unter `./slitranet` und ergänzt ei
 
 ## Struktur
 
-- `config/slitranet.env`: zentrale Run-Konfiguration
+- `config/pipeline.env`: zentrale Run-Konfiguration
 - `config/prompts/`: Prompt-Dateien für Gemini/Text/TTS
 - `config/language/`: Sprachkatalog und Termbase
 - `videos/`: Input-Videos
@@ -52,7 +52,7 @@ Ergebnis:
 
 ```bash
 source .venv/bin/activate
-bash scripts/run_slitranet.sh --video "videos/example.mp4"
+bash scripts/run_pipeline.sh --video "videos/example.mp4"
 ```
 
 4. Web-UI starten:
@@ -68,7 +68,7 @@ Dann öffnen:
 ## Konfiguration
 
 Die zentrale Konfiguration liegt in:
-- `config/slitranet.env`
+- `config/pipeline.env`
 
 Wichtige Blöcke:
 
@@ -165,7 +165,7 @@ REPLICATE_API_TOKEN="..."
 ```
 
 `.env.local` ist gitignoriert und wird von:
-- `scripts/run_slitranet.sh`
+- `scripts/run_pipeline.sh`
 - `web/server.py`
 - den Provider-Skripten
 

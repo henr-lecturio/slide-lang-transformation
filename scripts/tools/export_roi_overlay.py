@@ -89,10 +89,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Export one video frame with current ROI overlay and corner coordinates "
-            "from config/slitranet.env."
+            "from config/pipeline.env."
         )
     )
-    parser.add_argument("--config", default="config/slitranet.env", help="Path to .env config.")
+    parser.add_argument("--config", default="config/pipeline.env", help="Path to .env config.")
     parser.add_argument(
         "--video",
         default="",

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CONFIG_FILE="$ROOT_DIR/config/slitranet.env"
+CONFIG_FILE="$ROOT_DIR/config/pipeline.env"
 DATASET_DIR="${DATASET_DIR:-$ROOT_DIR/dataset}"
 
 if [ ! -f "$CONFIG_FILE" ]; then
