@@ -27,12 +27,18 @@ import {
 } from "./settings.js";
 import {
   closeImageModal,
+  closeExportLabRunPicker,
+  closeExportLabSettingsModal,
+  closeExportLabStatusModal,
   closeLabImagePicker,
   closeLabStatusModal,
   closeLabSettingsModal,
   closeRoiStatusModal,
   closeStatusModal,
   closeVideoPicker,
+  openExportLabRunPicker,
+  openExportLabSettingsModal,
+  openExportLabStatusModal,
   openLabImagePicker,
   openLabStatusModal,
   openLabSettingsModal,
@@ -40,6 +46,17 @@ import {
   openStatusModal,
   openVideoPicker,
 } from "./modals.js";
+import {
+  initializeExportLabTestSettings,
+  loadExportLabStatus,
+  renderExportLabSelection,
+  resetExportLabTestSettingsFromCurrentSettings,
+  runExportLabAction,
+  saveExportLabTestSettings,
+  stopExportLabJob,
+  syncExportLabActionState,
+  syncExportLabTestSections,
+} from "./export-lab.js";
 import {
   initializeLabTestSettings,
   loadLabStatus,
@@ -94,6 +111,7 @@ function syncActionState() {
     el.stopRun.textContent = state.currentRunStatus === "stopping" ? "Stopping..." : "Stop Run";
   }
   syncLabActionState();
+  syncExportLabActionState();
 }
 
 function renderRunSteps(current) {
@@ -252,6 +270,38 @@ function bindEvents() {
     showButtonSuccess(el.labSettingsReset, "Reset");
   }));
   el.labFinalSlideUpscaleMode.addEventListener("change", saveLabTestSettings);
+
+  el.exportLabPickRun.addEventListener("click", () => runTask(() => openExportLabRunPicker({
+    runTask,
+    renderExportLabSelection,
+  })));
+  el.exportLabOpenSettings.addEventListener("click", () => runTask(async () => {
+    initializeExportLabTestSettings();
+    openExportLabSettingsModal();
+  }));
+  el.exportLabOpenTerminal.addEventListener("click", openExportLabStatusModal);
+  el.exportLabStopRun.addEventListener("click", () => runTask(stopExportLabJob));
+  el.exportLabRunExport.addEventListener("click", () => runTask(async () => {
+    await runExportLabAction();
+    showButtonSuccess(el.exportLabRunExport, "Started");
+  }));
+  el.exportLabSettingsSave.addEventListener("click", () => runTask(async () => {
+    saveExportLabTestSettings();
+    showButtonSuccess(el.exportLabSettingsSave, "Saved");
+  }));
+  el.exportLabSettingsReset.addEventListener("click", () => runTask(async () => {
+    resetExportLabTestSettingsFromCurrentSettings();
+    showButtonSuccess(el.exportLabSettingsReset, "Reset");
+  }));
+
+  document.querySelectorAll(".export-lab-step-section-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionId = button.dataset.exportLabStepToggle;
+      if (!sectionId) return;
+      state.exportLabStepSectionExpanded[sectionId] = !state.exportLabStepSectionExpanded[sectionId];
+      syncExportLabTestSections();
+    });
+  });
 
   document.querySelectorAll(".lab-step-section-toggle").forEach((button) => {
     button.addEventListener("click", () => {
@@ -426,6 +476,12 @@ function bindEvents() {
   el.labImagePickerBackdrop.addEventListener("click", closeLabImagePicker);
   el.labSettingsClose.addEventListener("click", closeLabSettingsModal);
   el.labSettingsBackdrop.addEventListener("click", closeLabSettingsModal);
+  el.exportLabRunPickerClose.addEventListener("click", closeExportLabRunPicker);
+  el.exportLabRunPickerBackdrop.addEventListener("click", closeExportLabRunPicker);
+  el.exportLabSettingsClose.addEventListener("click", closeExportLabSettingsModal);
+  el.exportLabSettingsBackdrop.addEventListener("click", closeExportLabSettingsModal);
+  el.exportLabStatusModalClose.addEventListener("click", closeExportLabStatusModal);
+  el.exportLabStatusModalBackdrop.addEventListener("click", closeExportLabStatusModal);
   el.videoPickerClose.addEventListener("click", closeVideoPicker);
   el.videoPickerBackdrop.addEventListener("click", closeVideoPicker);
 
@@ -447,6 +503,15 @@ function bindEvents() {
     }
     if (e.key === "Escape" && el.labSettingsModal.classList.contains("open")) {
       closeLabSettingsModal();
+    }
+    if (e.key === "Escape" && el.exportLabRunPickerModal.classList.contains("open")) {
+      closeExportLabRunPicker();
+    }
+    if (e.key === "Escape" && el.exportLabSettingsModal.classList.contains("open")) {
+      closeExportLabSettingsModal();
+    }
+    if (e.key === "Escape" && el.exportLabStatusModal.classList.contains("open")) {
+      closeExportLabStatusModal();
     }
     if (e.key === "Escape" && el.videoPickerModal.classList.contains("open")) {
       closeVideoPicker();
@@ -492,17 +557,23 @@ async function init() {
   state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
   syncSettingsFieldState();
   syncLabActionState();
+  syncExportLabActionState();
   setActiveTab(getInitialActiveTab());
 
   await runTask(() => loadConfig({ syncActionState }));
   initializeLabTestSettings();
+  initializeExportLabTestSettings();
   await runTask(loadOverlay);
   await runTask(loadRuns);
   await runTask(loadLabStatus);
+  await runTask(loadExportLabStatus);
 
   window.setInterval(pollCurrent, 2000);
   window.setInterval(() => {
     runTaskImmediate(loadLabStatus);
+  }, 2000);
+  window.setInterval(() => {
+    runTaskImmediate(loadExportLabStatus);
   }, 2000);
 }
 

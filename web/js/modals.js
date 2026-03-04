@@ -23,6 +23,16 @@ export function closeLabStatusModal() {
   el.labStatusModal.setAttribute("aria-hidden", "true");
 }
 
+export function openExportLabStatusModal() {
+  el.exportLabStatusModal.classList.add("open");
+  el.exportLabStatusModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeExportLabStatusModal() {
+  el.exportLabStatusModal.classList.remove("open");
+  el.exportLabStatusModal.setAttribute("aria-hidden", "true");
+}
+
 export function openRoiStatusModal() {
   el.roiStatusModal.classList.add("open");
   el.roiStatusModal.setAttribute("aria-hidden", "false");
@@ -53,6 +63,11 @@ export function closeVideoPicker() {
   el.videoPickerModal.setAttribute("aria-hidden", "true");
 }
 
+export function closeExportLabRunPicker() {
+  el.exportLabRunPickerModal.classList.remove("open");
+  el.exportLabRunPickerModal.setAttribute("aria-hidden", "true");
+}
+
 export function closeLabImagePicker() {
   el.labImagePickerModal.classList.remove("open");
   el.labImagePickerModal.setAttribute("aria-hidden", "true");
@@ -66,6 +81,16 @@ export function openLabSettingsModal() {
 export function closeLabSettingsModal() {
   el.labSettingsModal.classList.remove("open");
   el.labSettingsModal.setAttribute("aria-hidden", "true");
+}
+
+export function openExportLabSettingsModal() {
+  el.exportLabSettingsModal.classList.add("open");
+  el.exportLabSettingsModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeExportLabSettingsModal() {
+  el.exportLabSettingsModal.classList.remove("open");
+  el.exportLabSettingsModal.setAttribute("aria-hidden", "true");
 }
 
 function renderVideoPickerList({ runTask, saveConfig, successButton = null }) {
@@ -156,4 +181,55 @@ export async function openLabImagePicker({ runTask, renderLabSelection }) {
   renderLabImagePickerList({ runTask, renderLabSelection });
   el.labImagePickerModal.classList.add("open");
   el.labImagePickerModal.setAttribute("aria-hidden", "false");
+}
+
+function renderExportLabRunPickerList({ runTask, renderExportLabSelection }) {
+  const items = state.exportLabRuns || [];
+  el.exportLabRunPickerList.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No exportable runs available.";
+    el.exportLabRunPickerList.appendChild(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "video-item video-file";
+    if (state.exportLabSelectedRun?.run_id === item.run_id) {
+      btn.classList.add("selected");
+    }
+    const parts = [item.label || item.run_id, item.run_status || "-"];
+    if (!item.export_ready && Array.isArray(item.missing_requirements) && item.missing_requirements.length > 0) {
+      parts.push(`missing: ${item.missing_requirements.join(", ")}`);
+    }
+    btn.textContent = parts.join(" | ");
+    btn.title = btn.textContent;
+    btn.disabled = !item.export_ready;
+    btn.addEventListener("click", () => runTask(async () => {
+      state.exportLabSelectedRun = item;
+      renderExportLabSelection();
+      closeExportLabRunPicker();
+      showButtonSuccess(el.exportLabPickRun, "Selected");
+    }));
+    el.exportLabRunPickerList.appendChild(btn);
+  }
+}
+
+export async function openExportLabRunPicker({ runTask, renderExportLabSelection }) {
+  const data = await apiGet("/api/export-lab/runs");
+  state.exportLabRuns = data.runs || [];
+  if (data.current) {
+    state.exportLabCurrent = data.current;
+  }
+  if (!state.exportLabSelectedRun && state.exportLabRuns.length > 0) {
+    const firstReady = state.exportLabRuns.find((item) => item.export_ready) || state.exportLabRuns[0];
+    state.exportLabSelectedRun = firstReady;
+    renderExportLabSelection();
+  }
+  renderExportLabRunPickerList({ runTask, renderExportLabSelection });
+  el.exportLabRunPickerModal.classList.add("open");
+  el.exportLabRunPickerModal.setAttribute("aria-hidden", "false");
 }

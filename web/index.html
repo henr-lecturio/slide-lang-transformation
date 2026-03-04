@@ -20,6 +20,7 @@
           <button id="tab-home" class="tab-btn active" data-tab="home" type="button">Home</button>
           <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
           <button id="tab-image-lab" class="tab-btn" data-tab="image-lab" type="button">Image Lab</button>
+          <button id="tab-export-lab" class="tab-btn" data-tab="export-lab" type="button">Export Lab</button>
           <button id="tab-roi" class="tab-btn" data-tab="roi" type="button">ROI</button>
           <button id="tab-settings" class="tab-btn" data-tab="settings" type="button">Settings</button>
         </nav>
@@ -169,6 +170,33 @@
               <div class="image-wrap lab-preview-wrap">
                 <img id="lab-result-image" alt="Latest lab result image" />
               </div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section id="panel-export-lab" class="panel">
+        <section class="card">
+          <h2>Export Lab</h2>
+          <div class="lab-toolbar">
+            <div class="lab-toolbar-main">
+              <button id="export-lab-pick-run" type="button">Select Run</button>
+              <button id="export-lab-open-settings" type="button">Test Settings</button>
+              <button id="export-lab-run-export" type="button">Run Export</button>
+            </div>
+            <div class="lab-toolbar-side">
+              <button id="export-lab-open-terminal" type="button">Open Terminal</button>
+              <button id="export-lab-stop-run" type="button" disabled>Stop Execution</button>
+            </div>
+          </div>
+          <div class="lab-preview-grid">
+            <section class="lab-preview-panel">
+              <div class="slide-compare-label">Export Preview</div>
+              <div class="image-wrap lab-preview-wrap export-lab-video-wrap">
+                <video id="export-lab-video" controls preload="metadata"></video>
+              </div>
+              <div id="export-lab-meta" class="muted"></div>
+              <div id="export-lab-downloads" class="summary-links row wrap"></div>
             </section>
           </div>
         </section>
@@ -934,6 +962,17 @@
       </div>
     </div>
 
+    <div id="export-lab-run-picker-modal" class="video-picker-modal" aria-hidden="true">
+      <div id="export-lab-run-picker-backdrop" class="video-picker-backdrop"></div>
+      <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Export run picker">
+        <div class="modal-head">
+          <h3>Select Run</h3>
+          <button id="export-lab-run-picker-close" class="modal-close" type="button" aria-label="Close export run picker">×</button>
+        </div>
+        <div id="export-lab-run-picker-list" class="video-picker-list"></div>
+      </div>
+    </div>
+
     <div id="lab-settings-modal" class="video-picker-modal" aria-hidden="true">
       <div id="lab-settings-backdrop" class="video-picker-backdrop"></div>
       <div class="video-picker-dialog lab-settings-dialog" role="dialog" aria-modal="true" aria-label="Image Lab test settings">
@@ -1082,6 +1121,137 @@
       </div>
     </div>
 
+    <div id="export-lab-settings-modal" class="video-picker-modal" aria-hidden="true">
+      <div id="export-lab-settings-backdrop" class="video-picker-backdrop"></div>
+      <div class="video-picker-dialog lab-settings-dialog" role="dialog" aria-modal="true" aria-label="Export Lab test settings">
+        <div class="modal-head lab-settings-head">
+          <h3>Export Lab Test Settings</h3>
+          <div class="lab-settings-head-actions">
+            <button id="export-lab-settings-reset" type="button">Reset from Settings</button>
+            <button id="export-lab-settings-save" type="button">Save Test Settings</button>
+            <button id="export-lab-settings-close" class="modal-close" type="button" aria-label="Close export test settings">×</button>
+          </div>
+        </div>
+        <div class="status-modal-body lab-settings-body">
+          <div class="muted">These values apply only to <strong>Export Lab</strong> tests and never modify the main settings.</div>
+          <div class="step-sections lab-step-sections">
+            <section class="step-section is-forced" data-export-lab-step-section="timing">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Export timing test settings" /></label>
+                    <h3>Timing</h3>
+                    <button type="button" class="step-section-toggle export-lab-step-section-toggle" data-export-lab-step-toggle="timing" aria-expanded="false" aria-controls="export-lab-step-section-body-timing" aria-label="Toggle export timing test settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Isolated timing values for <strong>Export Lab</strong> video export tests.</div>
+                </div>
+              </div>
+              <div id="export-lab-step-section-body-timing" class="step-section-body" hidden>
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_min_slide_sec">VIDEO_EXPORT_MIN_SLIDE_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_min_slide_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_tail_pad_sec">VIDEO_EXPORT_TAIL_PAD_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_tail_pad_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_thumbnail_fade_sec">VIDEO_EXPORT_THUMBNAIL_FADE_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_thumbnail_fade_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section is-forced" data-export-lab-step-section="intro-outro">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Export intro outro test settings" /></label>
+                    <h3>Intro / Outro</h3>
+                    <button type="button" class="step-section-toggle export-lab-step-section-toggle" data-export-lab-step-toggle="intro-outro" aria-expanded="false" aria-controls="export-lab-step-section-body-intro-outro" aria-label="Toggle export intro and outro test settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Isolated intro and outro values for <strong>Export Lab</strong>.</div>
+                </div>
+              </div>
+              <div id="export-lab-step-section-body-intro-outro" class="step-section-body" hidden>
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_intro_white_sec">VIDEO_EXPORT_INTRO_WHITE_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_intro_white_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_intro_fade_sec">VIDEO_EXPORT_INTRO_FADE_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_intro_fade_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_intro_color">VIDEO_EXPORT_INTRO_COLOR</label>
+                    <div class="settings-value"><input id="export_lab_video_export_intro_color" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_outro_hold_sec">VIDEO_EXPORT_OUTRO_HOLD_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_outro_hold_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_outro_fade_sec">VIDEO_EXPORT_OUTRO_FADE_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_outro_fade_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_outro_fade_color">VIDEO_EXPORT_OUTRO_FADE_COLOR</label>
+                    <div class="settings-value"><input id="export_lab_video_export_outro_fade_color" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_outro_black_sec">VIDEO_EXPORT_OUTRO_BLACK_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_outro_black_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="step-section is-forced" data-export-lab-step-section="output-format">
+              <div class="step-section-head">
+                <div class="step-section-title-wrap">
+                  <div class="step-section-heading">
+                    <label class="step-switch is-static step-switch-icononly"><input type="checkbox" checked disabled aria-label="Export output format test settings" /></label>
+                    <h3>Output Format</h3>
+                    <button type="button" class="step-section-toggle export-lab-step-section-toggle" data-export-lab-step-toggle="output-format" aria-expanded="false" aria-controls="export-lab-step-section-body-output-format" aria-label="Toggle export output format test settings">
+                      <span class="step-section-chevron" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="step-section-subtitle muted">Isolated render format values for <strong>Export Lab</strong>.</div>
+                </div>
+              </div>
+              <div id="export-lab-step-section-body-output-format" class="step-section-body" hidden>
+                <div class="settings-list">
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_width">VIDEO_EXPORT_WIDTH</label>
+                    <div class="settings-value"><input id="export_lab_video_export_width" type="number" step="1" min="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_height">VIDEO_EXPORT_HEIGHT</label>
+                    <div class="settings-value"><input id="export_lab_video_export_height" type="number" step="1" min="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_fps">VIDEO_EXPORT_FPS</label>
+                    <div class="settings-value"><input id="export_lab_video_export_fps" type="number" step="1" min="1" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_bg_color">VIDEO_EXPORT_BG_COLOR</label>
+                    <div class="settings-value"><input id="export_lab_video_export_bg_color" type="text" /></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="status-modal" class="status-modal" aria-hidden="true">
       <div id="status-modal-backdrop" class="status-modal-backdrop"></div>
       <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="Run terminal log">
@@ -1104,6 +1274,19 @@
         </div>
         <div class="status-modal-body">
           <pre id="lab-log" class="log log-status status-modal-log"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="export-lab-status-modal" class="status-modal" aria-hidden="true">
+      <div id="export-lab-status-modal-backdrop" class="status-modal-backdrop"></div>
+      <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="Export Lab terminal log">
+        <div class="modal-head">
+          <h3>Export Lab Terminal</h3>
+          <button id="export-lab-status-modal-close" class="modal-close" type="button" aria-label="Close export lab terminal">×</button>
+        </div>
+        <div class="status-modal-body">
+          <pre id="export-lab-log" class="log log-status status-modal-log"></pre>
         </div>
       </div>
     </div>

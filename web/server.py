@@ -46,6 +46,7 @@ LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
 LAB_DIR = OUTPUT_DIR / "ui_lab"
+EXPORT_LAB_DIR = OUTPUT_DIR / "export_lab"
 OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
 VIDEOS_DIR = ROOT_DIR / "videos"
 VIDEO_THUMB_DIR = OUTPUT_DIR / "ui" / "video_thumbs"
@@ -120,6 +121,26 @@ LAB_STATE = {
     "result_name": "",
     "estimated_cost_usd": 0.0,
     "manifest_path": "",
+    "message": "",
+    "log_tail": deque(maxlen=400),
+    "process": None,
+    "stop_requested": False,
+    "stopping": False,
+}
+
+EXPORT_LAB_LOCK = threading.Lock()
+EXPORT_LAB_STATE = {
+    "status": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "job_id": None,
+    "run_id": None,
+    "input_name": "",
+    "result_url": "",
+    "result_name": "",
+    "timeline_json_url": "",
+    "timeline_csv_url": "",
+    "subtitle_url": "",
     "message": "",
     "log_tail": deque(maxlen=400),
     "process": None,
@@ -275,6 +296,29 @@ def latest_run_id() -> str | None:
         if entry.is_dir() and RUN_ID_PATTERN.match(entry.name):
             return entry.name
     return None
+
+
+def format_run_label(run_id: str) -> str:
+    text = str(run_id or "").strip()
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:-(\d{2}))?$", text)
+    if not match:
+        return text or "-"
+    year, month, day, hour, minute = match.group(1), match.group(2), match.group(3), match.group(4), match.group(5)
+    month_names = {
+        "01": "Jan",
+        "02": "Feb",
+        "03": "Mar",
+        "04": "Apr",
+        "05": "May",
+        "06": "Jun",
+        "07": "Jul",
+        "08": "Aug",
+        "09": "Sep",
+        "10": "Oct",
+        "11": "Nov",
+        "12": "Dec",
+    }
+    return f"{day}-{month_names.get(month, month)}-{year}, {hour}:{minute}"
 
 
 def parse_env(path: Path) -> dict[str, str]:
@@ -1016,6 +1060,282 @@ def list_lab_images() -> dict:
             }
         )
     return {"latest_run_id": run_id, "items": out}
+
+
+def export_lab_artifacts_for_run(run_id: str) -> dict:
+    if not RUN_ID_PATTERN.match(run_id):
+        raise ValueError("Invalid run id")
+    run_dir = ensure_within(RUNS_DIR, RUNS_DIR / run_id)
+    if not run_dir.exists():
+        raise FileNotFoundError(run_id)
+
+    candidates = [
+        run_dir / "slitranet" / "keyframes" / "final" / "slide_translated_upscaled",
+        run_dir / "slitranet" / "keyframes" / "final" / "slide_translated",
+        run_dir / "slitranet" / "keyframes" / "final" / "slide_upscaled",
+        run_dir / "slitranet" / "keyframes" / "final" / "slide",
+    ]
+    image_dir = next((path for path in candidates if path.exists() and count_files(path) > 0), None)
+    slide_map_json = run_dir / "slitranet" / "slide_text_map_final_translated.json"
+    if not slide_map_json.exists():
+        slide_map_json = run_dir / "slitranet" / "slide_text_map_final.json"
+    tts_alignment_json = run_dir / "slitranet" / "tts" / "segment_alignment.json"
+    full_audio_path = run_dir / "slitranet" / "tts" / "audio" / "full_transcript.wav"
+
+    missing: list[str] = []
+    if not slide_map_json.exists():
+        missing.append("slide_text_map_final.json")
+    if image_dir is None:
+        missing.append("final slide images")
+    if not tts_alignment_json.exists():
+        missing.append("tts/segment_alignment.json")
+    if not full_audio_path.exists():
+        missing.append("tts/audio/full_transcript.wav")
+
+    return {
+        "run_dir": run_dir,
+        "slide_map_json": slide_map_json if slide_map_json.exists() else None,
+        "image_dir": image_dir,
+        "tts_alignment_json": tts_alignment_json if tts_alignment_json.exists() else None,
+        "full_audio_path": full_audio_path if full_audio_path.exists() else None,
+        "export_ready": len(missing) == 0,
+        "missing_requirements": missing,
+    }
+
+
+def list_export_lab_runs() -> dict:
+    runs_payload = []
+    for run in list_runs():
+        run_id = str(run["id"])
+        artifacts = export_lab_artifacts_for_run(run_id)
+        image_dir = artifacts.get("image_dir")
+        runs_payload.append(
+            {
+                "run_id": run_id,
+                "label": format_run_label(run_id),
+                "run_status": run.get("run_status", ""),
+                "highest_available_label": run.get("highest_available_label", ""),
+                "export_ready": bool(artifacts["export_ready"]),
+                "missing_requirements": list(artifacts["missing_requirements"]),
+                "image_dir_name": image_dir.name if isinstance(image_dir, Path) else "",
+            }
+        )
+    return {"runs": runs_payload}
+
+
+def _export_lab_job_id() -> str:
+    return f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_export_{int(time.time() * 1000) % 1000:03d}"
+
+
+def _export_lab_value_str(overrides: dict, key: str, default: str = "") -> str:
+    value = overrides.get(key, default)
+    return str(value if value is not None else default).strip()
+
+
+def _export_lab_value_int(overrides: dict, key: str, default: int) -> int:
+    value = overrides.get(key, default)
+    return int(value if value is not None and str(value).strip() != "" else default)
+
+
+def _export_lab_value_float(overrides: dict, key: str, default: float) -> float:
+    value = overrides.get(key, default)
+    return float(value if value is not None and str(value).strip() != "" else default)
+
+
+def start_export_lab_job(run_id: str, overrides: dict | None = None) -> tuple[bool, str]:
+    if not RUN_ID_PATTERN.match(run_id):
+        return False, "Invalid run id"
+    overrides = overrides if isinstance(overrides, dict) else {}
+    artifacts = export_lab_artifacts_for_run(run_id)
+    if not artifacts["export_ready"]:
+        missing = ", ".join(artifacts["missing_requirements"])
+        return False, f"Selected run is not export-ready: missing {missing}"
+
+    env = parse_env(CONFIG_PATH)
+    job_id = _export_lab_job_id()
+    job_dir = EXPORT_LAB_DIR / job_id
+    output_dir = job_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    out_video = output_dir / "final_preview.mp4"
+    out_timeline_json = output_dir / "timeline.json"
+    out_timeline_csv = output_dir / "timeline.csv"
+    out_srt = output_dir / "subtitles.srt"
+
+    cmd = [
+        PYTHON_BIN,
+        "scripts/pipeline/export_slide_video.py",
+        "--slide-map-json",
+        str(artifacts["slide_map_json"]),
+        "--image-dir",
+        str(artifacts["image_dir"]),
+        "--tts-alignment-json",
+        str(artifacts["tts_alignment_json"]),
+        "--out-video",
+        str(out_video),
+        "--out-timeline-json",
+        str(out_timeline_json),
+        "--out-timeline-csv",
+        str(out_timeline_csv),
+        "--out-srt",
+        str(out_srt),
+        "--min-slide-sec",
+        str(_export_lab_value_float(overrides, "video_export_min_slide_sec", float(env.get("VIDEO_EXPORT_MIN_SLIDE_SEC", "1.2") or "1.2"))),
+        "--tail-pad-sec",
+        str(_export_lab_value_float(overrides, "video_export_tail_pad_sec", float(env.get("VIDEO_EXPORT_TAIL_PAD_SEC", "0.35") or "0.35"))),
+        "--intro-white-sec",
+        str(_export_lab_value_float(overrides, "video_export_intro_white_sec", float(env.get("VIDEO_EXPORT_INTRO_WHITE_SEC", "1.0") or "1.0"))),
+        "--intro-fade-sec",
+        str(_export_lab_value_float(overrides, "video_export_intro_fade_sec", float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4") or "0.4"))),
+        "--thumbnail-fade-sec",
+        str(_export_lab_value_float(overrides, "video_export_thumbnail_fade_sec", float(env.get("VIDEO_EXPORT_THUMBNAIL_FADE_SEC", "0.3") or "0.3"))),
+        "--intro-color",
+        _export_lab_value_str(overrides, "video_export_intro_color", env.get("VIDEO_EXPORT_INTRO_COLOR", "white") or "white"),
+        "--outro-hold-sec",
+        str(_export_lab_value_float(overrides, "video_export_outro_hold_sec", float(env.get("VIDEO_EXPORT_OUTRO_HOLD_SEC", "1.5") or "1.5"))),
+        "--outro-fade-sec",
+        str(_export_lab_value_float(overrides, "video_export_outro_fade_sec", float(env.get("VIDEO_EXPORT_OUTRO_FADE_SEC", "1.5") or "1.5"))),
+        "--outro-fade-color",
+        _export_lab_value_str(overrides, "video_export_outro_fade_color", env.get("VIDEO_EXPORT_OUTRO_FADE_COLOR", "black") or "black"),
+        "--outro-black-sec",
+        str(_export_lab_value_float(overrides, "video_export_outro_black_sec", float(env.get("VIDEO_EXPORT_OUTRO_BLACK_SEC", "2.0") or "2.0"))),
+        "--width",
+        str(_export_lab_value_int(overrides, "video_export_width", int(env.get("VIDEO_EXPORT_WIDTH", "1920") or "1920"))),
+        "--height",
+        str(_export_lab_value_int(overrides, "video_export_height", int(env.get("VIDEO_EXPORT_HEIGHT", "1080") or "1080"))),
+        "--fps",
+        str(_export_lab_value_int(overrides, "video_export_fps", int(env.get("VIDEO_EXPORT_FPS", "30") or "30"))),
+        "--bg-color",
+        _export_lab_value_str(overrides, "video_export_bg_color", env.get("VIDEO_EXPORT_BG_COLOR", "white") or "white"),
+    ]
+
+    with EXPORT_LAB_LOCK:
+        proc = EXPORT_LAB_STATE.get("process")
+        if proc is not None and proc.poll() is None:
+            return False, "Another Export Lab job is already in progress"
+
+        EXPORT_LAB_STATE["status"] = "running"
+        EXPORT_LAB_STATE["started_at"] = _now()
+        EXPORT_LAB_STATE["finished_at"] = None
+        EXPORT_LAB_STATE["job_id"] = job_id
+        EXPORT_LAB_STATE["run_id"] = run_id
+        EXPORT_LAB_STATE["input_name"] = run_id
+        EXPORT_LAB_STATE["result_url"] = api_file_url_for(out_video)
+        EXPORT_LAB_STATE["result_name"] = out_video.name
+        EXPORT_LAB_STATE["timeline_json_url"] = api_file_url_for(out_timeline_json)
+        EXPORT_LAB_STATE["timeline_csv_url"] = api_file_url_for(out_timeline_csv)
+        EXPORT_LAB_STATE["subtitle_url"] = api_file_url_for(out_srt)
+        EXPORT_LAB_STATE["stop_requested"] = False
+        EXPORT_LAB_STATE["stopping"] = False
+        EXPORT_LAB_STATE["message"] = f"Running export test for run {format_run_label(run_id)}."
+        EXPORT_LAB_STATE["log_tail"].clear()
+        EXPORT_LAB_STATE["log_tail"].append(f"[Export Lab] run={run_id}")
+        EXPORT_LAB_STATE["log_tail"].append(f"[Export Lab] image_dir={Path(artifacts['image_dir']).name}")
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=True,
+        )
+        EXPORT_LAB_STATE["process"] = process
+
+    thread = threading.Thread(target=_export_lab_worker, args=(process,), daemon=True)
+    thread.start()
+    return True, "started"
+
+
+def snapshot_export_lab_state() -> dict:
+    reconcile_export_lab_state()
+    with EXPORT_LAB_LOCK:
+        return {
+            "status": EXPORT_LAB_STATE["status"],
+            "started_at": EXPORT_LAB_STATE["started_at"],
+            "finished_at": EXPORT_LAB_STATE["finished_at"],
+            "job_id": EXPORT_LAB_STATE["job_id"],
+            "run_id": EXPORT_LAB_STATE["run_id"],
+            "input_name": EXPORT_LAB_STATE["input_name"],
+            "result_url": EXPORT_LAB_STATE["result_url"],
+            "result_name": EXPORT_LAB_STATE["result_name"],
+            "timeline_json_url": EXPORT_LAB_STATE["timeline_json_url"],
+            "timeline_csv_url": EXPORT_LAB_STATE["timeline_csv_url"],
+            "subtitle_url": EXPORT_LAB_STATE["subtitle_url"],
+            "message": EXPORT_LAB_STATE["message"],
+            "log_tail": list(EXPORT_LAB_STATE["log_tail"]),
+            "stop_requested": bool(EXPORT_LAB_STATE["stop_requested"]),
+            "stopping": bool(EXPORT_LAB_STATE["stopping"]),
+        }
+
+
+def finalize_export_lab_state(code: int) -> None:
+    with EXPORT_LAB_LOCK:
+        stopped = bool(EXPORT_LAB_STATE.get("stop_requested"))
+        EXPORT_LAB_STATE["finished_at"] = _now()
+        EXPORT_LAB_STATE["status"] = "stopped" if stopped else ("done" if code == 0 else "error")
+        EXPORT_LAB_STATE["process"] = None
+        EXPORT_LAB_STATE["stopping"] = False
+        EXPORT_LAB_STATE["stop_requested"] = False
+        if stopped:
+            EXPORT_LAB_STATE["message"] = "Export Lab execution stopped."
+        elif code != 0 and not EXPORT_LAB_STATE["message"]:
+            EXPORT_LAB_STATE["message"] = "Export Lab job failed."
+
+
+def reconcile_export_lab_state() -> None:
+    with EXPORT_LAB_LOCK:
+        proc = EXPORT_LAB_STATE.get("process")
+        if proc is not None and proc.poll() is not None:
+            finalize_export_lab_state(proc.returncode)
+
+
+def _export_lab_worker(process: subprocess.Popen) -> None:
+    try:
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            line = raw_line.rstrip("\n")
+            with EXPORT_LAB_LOCK:
+                EXPORT_LAB_STATE["log_tail"].append(line)
+    finally:
+        process.wait()
+        finalize_export_lab_state(process.returncode)
+
+
+def stop_export_lab_job() -> tuple[bool, str]:
+    with EXPORT_LAB_LOCK:
+        proc = EXPORT_LAB_STATE.get("process")
+        if proc is None or proc.poll() is not None:
+            return False, "No Export Lab execution is currently running"
+        if EXPORT_LAB_STATE.get("stopping"):
+            return False, "Export Lab execution is already stopping"
+        EXPORT_LAB_STATE["stop_requested"] = True
+        EXPORT_LAB_STATE["stopping"] = True
+        EXPORT_LAB_STATE["status"] = "stopping"
+        EXPORT_LAB_STATE["message"] = "Stopping Export Lab execution..."
+        EXPORT_LAB_STATE["log_tail"].append("[Export Lab] stop requested")
+        pgid = os.getpgid(proc.pid)
+
+    def _stop_group() -> None:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            pass
+        time.sleep(3.0)
+        if proc.poll() is None:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                pass
+
+    threading.Thread(target=_stop_group, daemon=True).start()
+    return True, "stop_requested"
 
 
 def _lab_job_id(action: str) -> str:
@@ -2364,6 +2684,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/lab/status":
                 return self._send_json(200, snapshot_lab_state())
 
+            if path == "/api/export-lab/runs":
+                payload = list_export_lab_runs()
+                payload["current"] = snapshot_export_lab_state()
+                return self._send_json(200, payload)
+
+            if path == "/api/export-lab/status":
+                return self._send_json(200, snapshot_export_lab_state())
+
             if path.startswith("/api/runs/"):
                 rest = path[len("/api/runs/") :]
                 parts = rest.split("/")
@@ -2785,6 +3113,22 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_lab_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_lab_state()})
+
+            if path == "/api/export-lab/export":
+                data = self._read_json_body()
+                ok, msg = start_export_lab_job(
+                    str(data["run_id"]).strip(),
+                    data.get("settings") if isinstance(data.get("settings"), dict) else {},
+                )
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_export_lab_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_export_lab_state()})
+
+            if path == "/api/export-lab/stop":
+                ok, msg = stop_export_lab_job()
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_export_lab_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_export_lab_state()})
 
             return self._send_json(404, {"error": "Not found"})
         except (KeyError, ValueError) as exc:
