@@ -1,1 +1,1 @@
-Translate all text elements only to {{TARGET_LANGUAGE}}. Keep everything else exactly the same. 
+Translate all the English text elements into {{TARGET_LANGUAGE}}, while keeping everything else the same.

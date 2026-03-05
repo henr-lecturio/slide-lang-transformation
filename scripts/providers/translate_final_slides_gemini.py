@@ -18,6 +18,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.lib.translation_memory import DEFAULT_TERMBASE_PATH, append_glossary_to_prompt, load_termbase_entries
+from scripts.lib.cloud_gemini_image import ensure_cloud_gemini_image_client
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
@@ -45,6 +46,16 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_TERMBASE_PATH),
         help="CSV termbase applied as glossary instructions to the image translation prompt.",
     )
+    parser.add_argument(
+        "--project-id",
+        default="",
+        help="Google Cloud project id for Vertex AI Gemini image translation.",
+    )
+    parser.add_argument(
+        "--location",
+        default="",
+        help="Google Cloud location for Vertex AI Gemini image translation (e.g. global or us-central1).",
+    )
     return parser.parse_args()
 
 
@@ -71,20 +82,12 @@ def load_prompt(path: Path, target_language: str) -> str:
     return prompt
 
 
-def ensure_client():
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
-            "google-genai is not installed in this environment. "
-            "Run: source .venv/bin/activate && pip install google-genai"
-        ) from exc
-
-    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-    return genai.Client(api_key=api_key), types
+def ensure_client(project_id: str, location: str):
+    client, types, project_id_used, _default_project, location_used = ensure_cloud_gemini_image_client(
+        project_id=project_id,
+        location=location,
+    )
+    return client, types, project_id_used, location_used
 
 
 def encode_png(image: np.ndarray) -> bytes:
@@ -184,7 +187,9 @@ def main() -> int:
     if not input_dir.exists():
         raise FileNotFoundError(input_dir)
 
-    client, types = ensure_client()
+    client, types, project_id_used, location_used = ensure_client(args.project_id, args.location)
+    print(f"[Translate] Vertex project: {project_id_used}", flush=True)
+    print(f"[Translate] Vertex location: {location_used}", flush=True)
     clear_pngs(output_dir)
 
     slide_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")

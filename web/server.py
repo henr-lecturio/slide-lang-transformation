@@ -31,9 +31,15 @@ from scripts.lib.cloud_translate import (
     resolve_target_language_codes,
     translate_texts_llm,
 )
+from scripts.lib.cloud_gemini_image import (
+    ensure_cloud_gemini_image_client,
+    resolve_gemini_location as resolve_cloud_gemini_location,
+    resolve_gemini_project_id as resolve_cloud_gemini_project_id,
+)
 from scripts.lib.cloud_tts import ensure_cloud_tts_client, measure_wave_or_pcm_duration, synthesize_cloud_tts_audio
 from scripts.lib.slide_ocr import ensure_cloud_vision_client
 from scripts.lib.translation_memory import (
+    append_glossary_to_prompt,
     apply_termbase_placeholders,
     load_termbase_entries,
     restore_termbase_placeholders,
@@ -130,6 +136,8 @@ LAB_STATE = {
     "original_url": "",
     "result_url": "",
     "result_name": "",
+    "result_debug_overlay_url": "",
+    "result_debug_overlay_name": "",
     "estimated_cost_usd": 0.0,
     "manifest_path": "",
     "message": "",
@@ -350,6 +358,94 @@ def load_local_env(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
+def _first_non_empty(*values: object) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _map_get(mapping: dict | None, *keys: str) -> str:
+    source = mapping if isinstance(mapping, dict) else {}
+    for key in keys:
+        if not key:
+            continue
+        value = source.get(key, "")
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def resolve_vertex_project_id_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    return _map_get(
+        mapping,
+        "GCLOUD_VERTEX_PROJECTID",
+        "GOOGLE_GEMINI_PROJECT_ID",
+        "GCLOUD_VISION_PROJECTID",
+        "GOOGLE_VISION_PROJECT_ID",
+        "GCLOUD_TRANSLATE_PROJECTID",
+        "GOOGLE_TRANSLATE_PROJECT_ID",
+        "GCLOUD_TTS_PROJECTID",
+        "GOOGLE_TTS_PROJECT_ID",
+        "GOOGLE_SPEECH_PROJECT_ID",
+    )
+
+
+def resolve_vision_project_id_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    return _map_get(
+        mapping,
+        "GCLOUD_VISION_PROJECTID",
+        "GOOGLE_VISION_PROJECT_ID",
+        "GCLOUD_TRANSLATE_PROJECTID",
+        "GOOGLE_TRANSLATE_PROJECT_ID",
+        "GCLOUD_TTS_PROJECTID",
+        "GOOGLE_TTS_PROJECT_ID",
+        "GOOGLE_SPEECH_PROJECT_ID",
+    )
+
+
+def resolve_translate_project_id_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    return _map_get(
+        mapping,
+        "GCLOUD_TRANSLATE_PROJECTID",
+        "GOOGLE_TRANSLATE_PROJECT_ID",
+        "GCLOUD_TTS_PROJECTID",
+        "GOOGLE_TTS_PROJECT_ID",
+        "GOOGLE_SPEECH_PROJECT_ID",
+    )
+
+
+def resolve_tts_project_id_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    return _map_get(
+        mapping,
+        "GCLOUD_TTS_PROJECTID",
+        "GOOGLE_TTS_PROJECT_ID",
+        "GOOGLE_SPEECH_PROJECT_ID",
+    )
+
+
+def resolve_gemini_project_id_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    project_hint = resolve_vertex_project_id_from_mapping(mapping)
+    return resolve_cloud_gemini_project_id(project_hint)
+
+
+def resolve_gemini_location_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    location_hint = str(
+        mapping.get("GOOGLE_GEMINI_LOCATION", "")
+        or mapping.get("GOOGLE_TRANSLATE_LOCATION", "")
+        or ""
+    ).strip()
+    return resolve_cloud_gemini_location(location_hint)
+
+
 load_local_env(LOCAL_ENV_PATH)
 
 
@@ -436,11 +532,22 @@ def normalize_slide_translate_styles_json(text: str) -> str:
         for key, value in scope_payload.items():
             if not isinstance(value, dict):
                 raise ValueError(f"SLIDE_TRANSLATE_STYLES_JSON.{scope_name}.{key} must be an object")
+
+    def force_fixed_font_size_mode(style_obj: dict) -> dict:
+        normalized_style = dict(style_obj)
+        normalized_style["font_size_mode"] = "fixed"
+        normalized_style.pop("font_size_limit", None)
+        return normalized_style
+
+    normalized_defaults = force_fixed_font_size_mode(defaults)
+    normalized_roles = {str(key): force_fixed_font_size_mode(value) for key, value in roles.items()}
+    normalized_slots = {str(key): force_fixed_font_size_mode(value) for key, value in slots.items()}
+
     normalized = {
         "version": version,
-        "defaults": defaults,
-        "roles": roles,
-        "slots": slots,
+        "defaults": normalized_defaults,
+        "roles": normalized_roles,
+        "slots": normalized_slots,
     }
     return json.dumps(normalized, ensure_ascii=False, indent=2)
 
@@ -1427,6 +1534,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
 
     source_path = ensure_within(run_dir, run_dir / source_rel)
     env = parse_env(CONFIG_PATH)
+    gemini_project_id = resolve_gemini_project_id_from_mapping(env)
+    gemini_location = resolve_gemini_location_from_mapping(env)
     overrides = overrides if isinstance(overrides, dict) else {}
     lab_slide_translate_styles_override = ""
 
@@ -1444,8 +1553,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
 
     if action == "edit":
         mode = "gemini"
-        if not (os.environ.get("GEMINI_API_KEY") or "").strip():
-            return False, "GEMINI_API_KEY is not set in the server environment"
+        if not gemini_project_id:
+            return False, "Image Lab Slide Edit requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)"
         edit_model = override_str("slide_edit_model", env.get("GEMINI_EDIT_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
         edit_prompt = override_str("slide_edit_prompt", GEMINI_PROMPT_PATH.read_text(encoding="utf-8"))
         if edit_model not in ALLOWED_IMAGE_MODELS:
@@ -1464,22 +1573,10 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
             style_override_raw = str(overrides.get("slide_translate_styles_json", "") or "")
             if style_override_raw.strip():
                 lab_slide_translate_styles_override = normalize_slide_translate_styles_json(style_override_raw)
-            vision_project_id = (
-                env.get("GOOGLE_VISION_PROJECT_ID", "")
-                or env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
-                or env.get("GOOGLE_TTS_PROJECT_ID", "")
-                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
-                or ""
-            ).strip()
-            translate_project_id = (
-                env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
-                or env.get("GOOGLE_VISION_PROJECT_ID", "")
-                or env.get("GOOGLE_TTS_PROJECT_ID", "")
-                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
-                or ""
-            ).strip()
+            vision_project_id = resolve_vision_project_id_from_mapping(env)
+            translate_project_id = resolve_translate_project_id_from_mapping(env) or vision_project_id
             if not vision_project_id:
-                return False, "Image Lab deterministic translate requires GOOGLE_VISION_PROJECT_ID"
+                return False, "Image Lab deterministic translate requires GCLOUD_VISION_PROJECTID"
             if not translate_project_id:
                 return False, "Image Lab deterministic translate requires a Google project id for Translation"
             font_path_raw = (
@@ -1502,8 +1599,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                     return False, f"Image Lab deterministic translate style config not found: {style_config_path}"
         else:
             mode = "gemini"
-            if not (os.environ.get("GEMINI_API_KEY") or "").strip():
-                return False, "GEMINI_API_KEY is not set in the server environment"
+            if not gemini_project_id:
+                return False, "Image Lab Slide Translate requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)"
             translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
             translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
             if translate_model not in ALLOWED_IMAGE_MODELS:
@@ -1532,6 +1629,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
     shutil.copy2(source_path, original_copy)
     shutil.copy2(source_path, input_copy)
     result_path = output_dir / source_path.name
+    debug_overlay_path: Path | None = None
 
     if action == "edit":
         edit_prompt_path = job_dir / "slide_edit_prompt.txt"
@@ -1547,14 +1645,22 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
             edit_model,
             "--prompt-file",
             str(edit_prompt_path),
+            "--project-id",
+            gemini_project_id,
+            "--location",
+            gemini_location,
             "--skip-first-slide",
             "0",
         ]
         message = "Running Gemini edit on selected final slide."
     elif action == "translate":
         if mode == "deterministic_glossary":
+            debug_overlay_path = job_dir / "slide_translate" / "debug" / "overlay" / source_path.name
             needs_review_policy = (
-                env.get("SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY", "mark_only") or "mark_only"
+                override_str(
+                    "slide_translate_needs_review_policy",
+                    env.get("LAB_SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY", "allow_partial") or "allow_partial",
+                )
             ).strip()
             font_path_raw = (
                 env.get(
@@ -1572,20 +1678,24 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
             if lab_slide_translate_styles_override:
                 style_config_path = job_dir / "slide_translate_style_override.json"
                 write_text_file(style_config_path, lab_slide_translate_styles_override)
-            vision_project_id = (
-                env.get("GOOGLE_VISION_PROJECT_ID", "")
-                or env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
-                or env.get("GOOGLE_TTS_PROJECT_ID", "")
-                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
-                or ""
-            ).strip()
-            translate_project_id = (
-                env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
-                or env.get("GOOGLE_VISION_PROJECT_ID", "")
-                or env.get("GOOGLE_TTS_PROJECT_ID", "")
-                or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
-                or ""
-            ).strip()
+            try:
+                global_max_font_size = max(8, int(env.get("SLIDE_TRANSLATE_MAX_FONT_SIZE", "120") or "120"))
+            except (TypeError, ValueError):
+                global_max_font_size = 120
+            try:
+                max_expand_px = max(0, int(env.get("SLIDE_TRANSLATE_MAX_EXPAND_PX", "120") or "120"))
+            except (TypeError, ValueError):
+                max_expand_px = 120
+            try:
+                layout_max_attempts = max(0, int(env.get("SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS", "50000") or "50000"))
+            except (TypeError, ValueError):
+                layout_max_attempts = 50000
+            try:
+                layout_max_ms = max(0, int(env.get("SLIDE_TRANSLATE_LAYOUT_MAX_MS", "15000") or "15000"))
+            except (TypeError, ValueError):
+                layout_max_ms = 15000
+            vision_project_id = resolve_vision_project_id_from_mapping(env)
+            translate_project_id = resolve_translate_project_id_from_mapping(env) or vision_project_id
             cmd = [
                 PYTHON_BIN,
                 "scripts/pipeline/translate_single_slide_deterministic.py",
@@ -1615,8 +1725,16 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                 str(font_path),
                 "--style-config-json",
                 str(style_config_path),
+                "--global-max-font-size",
+                str(global_max_font_size),
+                "--max-expand-px",
+                str(max_expand_px),
+                "--layout-max-attempts",
+                str(layout_max_attempts),
+                "--layout-max-ms",
+                str(layout_max_ms),
                 "--needs-review-policy",
-                needs_review_policy if needs_review_policy in {"mark_only", "allow_partial"} else "mark_only",
+                needs_review_policy if needs_review_policy in {"mark_only", "allow_partial"} else "allow_partial",
             ]
             source_language_code = str(env.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
             if source_language_code:
@@ -1636,6 +1754,10 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                 translate_model,
                 "--prompt-file",
                 str(translate_prompt_path),
+                "--project-id",
+                gemini_project_id,
+                "--location",
+                gemini_location,
                 "--target-language",
                 translate_target_language,
             ]
@@ -1714,6 +1836,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
         LAB_STATE["original_url"] = api_file_url_for(original_copy)
         LAB_STATE["result_url"] = api_file_url_for(result_path)
         LAB_STATE["result_name"] = result_path.name
+        LAB_STATE["result_debug_overlay_url"] = api_file_url_for(debug_overlay_path) if debug_overlay_path is not None else ""
+        LAB_STATE["result_debug_overlay_name"] = debug_overlay_path.name if debug_overlay_path is not None else ""
         LAB_STATE["estimated_cost_usd"] = 0.0
         LAB_STATE["manifest_path"] = (
             str(job_dir / "replicate_manifest.json")
@@ -1894,6 +2018,8 @@ def snapshot_lab_state() -> dict:
             "original_url": LAB_STATE["original_url"],
             "result_url": LAB_STATE["result_url"],
             "result_name": LAB_STATE["result_name"],
+            "result_debug_overlay_url": LAB_STATE["result_debug_overlay_url"],
+            "result_debug_overlay_name": LAB_STATE["result_debug_overlay_name"],
             "estimated_cost_usd": LAB_STATE["estimated_cost_usd"],
             "message": LAB_STATE["message"],
             "log_tail": list(LAB_STATE["log_tail"]),
@@ -2085,28 +2211,17 @@ def start_run() -> tuple[bool, str]:
     run_step_tts = (env.get("RUN_STEP_TTS", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
-    translate_project_id = (
-        env.get("GOOGLE_TRANSLATE_PROJECT_ID", "")
-        or env.get("GOOGLE_VISION_PROJECT_ID", "")
-        or env.get("GOOGLE_TTS_PROJECT_ID", "")
-        or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
-        or ""
-    ).strip()
-    vision_project_id = (
-        env.get("GOOGLE_VISION_PROJECT_ID", "")
-        or translate_project_id
-        or env.get("GOOGLE_TTS_PROJECT_ID", "")
-        or env.get("GOOGLE_SPEECH_PROJECT_ID", "")
-        or ""
-    ).strip()
+    translate_project_id = resolve_translate_project_id_from_mapping(env)
+    vision_project_id = resolve_vision_project_id_from_mapping(env) or translate_project_id
+    vertex_project_id = resolve_vertex_project_id_from_mapping(env)
     if (
         (run_step_edit and final_slide_mode == "gemini")
         or (run_step_translate and translation_mode == "gemini")
-    ) and not (os.environ.get("GEMINI_API_KEY") or "").strip():
-        return False, "GEMINI_API_KEY is not set in the server environment"
+    ) and not vertex_project_id:
+        return False, "GCLOUD_VERTEX_PROJECTID must be set when nano banana Slide Edit/Translate is enabled"
     if run_step_translate and translation_mode == "deterministic_glossary":
         if not vision_project_id:
-            return False, "GOOGLE_VISION_PROJECT_ID must be set when FINAL_SLIDE_TRANSLATION_MODE=deterministic_glossary"
+            return False, "GCLOUD_VISION_PROJECTID must be set when FINAL_SLIDE_TRANSLATION_MODE=deterministic_glossary"
         if not translate_project_id:
             return False, "A Google project id for Translation must be set when FINAL_SLIDE_TRANSLATION_MODE=deterministic_glossary"
         font_path_raw = (
@@ -2126,16 +2241,40 @@ def start_run() -> tuple[bool, str]:
         style_config_path = Path(style_config_raw) if Path(style_config_raw).is_absolute() else ROOT_DIR / style_config_raw
         if not style_config_path.exists():
             return False, f"SLIDE_TRANSLATE_STYLE_CONFIG_PATH not found: {style_config_path}"
+        max_font_size_raw = (env.get("SLIDE_TRANSLATE_MAX_FONT_SIZE", "120") or "120").strip()
+        try:
+            max_font_size = int(max_font_size_raw)
+        except (TypeError, ValueError):
+            return False, "SLIDE_TRANSLATE_MAX_FONT_SIZE must be an integer >= 8"
+        if max_font_size < 8:
+            return False, "SLIDE_TRANSLATE_MAX_FONT_SIZE must be an integer >= 8"
+        max_expand_px_raw = (env.get("SLIDE_TRANSLATE_MAX_EXPAND_PX", "120") or "120").strip()
+        try:
+            max_expand_px = int(max_expand_px_raw)
+        except (TypeError, ValueError):
+            return False, "SLIDE_TRANSLATE_MAX_EXPAND_PX must be an integer >= 0"
+        if max_expand_px < 0:
+            return False, "SLIDE_TRANSLATE_MAX_EXPAND_PX must be an integer >= 0"
+        layout_attempts_raw = (env.get("SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS", "50000") or "50000").strip()
+        layout_ms_raw = (env.get("SLIDE_TRANSLATE_LAYOUT_MAX_MS", "15000") or "15000").strip()
+        try:
+            layout_attempts = int(layout_attempts_raw)
+        except (TypeError, ValueError):
+            return False, "SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS must be an integer >= 0"
+        try:
+            layout_ms = int(layout_ms_raw)
+        except (TypeError, ValueError):
+            return False, "SLIDE_TRANSLATE_LAYOUT_MAX_MS must be an integer >= 0"
+        if layout_attempts < 0:
+            return False, "SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS must be an integer >= 0"
+        if layout_ms < 0:
+            return False, "SLIDE_TRANSLATE_LAYOUT_MAX_MS must be an integer >= 0"
     if transcription_provider == "google_chirp_3" and not (env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip():
         return False, "GOOGLE_SPEECH_PROJECT_ID must be set when TRANSCRIPTION_PROVIDER=google_chirp_3"
-    if run_step_text_translate and not (
-        (env.get("GOOGLE_TRANSLATE_PROJECT_ID", "") or env.get("GOOGLE_TTS_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
-    ):
-        return False, "GOOGLE_TRANSLATE_PROJECT_ID must be set when Transcript Translate is enabled"
-    if run_step_tts and not (
-        (env.get("GOOGLE_TTS_PROJECT_ID", "") or env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip()
-    ):
-        return False, "GOOGLE_TTS_PROJECT_ID must be set when TTS is enabled"
+    if run_step_text_translate and not resolve_translate_project_id_from_mapping(env):
+        return False, "GCLOUD_TRANSLATE_PROJECTID must be set when Transcript Translate is enabled"
+    if run_step_tts and not resolve_tts_project_id_from_mapping(env):
+        return False, "GCLOUD_TTS_PROJECTID must be set when TTS is enabled"
     with RUN_LOCK:
         proc = RUN_STATE.get("process")
         if proc is not None and proc.poll() is None:
@@ -2241,20 +2380,11 @@ def make_silent_wav_bytes(duration_sec: float = 1.2, sample_rate: int = 16000) -
     return payload.getvalue()
 
 
-def ensure_gemini_client():
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
-            "google-genai is not installed in this environment. "
-            "Run: source .venv/bin/activate && pip install google-genai"
-        ) from exc
-
-    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-    return genai.Client(api_key=api_key), types
+def ensure_gemini_client(values: dict | None = None):
+    mapping = values if isinstance(values, dict) else {}
+    project_id = resolve_gemini_project_id_from_mapping(mapping)
+    location = resolve_gemini_location_from_mapping(mapping)
+    return ensure_cloud_gemini_image_client(project_id=project_id, location=location)
 
 
 def inject_target_language(prompt: str, target_language: str) -> str:
@@ -2415,9 +2545,12 @@ def run_transcription_health_check(payload: dict) -> dict:
 
 
 def run_slide_edit_health_check(payload: dict) -> dict:
-    mode = str(payload.get("FINAL_SLIDE_POSTPROCESS_MODE", "") or "").strip().lower()
-    model = str(payload.get("GEMINI_EDIT_MODEL", "") or "").strip()
-    prompt = str(payload.get("GEMINI_EDIT_PROMPT", "") or "").strip()
+    merged = parse_env(CONFIG_PATH)
+    if isinstance(payload, dict):
+        merged.update(payload)
+    mode = str(merged.get("FINAL_SLIDE_POSTPROCESS_MODE", "") or "").strip().lower()
+    model = str(merged.get("GEMINI_EDIT_MODEL", "") or "").strip()
+    prompt = str(merged.get("GEMINI_EDIT_PROMPT", "") or "").strip()
     if mode != "gemini":
         return {
             "ok": False,
@@ -2430,7 +2563,7 @@ def run_slide_edit_health_check(payload: dict) -> dict:
 
     start = time.perf_counter()
     try:
-        client, types = ensure_gemini_client()
+        client, types, project_id_used, _default_project, location_used = ensure_gemini_client(merged)
         original, overlay, mask = make_health_edit_assets()
         response = client.models.generate_content(
             model=model,
@@ -2450,6 +2583,8 @@ def run_slide_edit_health_check(payload: dict) -> dict:
         return {
             "ok": True,
             "model": model,
+            "project_id_used": project_id_used,
+            "location": location_used,
             "latency_ms": latency_ms,
             "image_width": int(image.shape[1]),
             "image_height": int(image.shape[0]),
@@ -2465,10 +2600,13 @@ def run_slide_edit_health_check(payload: dict) -> dict:
 
 
 def run_slide_translate_health_check(payload: dict) -> dict:
-    mode = str(payload.get("FINAL_SLIDE_TRANSLATION_MODE", "") or "").strip().lower()
-    model = str(payload.get("GEMINI_TRANSLATE_MODEL", "") or "").strip()
-    prompt = str(payload.get("GEMINI_TRANSLATE_PROMPT", "") or "").strip()
-    target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
+    merged = parse_env(CONFIG_PATH)
+    if isinstance(payload, dict):
+        merged.update(payload)
+    mode = str(merged.get("FINAL_SLIDE_TRANSLATION_MODE", "") or "").strip().lower()
+    model = str(merged.get("GEMINI_TRANSLATE_MODEL", "") or "").strip()
+    prompt = str(merged.get("GEMINI_TRANSLATE_PROMPT", "") or "").strip()
+    target_language = str(merged.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
     if not target_language:
         raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
     if mode == "gemini":
@@ -2478,7 +2616,7 @@ def run_slide_translate_health_check(payload: dict) -> dict:
 
         start = time.perf_counter()
         try:
-            client, types = ensure_gemini_client()
+            client, types, project_id_used, _default_project, location_used = ensure_gemini_client(merged)
             glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
             response = client.models.generate_content(
                 model=model,
@@ -2498,6 +2636,8 @@ def run_slide_translate_health_check(payload: dict) -> dict:
                 "mode": mode,
                 "model": model,
                 "target_language": target_language,
+                "project_id_used": project_id_used,
+                "location": location_used,
                 "latency_ms": latency_ms,
                 "image_width": int(image.shape[1]),
                 "image_height": int(image.shape[0]),
@@ -2513,15 +2653,15 @@ def run_slide_translate_health_check(payload: dict) -> dict:
             }
 
     if mode == "deterministic_glossary":
-        vision_project_id = str(payload.get("GOOGLE_VISION_PROJECT_ID", "") or "").strip()
-        translate_project_id = str(payload.get("GOOGLE_TRANSLATE_PROJECT_ID", "") or "").strip() or vision_project_id
-        translate_location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip() or "us-central1"
-        translate_model = str(payload.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip() or "general/translation-llm"
-        source_language_code = str(payload.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
+        vision_project_id = resolve_vision_project_id_from_mapping(merged)
+        translate_project_id = resolve_translate_project_id_from_mapping(merged) or vision_project_id
+        translate_location = str(merged.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip() or "us-central1"
+        translate_model = str(merged.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip() or "general/translation-llm"
+        source_language_code = str(merged.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
         if not vision_project_id:
-            raise ValueError("GOOGLE_VISION_PROJECT_ID must not be empty")
+            raise ValueError("GCLOUD_VISION_PROJECTID must not be empty")
         if not translate_project_id:
-            raise ValueError("GOOGLE_TRANSLATE_PROJECT_ID must not be empty")
+            raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty")
 
         start = time.perf_counter()
         try:
@@ -2580,13 +2720,16 @@ def run_slide_translate_health_check(payload: dict) -> dict:
 
 
 def run_text_translate_health_check(payload: dict) -> dict:
-    project_id = str(payload.get("GOOGLE_TRANSLATE_PROJECT_ID", "") or "").strip()
+    project_id = _first_non_empty(
+        payload.get("GCLOUD_TRANSLATE_PROJECTID", ""),
+        payload.get("GOOGLE_TRANSLATE_PROJECT_ID", ""),
+    )
     location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip()
     model = str(payload.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip()
     source_language_code = str(payload.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
     target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
     if not project_id:
-        raise ValueError("GOOGLE_TRANSLATE_PROJECT_ID must not be empty")
+        raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty")
     if not location:
         raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
     if not model:
@@ -2752,7 +2895,10 @@ def run_slide_upscale_health_check(payload: dict) -> dict:
 
 
 def run_tts_health_check(payload: dict) -> dict:
-    project_id = str(payload.get("GOOGLE_TTS_PROJECT_ID", "") or "").strip()
+    project_id = _first_non_empty(
+        payload.get("GCLOUD_TTS_PROJECTID", ""),
+        payload.get("GOOGLE_TTS_PROJECT_ID", ""),
+    )
     language_code = str(payload.get("GOOGLE_TTS_LANGUAGE_CODE", "") or "").strip()
     model = str(payload.get("GEMINI_TTS_MODEL", "") or "").strip()
     voice = str(payload.get("GEMINI_TTS_VOICE", "") or "").strip()
@@ -2885,6 +3031,7 @@ class Handler(BaseHTTPRequestHandler):
                     "SPEAKER_FILTER_MAX_EDGE_DENSITY": float(env.get("SPEAKER_FILTER_MAX_EDGE_DENSITY", "0.011")),
                     "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(env.get("SPEAKER_FILTER_MAX_LAPLACIAN_VAR", "80")),
                     "SPEAKER_FILTER_MAX_DURATION_SEC": float(env.get("SPEAKER_FILTER_MAX_DURATION_SEC", "2.5")),
+                    "GCLOUD_VERTEX_PROJECTID": resolve_vertex_project_id_from_mapping(env),
                     "FINAL_SLIDE_POSTPROCESS_MODE": env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local"),
                     "GEMINI_EDIT_MODEL": normalize_image_model(env.get("GEMINI_EDIT_MODEL", DEFAULT_IMAGE_MODEL)),
                     "GEMINI_EDIT_PROMPT": read_text_file(GEMINI_PROMPT_PATH).rstrip("\n"),
@@ -2892,29 +3039,21 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
                     "GEMINI_TRANSLATE_MODEL": normalize_image_model(env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL)),
                     "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
-                    "GOOGLE_VISION_PROJECT_ID": env.get(
-                        "GOOGLE_VISION_PROJECT_ID",
-                        env.get(
-                            "GOOGLE_TRANSLATE_PROJECT_ID",
-                            env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
-                        ),
-                    ),
+                    "GCLOUD_VISION_PROJECTID": resolve_vision_project_id_from_mapping(env),
                     "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": env.get(
                         "SLIDE_TRANSLATE_STYLE_CONFIG_PATH",
                         "config/slide_translate_styles.json",
                     ),
+                    "SLIDE_TRANSLATE_MAX_FONT_SIZE": int(env.get("SLIDE_TRANSLATE_MAX_FONT_SIZE", "120")),
                     "SLIDE_TRANSLATE_STYLES_JSON": read_text_file(slide_translate_style_config_path).rstrip("\n"),
-                    "GOOGLE_TRANSLATE_PROJECT_ID": env.get(
-                        "GOOGLE_TRANSLATE_PROJECT_ID",
-                        env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
-                    ),
+                    "GCLOUD_TRANSLATE_PROJECTID": resolve_translate_project_id_from_mapping(env),
                     "GOOGLE_TRANSLATE_LOCATION": env.get("GOOGLE_TRANSLATE_LOCATION", "us-central1"),
                     "GOOGLE_TRANSLATE_MODEL": env.get("GOOGLE_TRANSLATE_MODEL", "general/translation-llm"),
                     "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": env.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", ""),
                     "TRANSLATION_TERMBASE_CSV": read_text_file(TRANSLATION_TERMBASE_PATH).rstrip("\n"),
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
-                    "GOOGLE_TTS_PROJECT_ID": env.get("GOOGLE_TTS_PROJECT_ID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+                    "GCLOUD_TTS_PROJECTID": resolve_tts_project_id_from_mapping(env),
                     "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "de-DE"),
                     "GEMINI_TTS_LANGUAGE_OPTIONS": load_gemini_tts_language_options(),
                     "GEMINI_TTS_PROMPT": read_text_file(GEMINI_TTS_PROMPT_PATH).rstrip("\n"),
@@ -2953,7 +3092,6 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_HEIGHT": int(env.get("VIDEO_EXPORT_HEIGHT", "1080")),
                     "VIDEO_EXPORT_FPS": int(env.get("VIDEO_EXPORT_FPS", "30")),
                     "VIDEO_EXPORT_BG_COLOR": env.get("VIDEO_EXPORT_BG_COLOR", "white"),
-                    "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                     "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                 }
                 return self._send_json(200, payload)
@@ -3141,21 +3279,31 @@ class Handler(BaseHTTPRequestHandler):
                     "SPEAKER_FILTER_MAX_EDGE_DENSITY": float(data["SPEAKER_FILTER_MAX_EDGE_DENSITY"]),
                     "SPEAKER_FILTER_MAX_LAPLACIAN_VAR": float(data["SPEAKER_FILTER_MAX_LAPLACIAN_VAR"]),
                     "SPEAKER_FILTER_MAX_DURATION_SEC": float(data["SPEAKER_FILTER_MAX_DURATION_SEC"]),
+                    "GCLOUD_VERTEX_PROJECTID": str(
+                        data.get("GCLOUD_VERTEX_PROJECTID", data.get("GOOGLE_GEMINI_PROJECT_ID", ""))
+                    ).strip(),
                     "FINAL_SLIDE_POSTPROCESS_MODE": str(data["FINAL_SLIDE_POSTPROCESS_MODE"]).strip(),
                     "GEMINI_EDIT_MODEL": str(data["GEMINI_EDIT_MODEL"]).strip(),
                     "FINAL_SLIDE_TRANSLATION_MODE": str(data["FINAL_SLIDE_TRANSLATION_MODE"]).strip(),
                     "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
                     "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
-                    "GOOGLE_VISION_PROJECT_ID": str(data["GOOGLE_VISION_PROJECT_ID"]).strip(),
+                    "GCLOUD_VISION_PROJECTID": str(
+                        data.get("GCLOUD_VISION_PROJECTID", data.get("GOOGLE_VISION_PROJECT_ID", ""))
+                    ).strip(),
                     "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": slide_style_config_path,
+                    "SLIDE_TRANSLATE_MAX_FONT_SIZE": int(data["SLIDE_TRANSLATE_MAX_FONT_SIZE"]),
                     "SLIDE_TRANSLATE_STYLES_JSON": str(data["SLIDE_TRANSLATE_STYLES_JSON"]),
-                    "GOOGLE_TRANSLATE_PROJECT_ID": str(data["GOOGLE_TRANSLATE_PROJECT_ID"]).strip(),
+                    "GCLOUD_TRANSLATE_PROJECTID": str(
+                        data.get("GCLOUD_TRANSLATE_PROJECTID", data.get("GOOGLE_TRANSLATE_PROJECT_ID", ""))
+                    ).strip(),
                     "GOOGLE_TRANSLATE_LOCATION": str(data["GOOGLE_TRANSLATE_LOCATION"]).strip(),
                     "GOOGLE_TRANSLATE_MODEL": str(data["GOOGLE_TRANSLATE_MODEL"]).strip(),
                     "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": str(data["GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE"]).strip(),
                     "GEMINI_TTS_MODEL": str(data["GEMINI_TTS_MODEL"]).strip(),
                     "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
-                    "GOOGLE_TTS_PROJECT_ID": str(data["GOOGLE_TTS_PROJECT_ID"]).strip(),
+                    "GCLOUD_TTS_PROJECTID": str(
+                        data.get("GCLOUD_TTS_PROJECTID", data.get("GOOGLE_TTS_PROJECT_ID", ""))
+                    ).strip(),
                     "GOOGLE_TTS_LANGUAGE_CODE": str(data["GOOGLE_TTS_LANGUAGE_CODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODE": str(data["FINAL_SLIDE_UPSCALE_MODE"]).strip(),
                     "FINAL_SLIDE_UPSCALE_MODEL": str(data["FINAL_SLIDE_UPSCALE_MODEL"]).strip(),
@@ -3259,6 +3407,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("SPEAKER_FILTER_MAX_DURATION_SEC must be >= 0")
                 if cfg["FINAL_SLIDE_POSTPROCESS_MODE"] not in {"none", "local", "gemini"}:
                     raise ValueError("FINAL_SLIDE_POSTPROCESS_MODE must be none, local, or gemini")
+                merged_cfg = dict(existing_env)
+                merged_cfg.update({key: str(value) for key, value in cfg.items()})
+                if cfg["FINAL_SLIDE_POSTPROCESS_MODE"] == "gemini" and not resolve_vertex_project_id_from_mapping(merged_cfg):
+                    raise ValueError("GCLOUD_VERTEX_PROJECTID must not be empty when FINAL_SLIDE_POSTPROCESS_MODE=gemini")
                 cfg["GEMINI_EDIT_MODEL"] = validate_image_model(cfg["GEMINI_EDIT_MODEL"], "GEMINI_EDIT_MODEL")
                 if not gemini_edit_prompt.strip():
                     raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
@@ -3277,25 +3429,29 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["GEMINI_TRANSLATE_MODEL"] = validate_image_model(cfg["GEMINI_TRANSLATE_MODEL"], "GEMINI_TRANSLATE_MODEL")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini" and not resolve_vertex_project_id_from_mapping(merged_cfg):
+                    raise ValueError("GCLOUD_VERTEX_PROJECTID must not be empty when FINAL_SLIDE_TRANSLATION_MODE=gemini")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "deterministic_glossary" and not (
-                    cfg["GOOGLE_VISION_PROJECT_ID"]
-                    or cfg["GOOGLE_TRANSLATE_PROJECT_ID"]
-                    or cfg["GOOGLE_TTS_PROJECT_ID"]
+                    cfg["GCLOUD_VISION_PROJECTID"]
+                    or cfg["GCLOUD_TRANSLATE_PROJECTID"]
+                    or cfg["GCLOUD_TTS_PROJECTID"]
                     or cfg["GOOGLE_SPEECH_PROJECT_ID"]
                 ):
-                    raise ValueError("GOOGLE_VISION_PROJECT_ID must not be empty when deterministic Slide Translate is enabled")
+                    raise ValueError("GCLOUD_VISION_PROJECTID must not be empty when deterministic Slide Translate is enabled")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "deterministic_glossary":
                     if not cfg["SLIDE_TRANSLATE_STYLE_CONFIG_PATH"]:
                         raise ValueError("SLIDE_TRANSLATE_STYLE_CONFIG_PATH must not be empty when deterministic Slide Translate is enabled")
                     normalize_slide_translate_styles_json(slide_translate_styles_json)
                 elif cfg["SLIDE_TRANSLATE_STYLE_CONFIG_PATH"]:
                     normalize_slide_translate_styles_json(slide_translate_styles_json)
+                if cfg["SLIDE_TRANSLATE_MAX_FONT_SIZE"] < 8:
+                    raise ValueError("SLIDE_TRANSLATE_MAX_FONT_SIZE must be >= 8")
                 if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and not (
-                    cfg["GOOGLE_TRANSLATE_PROJECT_ID"]
-                    or cfg["GOOGLE_TTS_PROJECT_ID"]
+                    cfg["GCLOUD_TRANSLATE_PROJECTID"]
+                    or cfg["GCLOUD_TTS_PROJECTID"]
                     or cfg["GOOGLE_SPEECH_PROJECT_ID"]
                 ):
-                    raise ValueError("GOOGLE_TRANSLATE_PROJECT_ID must not be empty when Transcript Translate is enabled")
+                    raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty when Transcript Translate is enabled")
                 if not cfg["GOOGLE_TRANSLATE_LOCATION"]:
                     raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
                 if not cfg["GOOGLE_TRANSLATE_MODEL"]:
@@ -3307,9 +3463,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not cfg["GEMINI_TTS_VOICE"]:
                     raise ValueError("GEMINI_TTS_VOICE must not be empty")
                 if cfg["RUN_STEP_TTS"] == 1 and not (
-                    cfg["GOOGLE_TTS_PROJECT_ID"] or cfg["GOOGLE_SPEECH_PROJECT_ID"]
+                    cfg["GCLOUD_TTS_PROJECTID"] or cfg["GOOGLE_SPEECH_PROJECT_ID"]
                 ):
-                    raise ValueError("GOOGLE_TTS_PROJECT_ID must not be empty when TTS is enabled")
+                    raise ValueError("GCLOUD_TTS_PROJECTID must not be empty when TTS is enabled")
                 if cfg["RUN_STEP_TTS"] == 1 and not cfg["GOOGLE_TTS_LANGUAGE_CODE"]:
                     raise ValueError("GOOGLE_TTS_LANGUAGE_CODE must not be empty when TTS is enabled")
                 if cfg["GOOGLE_TTS_LANGUAGE_CODE"] and not tts_language_option:
@@ -3397,7 +3553,6 @@ class Handler(BaseHTTPRequestHandler):
                         "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
                         "SLIDE_TRANSLATE_STYLES_JSON": normalized_slide_translate_styles_json.rstrip("\n"),
                         "TRANSLATION_TERMBASE_CSV": translation_termbase_csv.rstrip("\n"),
-                        "GEMINI_API_KEY_SET": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                         "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                     },
                 )

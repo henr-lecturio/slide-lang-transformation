@@ -3,6 +3,54 @@ import { state } from "./state.js";
 import { apiGet } from "./api.js";
 import { showButtonSuccess } from "./ui-core.js";
 
+const IMAGE_MODAL_MIN_SCALE = 1;
+const IMAGE_MODAL_MAX_SCALE = 6;
+const IMAGE_MODAL_ZOOM_FACTOR = 1.18;
+
+let imageModalScale = IMAGE_MODAL_MIN_SCALE;
+let imageModalOriginX = 50;
+let imageModalOriginY = 50;
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function applyImageModalZoom() {
+  if (!el.imageModalImg) return;
+  const scale = Number(imageModalScale.toFixed(3));
+  el.imageModalImg.style.transformOrigin = `${imageModalOriginX.toFixed(2)}% ${imageModalOriginY.toFixed(2)}%`;
+  el.imageModalImg.style.transform = `scale(${scale})`;
+}
+
+function resetImageModalZoom() {
+  imageModalScale = IMAGE_MODAL_MIN_SCALE;
+  imageModalOriginX = 50;
+  imageModalOriginY = 50;
+  applyImageModalZoom();
+}
+
+export function handleImageModalWheel(event) {
+  if (!el.imageModal.classList.contains("open")) return;
+  if (!el.imageModalImg.getAttribute("src")) return;
+  event.preventDefault();
+
+  const imageBounds = el.imageModalImg.getBoundingClientRect();
+  if (imageBounds.width > 0 && imageBounds.height > 0) {
+    imageModalOriginX = clamp(((event.clientX - imageBounds.left) / imageBounds.width) * 100, 0, 100);
+    imageModalOriginY = clamp(((event.clientY - imageBounds.top) / imageBounds.height) * 100, 0, 100);
+  }
+
+  if (event.deltaY < 0) {
+    imageModalScale = clamp(imageModalScale * IMAGE_MODAL_ZOOM_FACTOR, IMAGE_MODAL_MIN_SCALE, IMAGE_MODAL_MAX_SCALE);
+  } else if (event.deltaY > 0) {
+    imageModalScale = clamp(imageModalScale / IMAGE_MODAL_ZOOM_FACTOR, IMAGE_MODAL_MIN_SCALE, IMAGE_MODAL_MAX_SCALE);
+  }
+  if (Math.abs(imageModalScale - IMAGE_MODAL_MIN_SCALE) < 0.001) {
+    imageModalScale = IMAGE_MODAL_MIN_SCALE;
+  }
+  applyImageModalZoom();
+}
+
 export function openStatusModal() {
   el.statusModal.classList.add("open");
   el.statusModal.setAttribute("aria-hidden", "false");
@@ -44,6 +92,7 @@ export function closeRoiStatusModal() {
 }
 
 export function openImageModal(url, name) {
+  resetImageModalZoom();
   const sep = url.includes("?") ? "&" : "?";
   el.imageModalImg.src = `${url}${sep}v=${Date.now()}`;
   el.imageModalCaption.textContent = name || "";
@@ -52,6 +101,7 @@ export function openImageModal(url, name) {
 }
 
 export function closeImageModal() {
+  resetImageModalZoom();
   el.imageModal.classList.remove("open");
   el.imageModal.setAttribute("aria-hidden", "true");
   el.imageModalImg.removeAttribute("src");

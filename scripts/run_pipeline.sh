@@ -71,11 +71,13 @@ GEMINI_EDIT_MODEL="${GEMINI_EDIT_MODEL:-gemini-3-pro-image-preview}"
 FINAL_SLIDE_TRANSLATION_MODE="${FINAL_SLIDE_TRANSLATION_MODE:-none}"
 FINAL_SLIDE_TARGET_LANGUAGE="${FINAL_SLIDE_TARGET_LANGUAGE:-German}"
 GEMINI_TRANSLATE_MODEL="${GEMINI_TRANSLATE_MODEL:-gemini-3-pro-image-preview}"
-GOOGLE_VISION_PROJECT_ID="${GOOGLE_VISION_PROJECT_ID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}"
-GOOGLE_TRANSLATE_PROJECT_ID="${GOOGLE_TRANSLATE_PROJECT_ID:-${GOOGLE_VISION_PROJECT_ID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}"
+GCLOUD_VISION_PROJECTID="${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}}}}"
+GCLOUD_TRANSLATE_PROJECTID="${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}}}}"
 GOOGLE_TRANSLATE_LOCATION="${GOOGLE_TRANSLATE_LOCATION:-us-central1}"
 GOOGLE_TRANSLATE_MODEL="${GOOGLE_TRANSLATE_MODEL:-general/translation-llm}"
 GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE="${GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE:-}"
+GCLOUD_VERTEX_PROJECTID="${GCLOUD_VERTEX_PROJECTID:-${GOOGLE_GEMINI_PROJECT_ID:-${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}}}}}}"
+GOOGLE_GEMINI_LOCATION="${GOOGLE_GEMINI_LOCATION:-${GOOGLE_TRANSLATE_LOCATION:-global}}"
 GOOGLE_VISION_LOCATION="${GOOGLE_VISION_LOCATION:-global}"
 GOOGLE_VISION_FEATURE="${GOOGLE_VISION_FEATURE:-DOCUMENT_TEXT_DETECTION}"
 SLIDE_TRANSLATE_BUILD_GLOSSARY="${SLIDE_TRANSLATE_BUILD_GLOSSARY:-1}"
@@ -83,9 +85,13 @@ SLIDE_TRANSLATE_APPLY_GLOSSARY="${SLIDE_TRANSLATE_APPLY_GLOSSARY:-1}"
 SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY="${SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY:-mark_only}"
 SLIDE_TRANSLATE_FONT_PATH="${SLIDE_TRANSLATE_FONT_PATH:-config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf}"
 SLIDE_TRANSLATE_STYLE_CONFIG_PATH="${SLIDE_TRANSLATE_STYLE_CONFIG_PATH:-config/slide_translate_styles.json}"
+SLIDE_TRANSLATE_MAX_FONT_SIZE="${SLIDE_TRANSLATE_MAX_FONT_SIZE:-120}"
+SLIDE_TRANSLATE_MAX_EXPAND_PX="${SLIDE_TRANSLATE_MAX_EXPAND_PX:-120}"
+SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS="${SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS:-50000}"
+SLIDE_TRANSLATE_LAYOUT_MAX_MS="${SLIDE_TRANSLATE_LAYOUT_MAX_MS:-15000}"
 GEMINI_TTS_MODEL="${GEMINI_TTS_MODEL:-gemini-2.5-flash-tts}"
 GEMINI_TTS_VOICE="${GEMINI_TTS_VOICE:-Kore}"
-GOOGLE_TTS_PROJECT_ID="${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}"
+GCLOUD_TTS_PROJECTID="${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}"
 GOOGLE_TTS_LANGUAGE_CODE="${GOOGLE_TTS_LANGUAGE_CODE:-en-US}"
 FINAL_SLIDE_UPSCALE_MODE="${FINAL_SLIDE_UPSCALE_MODE:-none}"
 FINAL_SLIDE_UPSCALE_MODEL="${FINAL_SLIDE_UPSCALE_MODEL:-caidas/swin2SR-classical-sr-x4-64}"
@@ -344,8 +350,8 @@ step_done transcription
 echo "[ASR] Transcription step finished."
 
 if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
-  if [ -z "${GOOGLE_TRANSLATE_PROJECT_ID:-}" ]; then
-    echo "ERROR: transcript translation requires GOOGLE_TRANSLATE_PROJECT_ID (or GOOGLE_TTS_PROJECT_ID / GOOGLE_SPEECH_PROJECT_ID)." >&2
+  if [ -z "${GCLOUD_TRANSLATE_PROJECTID:-}" ]; then
+    echo "ERROR: transcript translation requires GCLOUD_TRANSLATE_PROJECTID (or GCLOUD_TTS_PROJECTID / GOOGLE_SPEECH_PROJECT_ID)." >&2
     exit 1
   fi
   if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
@@ -360,7 +366,7 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
     --input-json "$TRANSCRIPT_JSON" \
     --out-json "$TRANSCRIPT_TRANSLATED_JSON.__tmp" \
     --out-csv "$TRANSCRIPT_TRANSLATED_CSV.__tmp" \
-    --project-id "$GOOGLE_TRANSLATE_PROJECT_ID" \
+    --project-id "$GCLOUD_TRANSLATE_PROJECTID" \
     --location "$GOOGLE_TRANSLATE_LOCATION" \
     --model "$GOOGLE_TRANSLATE_MODEL" \
     --source-language-code "$GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE" \
@@ -516,8 +522,8 @@ fi
 echo "[ASR] Speaker-only filtering finished."
 
 if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
-  if [ -z "${GEMINI_API_KEY:-}" ]; then
-    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
+  if [ -z "${GCLOUD_VERTEX_PROJECTID:-}" ]; then
+    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)." >&2
     exit 1
   fi
 
@@ -530,6 +536,8 @@ if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ];
     --output-dir "$FINAL_SLIDE_DIR.__tmp" \
     --model "$GEMINI_EDIT_MODEL" \
     --prompt-file "$GEMINI_PROMPT_FILE" \
+    --project-id "$GCLOUD_VERTEX_PROJECTID" \
+    --location "$GOOGLE_GEMINI_LOCATION" \
     --source-manifest-csv "$FINAL_SOURCE_MANIFEST_CSV" \
     --mask-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_mask" \
     --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay"
@@ -549,8 +557,8 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
       step_skip translate "mode=none"
       ;;
     gemini)
-      if [ -z "${GEMINI_API_KEY:-}" ]; then
-        echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GEMINI_API_KEY in the environment." >&2
+      if [ -z "${GCLOUD_VERTEX_PROJECTID:-}" ]; then
+        echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)." >&2
         exit 1
       fi
       if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
@@ -566,6 +574,8 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         --output-dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" \
         --model "$GEMINI_TRANSLATE_MODEL" \
         --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
+        --project-id "$GCLOUD_VERTEX_PROJECTID" \
+        --location "$GOOGLE_GEMINI_LOCATION" \
         --termbase-file "$TRANSLATION_TERMBASE_FILE" \
         --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
       publish_dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR"
@@ -577,16 +587,16 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when translation is enabled." >&2
         exit 1
       fi
-      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ] && [ -z "${GOOGLE_VISION_PROJECT_ID:-}" ]; then
-        echo "ERROR: deterministic_glossary requires GOOGLE_VISION_PROJECT_ID for OCR." >&2
+      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ] && [ -z "${GCLOUD_VISION_PROJECTID:-}" ]; then
+        echo "ERROR: deterministic_glossary requires GCLOUD_VISION_PROJECTID for OCR." >&2
         exit 1
       fi
-      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ] && [ -z "${GOOGLE_TRANSLATE_PROJECT_ID:-}" ]; then
-        echo "ERROR: deterministic_glossary requires GOOGLE_TRANSLATE_PROJECT_ID for glossary translation." >&2
+      if [ "$SLIDE_TRANSLATE_BUILD_GLOSSARY" = "1" ] && [ -z "${GCLOUD_TRANSLATE_PROJECTID:-}" ]; then
+        echo "ERROR: deterministic_glossary requires GCLOUD_TRANSLATE_PROJECTID for glossary translation." >&2
         exit 1
       fi
-      if [ "$SLIDE_TRANSLATE_APPLY_GLOSSARY" = "1" ] && [ -z "${GOOGLE_VISION_PROJECT_ID:-}" ]; then
-        echo "ERROR: deterministic_glossary apply pass requires GOOGLE_VISION_PROJECT_ID for OCR." >&2
+      if [ "$SLIDE_TRANSLATE_APPLY_GLOSSARY" = "1" ] && [ -z "${GCLOUD_VISION_PROJECTID:-}" ]; then
+        echo "ERROR: deterministic_glossary apply pass requires GCLOUD_VISION_PROJECTID for OCR." >&2
         exit 1
       fi
       case "$SLIDE_TRANSLATE_FONT_PATH" in
@@ -609,6 +619,22 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         echo "ERROR: SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY must be mark_only or allow_partial." >&2
         exit 1
       fi
+      if ! [[ "$SLIDE_TRANSLATE_MAX_FONT_SIZE" =~ ^[0-9]+$ ]] || [ "$SLIDE_TRANSLATE_MAX_FONT_SIZE" -lt 8 ]; then
+        echo "ERROR: SLIDE_TRANSLATE_MAX_FONT_SIZE must be an integer >= 8." >&2
+        exit 1
+      fi
+      if ! [[ "$SLIDE_TRANSLATE_MAX_EXPAND_PX" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: SLIDE_TRANSLATE_MAX_EXPAND_PX must be an integer >= 0." >&2
+        exit 1
+      fi
+      if ! [[ "$SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS must be an integer >= 0." >&2
+        exit 1
+      fi
+      if ! [[ "$SLIDE_TRANSLATE_LAYOUT_MAX_MS" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: SLIDE_TRANSLATE_LAYOUT_MAX_MS must be an integer >= 0." >&2
+        exit 1
+      fi
       echo "[Translate] Deterministic glossary translation to $FINAL_SLIDE_TARGET_LANGUAGE ..."
       step_start translate
       rm -rf "$SLIDE_TRANSLATE_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR.__tmp"
@@ -620,9 +646,9 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
           --out-dir "$SLIDE_TRANSLATE_DIR.__tmp" \
           --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
           --termbase-file "$TRANSLATION_TERMBASE_FILE" \
-          --vision-project-id "$GOOGLE_VISION_PROJECT_ID" \
+          --vision-project-id "$GCLOUD_VISION_PROJECTID" \
           --vision-feature "$GOOGLE_VISION_FEATURE" \
-          --translate-project-id "$GOOGLE_TRANSLATE_PROJECT_ID" \
+          --translate-project-id "$GCLOUD_TRANSLATE_PROJECTID" \
           --translate-location "$GOOGLE_TRANSLATE_LOCATION" \
           --translate-model "$GOOGLE_TRANSLATE_MODEL" \
           --source-language-code "$GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE"
@@ -646,7 +672,11 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
           --style-manifest-json "$SLIDE_TRANSLATE_DIR.__tmp/style_manifest.json" \
           --font-path "$SLIDE_TRANSLATE_FONT_PATH_ABS" \
           --style-config-json "$SLIDE_TRANSLATE_STYLE_CONFIG_PATH_ABS" \
-          --vision-project-id "$GOOGLE_VISION_PROJECT_ID" \
+          --global-max-font-size "$SLIDE_TRANSLATE_MAX_FONT_SIZE" \
+          --max-expand-px "$SLIDE_TRANSLATE_MAX_EXPAND_PX" \
+          --layout-max-attempts "$SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS" \
+          --layout-max-ms "$SLIDE_TRANSLATE_LAYOUT_MAX_MS" \
+          --vision-project-id "$GCLOUD_VISION_PROJECTID" \
           --vision-feature "$GOOGLE_VISION_FEATURE" \
           --needs-review-policy "$SLIDE_TRANSLATE_NEEDS_REVIEW_POLICY" \
           --debug-dir "$SLIDE_TRANSLATE_DIR.__tmp/debug"
@@ -762,8 +792,8 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "0" ]; then
 fi
 
 if [ "$RUN_STEP_TTS" = "1" ]; then
-  if [ -z "${GOOGLE_TTS_PROJECT_ID:-}" ]; then
-    echo "ERROR: TTS requires GOOGLE_TTS_PROJECT_ID (or GOOGLE_SPEECH_PROJECT_ID) in the environment/config." >&2
+  if [ -z "${GCLOUD_TTS_PROJECTID:-}" ]; then
+    echo "ERROR: TTS requires GCLOUD_TTS_PROJECTID (or GOOGLE_SPEECH_PROJECT_ID) in the environment/config." >&2
     exit 1
   fi
   if [ -z "${GOOGLE_TTS_LANGUAGE_CODE:-}" ]; then
@@ -782,7 +812,7 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
     --out-manifest-csv "$TTS_MANIFEST_CSV.__tmp" \
     --model "$GEMINI_TTS_MODEL" \
     --voice "$GEMINI_TTS_VOICE" \
-    --project-id "$GOOGLE_TTS_PROJECT_ID" \
+    --project-id "$GCLOUD_TTS_PROJECTID" \
     --language-code "$GOOGLE_TTS_LANGUAGE_CODE" \
     --prompt-file "$GEMINI_TTS_PROMPT_FILE" \
     --language-label "$TTS_LANGUAGE_LABEL" \

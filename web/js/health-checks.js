@@ -100,7 +100,7 @@ export function clearHealthStatus(key, text = "Not tested.") {
 function collectTtsHealthPayload() {
   const selected = getSelectedTtsLanguageOption();
   return {
-    GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
+    GCLOUD_TTS_PROJECTID: el.gcloudTtsProjectId.value.trim(),
     GOOGLE_TTS_LANGUAGE_CODE: selected ? selected.tts_language_code : "",
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
@@ -119,21 +119,34 @@ function collectTranscriptionHealthPayload() {
 }
 
 function collectSlideEditHealthPayload() {
+  const vertexProjectId = el.gcloudVertexProjectId.value.trim() || el.slideTranslateVertexProjectId.value.trim();
   return {
     FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
     GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
     GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
+    GCLOUD_VERTEX_PROJECTID: vertexProjectId,
+    GCLOUD_VISION_PROJECTID: el.slideTranslateVisionProjectId.value.trim(),
+    GCLOUD_TRANSLATE_PROJECTID: el.gcloudTranslateProjectId.value.trim(),
+    GCLOUD_TTS_PROJECTID: el.gcloudTtsProjectId.value.trim(),
+    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
+    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
   };
 }
 
 function collectSlideTranslateHealthPayload() {
+  const mode = String(el.finalSlideTranslationMode.value || "").trim().toLowerCase();
+  const vertexProjectId = el.slideTranslateVertexProjectId.value.trim() || el.gcloudVertexProjectId.value.trim();
+  const visionProjectId = el.slideTranslateVisionProjectId.value.trim();
   return {
     FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
-    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
-    GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim() || el.googleVisionProjectId.value.trim(),
+    GCLOUD_VERTEX_PROJECTID: mode === "gemini" ? vertexProjectId : "",
+    GCLOUD_VISION_PROJECTID: mode === "deterministic_glossary" ? visionProjectId : "",
+    GCLOUD_TRANSLATE_PROJECTID: mode === "deterministic_glossary"
+      ? (el.gcloudTranslateProjectId.value.trim() || visionProjectId)
+      : "",
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
     GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
@@ -142,7 +155,7 @@ function collectSlideTranslateHealthPayload() {
 
 function collectTextTranslateHealthPayload() {
   return {
-    GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim(),
+    GCLOUD_TRANSLATE_PROJECTID: el.gcloudTranslateProjectId.value.trim(),
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
     GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
@@ -191,6 +204,8 @@ export async function testSlideEditHealth() {
   if (result.ok) {
     const meta = [
       `model=${result.model || "-"}`,
+      `project=${result.project_id_used || "-"}`,
+      `location=${result.location || "-"}`,
       `${result.latency_ms || 0} ms`,
       `${result.image_width || 0}x${result.image_height || 0}`,
       `${result.image_bytes || 0} bytes`,
@@ -223,6 +238,8 @@ export async function testSlideTranslateHealth() {
       : [
         `target=${result.target_language || "-"}`,
         `model=${result.model || "-"}`,
+        `project=${result.project_id_used || "-"}`,
+        `location=${result.location || "-"}`,
         result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
         `${result.latency_ms || 0} ms`,
         `${result.image_width || 0}x${result.image_height || 0}`,

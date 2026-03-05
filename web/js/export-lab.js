@@ -16,9 +16,6 @@ function appendCacheKey(url, cacheKey) {
 }
 
 function formatExportLabStatus(status, hasSelection) {
-  if (!hasSelection) {
-    return { label: "No run selected", iconClass: "", lineClass: "is-idle" };
-  }
   switch (status) {
     case "running":
       return { label: "Running", iconClass: "is-running", lineClass: "is-running" };
@@ -30,9 +27,11 @@ function formatExportLabStatus(status, hasSelection) {
       return { label: "Error", iconClass: "is-error", lineClass: "is-error" };
     case "stopped":
       return { label: "Stopped", iconClass: "is-stopped", lineClass: "is-stopped" };
-    default:
-      return { label: "Ready", iconClass: "", lineClass: "is-ready" };
   }
+  if (!hasSelection) {
+    return { label: "No run selected", iconClass: "", lineClass: "is-idle" };
+  }
+  return { label: "Ready", iconClass: "", lineClass: "is-ready" };
 }
 
 function renderExportLabMeta(current, selected) {
@@ -231,7 +230,7 @@ export function renderExportLabSelection() {
   const visibleCurrent = currentMatchesSelection ? current : null;
   if (!selected) {
     setNodeText(el.exportLabSelectedRun, "");
-    renderExportLabMeta(null, null);
+    renderExportLabMeta(current, null);
     el.exportLabDownloads.innerHTML = "";
     if (el.exportLabVideo) {
       el.exportLabVideo.pause();

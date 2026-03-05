@@ -2,12 +2,12 @@
   "version": 1,
   "defaults": {
     "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
-    "font_size_mode": "source_median",
-    "font_size": 20,
-    "min_font_size": 16,
+    "font_size_mode": "fixed",
+    "font_size": 50,
+    "min_font_size": 50,
     "line_spacing_ratio": 0.22,
     "text_color_mode": "fixed",
-    "text_color": "#A32F2F",
+    "text_color": "#000000",
     "box_padding_x_ratio": 0.04,
     "box_padding_y_ratio": 0.08,
     "list_item_gap_ratio": 0.72,
@@ -17,62 +17,71 @@
   "roles": {
     "title": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Bold.ttf",
-      "font_size_mode": "source_median",
-      "font_size": 120,
-      "min_font_size": 100,
+      "font_size_mode": "fixed",
+      "font_size": 60,
+      "min_font_size": 50,
       "line_spacing_ratio": 0.16,
       "text_color_mode": "fixed",
-      "text_color": "#625d73"
+      "text_color": "#67646c",
+      "font_weight": "medium"
     },
     "subtitle": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Medium.ttf",
-      "font_size_mode": "source_median",
-      "font_size": 30,
-      "min_font_size": 24,
+      "font_size_mode": "fixed",
+      "font_size": 50,
+      "min_font_size": 50,
       "line_spacing_ratio": 0.18,
-      "text_color_mode": "source_median"
+      "text_color": "#67646c",
+      "text_color_mode": "fixed",
+      "font_weight": "regular"
     },
     "section_heading": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Bold.ttf",
-      "font_size_mode": "source_median",
-      "font_size": 60,
-      "min_font_size": 22,
+      "font_size_mode": "fixed",
+      "font_size": 50,
+      "min_font_size": 40,
       "line_spacing_ratio": 0.18,
-      "text_color_mode": "source_median"
+      "text_color_mode": "fixed",
+      "text_color": "#67646c",
+      "font_weight": "regular"
     },
     "body": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
-      "font_size_mode": "source_median",
-      "font_size": 20,
-      "min_font_size": 16,
+      "font_size_mode": "fixed",
+      "font_size": 24,
+      "min_font_size": 24,
       "line_spacing_ratio": 0.22,
-      "text_color_mode": "source_median"
+      "text_color_mode": "fixed",
+      "text_color": "#000000"
     },
     "list_item_level_1": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
-      "font_size_mode": "source_median",
-      "font_size": 40,
-      "min_font_size": 16,
+      "font_size_mode": "fixed",
+      "font_size": 24,
+      "min_font_size": 24,
       "line_spacing_ratio": 0.22,
       "list_item_gap_ratio": 0.72,
       "list_bullet_gap_ratio": 0.45,
-      "text_color_mode": "source_median"
+      "text_color_mode": "fixed",
+      "text_color": "#000000"
     },
     "caption": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
-      "font_size_mode": "source_median",
-      "font_size": 16,
-      "min_font_size": 13,
+      "font_size_mode": "fixed",
+      "font_size": 28,
+      "min_font_size": 24,
       "line_spacing_ratio": 0.2,
-      "text_color_mode": "source_median"
+      "text_color_mode": "fixed",
+      "text_color": "#242424"
     },
     "footer": {
       "font_path": "config/fonts/slide_translate/Noto_Sans/static/NotoSans-Regular.ttf",
-      "font_size_mode": "source_median",
+      "font_size_mode": "fixed",
       "font_size": 14,
       "min_font_size": 12,
       "line_spacing_ratio": 0.18,
-      "text_color_mode": "source_median"
+      "text_color_mode": "fixed",
+      "text_color": "#000000"
     }
   },
   "slots": {}

@@ -20,9 +20,14 @@ def ensure_cloud_tts_client(project_id: str):
             "Run: source .venv/bin/activate && pip install google-cloud-texttospeech"
         ) from exc
 
-    quota_project_id = project_id.strip() or (os.environ.get("GOOGLE_CLOUD_PROJECT") or "").strip()
+    quota_project_id = (
+        project_id.strip()
+        or (os.environ.get("GCLOUD_TTS_PROJECTID") or "").strip()
+        or (os.environ.get("GOOGLE_TTS_PROJECT_ID") or "").strip()
+        or (os.environ.get("GOOGLE_CLOUD_PROJECT") or "").strip()
+    )
     if not quota_project_id:
-        raise RuntimeError("GOOGLE_TTS_PROJECT_ID / --project-id must not be empty.")
+        raise RuntimeError("GCLOUD_TTS_PROJECTID / --project-id must not be empty.")
     os.environ.setdefault("GOOGLE_CLOUD_PROJECT", quota_project_id)
 
     credentials, default_project = google.auth.default(

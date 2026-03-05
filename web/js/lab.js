@@ -19,6 +19,8 @@ const LAB_SLIDE_STYLE_COLUMNS = [
   { key: "text_color", type: "text", placeholder: "auto or #RRGGBB" },
   { key: "padding", type: "text", placeholder: "top right bottom left" },
 ];
+const LAB_RESULT_VIEW_RESULT = "result";
+const LAB_RESULT_VIEW_OCR_DEBUG = "ocr_debug";
 
 let labSlideStyleEditorModel = {
   version: 1,
@@ -154,6 +156,7 @@ function syncLabSlideTranslateStylesJsonFromTable() {
           ? payload.roles?.[scopeKey]
           : payload.slots?.[scopeKey];
     if (!style || typeof style !== "object") continue;
+    style.font_size_mode = "fixed";
 
     const current = {};
     for (const column of LAB_SLIDE_STYLE_COLUMNS) {
@@ -287,6 +290,53 @@ function setNodeText(node, text) {
   if (node) node.textContent = text;
 }
 
+function normalizeLabResultViewMode(value) {
+  return value === LAB_RESULT_VIEW_OCR_DEBUG ? LAB_RESULT_VIEW_OCR_DEBUG : LAB_RESULT_VIEW_RESULT;
+}
+
+function resolveLabResultAsset(current) {
+  const resultUrl = String(current?.result_url || "").trim();
+  const resultName = String(current?.result_name || "").trim() || "lab-result";
+  const debugOverlayUrl = String(current?.result_debug_overlay_url || "").trim();
+  const debugOverlayName = String(current?.result_debug_overlay_name || "").trim() || "lab-ocr-debug";
+  const debugAvailable = Boolean(debugOverlayUrl);
+  const requestedMode = normalizeLabResultViewMode(state.labResultViewMode || LAB_RESULT_VIEW_RESULT);
+  const mode = requestedMode === LAB_RESULT_VIEW_OCR_DEBUG && debugAvailable
+    ? LAB_RESULT_VIEW_OCR_DEBUG
+    : LAB_RESULT_VIEW_RESULT;
+  const url = mode === LAB_RESULT_VIEW_OCR_DEBUG ? debugOverlayUrl : resultUrl;
+  const name = mode === LAB_RESULT_VIEW_OCR_DEBUG ? debugOverlayName : resultName;
+  if (mode !== requestedMode) {
+    state.labResultViewMode = mode;
+  }
+  return { mode, url, name, debugAvailable };
+}
+
+function renderLabResultViewToggle(current) {
+  const resolved = resolveLabResultAsset(current);
+  if (el.labResultViewFinal) {
+    el.labResultViewFinal.classList.toggle("is-active", resolved.mode === LAB_RESULT_VIEW_RESULT);
+    el.labResultViewFinal.setAttribute("aria-pressed", resolved.mode === LAB_RESULT_VIEW_RESULT ? "true" : "false");
+  }
+  if (el.labResultViewDebug) {
+    el.labResultViewDebug.disabled = !resolved.debugAvailable;
+    el.labResultViewDebug.classList.toggle("is-active", resolved.mode === LAB_RESULT_VIEW_OCR_DEBUG);
+    el.labResultViewDebug.setAttribute("aria-pressed", resolved.mode === LAB_RESULT_VIEW_OCR_DEBUG ? "true" : "false");
+  }
+  return resolved;
+}
+
+function renderLabResultImage(current) {
+  const resolved = renderLabResultViewToggle(current);
+  if (resolved.url) {
+    el.labResultImage.src = `${resolved.url}?v=${Date.now()}`;
+    el.labResultImage.onclick = () => openImageModal(resolved.url, resolved.name || "lab-result");
+  } else {
+    el.labResultImage.removeAttribute("src");
+    el.labResultImage.onclick = null;
+  }
+}
+
 function formatLabSelectionMeta(runId, eventId) {
   const rawRunId = String(runId || "").trim();
   const tsMatch = rawRunId.match(/^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}(?:-\d{2})?)/);
@@ -297,9 +347,6 @@ function formatLabSelectionMeta(runId, eventId) {
 }
 
 function formatLabStatus(status, hasSelection) {
-  if (!hasSelection) {
-    return { label: "No image selected", iconClass: "", lineClass: "is-idle" };
-  }
   switch (status) {
     case "running":
       return { label: "Running", iconClass: "is-running", lineClass: "is-running" };
@@ -311,9 +358,11 @@ function formatLabStatus(status, hasSelection) {
       return { label: "Error", iconClass: "is-error", lineClass: "is-error" };
     case "stopped":
       return { label: "Stopped", iconClass: "is-stopped", lineClass: "is-stopped" };
-    default:
-      return { label: "Ready", iconClass: "", lineClass: "is-ready" };
   }
+  if (!hasSelection) {
+    return { label: "No image selected", iconClass: "", lineClass: "is-idle" };
+  }
+  return { label: "Ready", iconClass: "", lineClass: "is-ready" };
 }
 
 function renderLabStatusLine(status) {
@@ -502,9 +551,15 @@ function readLabTestSettingsFromForm() {
 
 function buildLabSettingsSummary() {
   const settings = ensureLabTestSettings();
+  const modeRaw = String(el.finalSlideTranslationMode?.value || "gemini").trim().toLowerCase();
+  const modeLabel = modeRaw === "deterministic_glossary"
+    ? "Google OCR + Glossary"
+    : modeRaw === "gemini"
+      ? "nano banana"
+      : modeRaw || "none";
   return [
     `edit=${settings.slide_edit_model || "-"}`,
-    `translate=${settings.target_language || "-"} [${String(el.finalSlideTranslationMode?.value || "gemini").trim() || "gemini"}]`,
+    `translate=${settings.target_language || "-"} [${modeLabel}]`,
     `upscale=${settings.slide_upscale_mode || "-"}`,
   ].join(" | ");
 }
@@ -536,6 +591,8 @@ export function initializeLabTestSettings() {
   ensureLabTestSettings();
   applyLabTestSettingsToForm();
   syncLabTestSections();
+  state.labResultViewMode = normalizeLabResultViewMode(state.labResultViewMode || LAB_RESULT_VIEW_RESULT);
+  renderLabResultViewToggle(state.labCurrent || {});
   if (state.labStatus === "idle") {
     setNodeText(el.labJobMeta, `Test settings: ${buildLabSettingsSummary()}`);
   }
@@ -593,6 +650,7 @@ export function renderLabSelection() {
 
 export function setLabStatus(current) {
   const status = current?.status || "idle";
+  state.labCurrent = current || {};
   state.labStatus = status;
   renderLabStatusLine(status);
   const resultMeta = [];
@@ -610,19 +668,18 @@ export function setLabStatus(current) {
     el.labLog.textContent = nextLog;
     el.labLog.scrollTop = el.labLog.scrollHeight;
   }
-  if (current?.result_url) {
-    el.labResultImage.src = `${current.result_url}?v=${Date.now()}`;
-    el.labResultImage.onclick = () => openImageModal(current.result_url, current.result_name || "lab-result");
-  } else {
-    el.labResultImage.removeAttribute("src");
-    el.labResultImage.onclick = null;
-  }
+  renderLabResultImage(current);
   if (!state.labSelectedImage && current?.original_url) {
     setNodeText(el.labSelectedImage, formatLabSelectionMeta(current.run_id, current.event_id));
     el.labOriginalImage.src = `${current.original_url}?v=${Date.now()}`;
     el.labOriginalImage.onclick = () => openImageModal(current.original_url, current.input_name || "lab-input");
   }
   syncLabActionState();
+}
+
+export function setLabResultViewMode(mode) {
+  state.labResultViewMode = normalizeLabResultViewMode(mode);
+  renderLabResultImage(state.labCurrent || {});
 }
 
 export async function loadLabStatus() {
@@ -639,8 +696,10 @@ export async function runLabAction(action) {
   if (!state.labSelectedImage) {
     throw new Error("Bitte zuerst ein Bild im Image Lab wählen.");
   }
+  state.labCurrent = null;
   el.labResultImage.removeAttribute("src");
   el.labResultImage.onclick = null;
+  renderLabResultViewToggle({});
   const payload = {
     run_id: state.labSelectedImage.run_id,
     event_id: state.labSelectedImage.event_id,

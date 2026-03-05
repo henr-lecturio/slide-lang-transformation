@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+import time
 from pathlib import Path
 
 import cv2
@@ -102,7 +102,56 @@ def _resolve_spacing(font_size: int, line_spacing_ratio: float | None = None) ->
     return max(2, int(round(max(1, int(font_size)) * ratio)))
 
 
-def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+def _split_word_for_width(
+    word: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+    *,
+    allow_hyphenation: bool,
+    hyphenation_min_word_length: int,
+) -> list[str]:
+    token = str(word or "")
+    if not token:
+        return [""]
+    if _measure_text(token, font)[0] <= max_width:
+        return [token]
+    if not allow_hyphenation:
+        return [token]
+
+    parts: list[str] = []
+    remaining = token
+    min_word_length = max(4, int(hyphenation_min_word_length))
+
+    while remaining:
+        if _measure_text(remaining, font)[0] <= max_width:
+            parts.append(remaining)
+            break
+
+        split_index = 0
+        if len(remaining) >= min_word_length:
+            start_index = max(2, min_word_length - 1)
+            for index in range(start_index, len(remaining)):
+                candidate = f"{remaining[:index]}-"
+                if _measure_text(candidate, font)[0] <= max_width:
+                    split_index = index
+                else:
+                    break
+        if split_index <= 0:
+            return [token]
+        parts.append(f"{remaining[:split_index]}-")
+        remaining = remaining[split_index:]
+
+    return parts
+
+
+def _wrap_text(
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+    *,
+    allow_hyphenation: bool = False,
+    hyphenation_min_word_length: int = 8,
+) -> list[str]:
     paragraphs = str(text or "").splitlines() or [str(text or "")]
     lines: list[str] = []
     for paragraph in paragraphs:
@@ -112,13 +161,27 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[
             continue
         current = ""
         for word in words:
-            candidate = f"{current} {word}".strip()
-            width, _ = _measure_text(candidate, font)
-            if current and width > max_width:
-                lines.append(current)
-                current = word
-            else:
-                current = candidate
+            word_parts = _split_word_for_width(
+                word,
+                font,
+                max_width,
+                allow_hyphenation=allow_hyphenation,
+                hyphenation_min_word_length=hyphenation_min_word_length,
+            )
+            if not word_parts:
+                word_parts = [word]
+            for part in word_parts:
+                if current.endswith("-"):
+                    lines.append(current)
+                    current = part
+                    continue
+                candidate = f"{current} {part}".strip()
+                width, _ = _measure_text(candidate, font)
+                if current and width > max_width:
+                    lines.append(current)
+                    current = part
+                else:
+                    current = candidate
         if current or not lines:
             lines.append(current)
     return lines or [""]
@@ -141,10 +204,18 @@ def layout_text_block(
     font_size: int,
     max_width: int,
     line_spacing_ratio: float | None = None,
+    allow_hyphenation: bool = False,
+    hyphenation_min_word_length: int = 8,
 ) -> dict | None:
     font = ImageFont.truetype(str(font_path), size=max(1, int(font_size)))
     spacing = _resolve_spacing(int(font_size), line_spacing_ratio)
-    lines = _wrap_text(text, font, max(1, int(max_width)))
+    lines = _wrap_text(
+        text,
+        font,
+        max(1, int(max_width)),
+        allow_hyphenation=allow_hyphenation,
+        hyphenation_min_word_length=hyphenation_min_word_length,
+    )
     text_w, text_h = _measure_multiline(lines, font, spacing)
     if text_w > max(1, int(max_width)):
         return None
@@ -169,6 +240,8 @@ def layout_hanging_text_block(
     prefix_text: str = "\u2022",
     prefix_gap: int | None = None,
     line_spacing_ratio: float | None = None,
+    allow_hyphenation: bool = False,
+    hyphenation_min_word_length: int = 8,
 ) -> dict | None:
     font = ImageFont.truetype(str(font_path), size=max(1, int(font_size)))
     spacing = _resolve_spacing(int(font_size), line_spacing_ratio)
@@ -177,7 +250,13 @@ def layout_hanging_text_block(
     gap = max(4, int(prefix_gap) if prefix_gap is not None else int(round(font_size * 0.45)))
     hanging_indent = prefix_w + gap
     available_text_w = max(1, int(max_width) - hanging_indent)
-    lines = _wrap_text(text, font, available_text_w)
+    lines = _wrap_text(
+        text,
+        font,
+        available_text_w,
+        allow_hyphenation=allow_hyphenation,
+        hyphenation_min_word_length=hyphenation_min_word_length,
+    )
     text_w, text_h = _measure_multiline(lines, font, spacing)
     if text_w > available_text_w:
         return None
@@ -209,6 +288,8 @@ def layout_text_for_font_size(
     pad_right_ratio: float | None = None,
     pad_bottom_ratio: float | None = None,
     pad_left_ratio: float | None = None,
+    allow_hyphenation: bool = False,
+    hyphenation_min_word_length: int = 8,
 ) -> dict | None:
     box_w = max(1, int(bbox.get("w", 0) or 0))
     box_h = max(1, int(bbox.get("h", 0) or 0))
@@ -232,15 +313,19 @@ def layout_text_for_font_size(
     available_h = max(1, box_h - pad_top - pad_bottom)
     font = ImageFont.truetype(str(font_path), size=max(1, int(font_size)))
     spacing = _resolve_spacing(int(font_size), line_spacing_ratio)
-    lines = _wrap_text(text, font, available_w)
+    lines = _wrap_text(
+        text,
+        font,
+        available_w,
+        allow_hyphenation=allow_hyphenation,
+        hyphenation_min_word_length=hyphenation_min_word_length,
+    )
     text_w, text_h = _measure_multiline(lines, font, spacing)
     if text_w > available_w or text_h > available_h:
         return None
 
     offset_x = pad_left
     offset_y = pad_top
-    if available_h > text_h:
-        offset_y += int(math.floor((available_h - text_h) / 2.0))
     return {
         "font_size": int(font_size),
         "spacing": spacing,
@@ -267,12 +352,19 @@ def fit_text_to_box(
     pad_right_ratio: float | None = None,
     pad_bottom_ratio: float | None = None,
     pad_left_ratio: float | None = None,
+    allow_hyphenation: bool = False,
+    hyphenation_min_word_length: int = 8,
+    fixed_font_size: bool = False,
 ) -> dict | None:
     box_h = max(1, int(bbox.get("h", 0) or 0))
     resolved_max_font_size = max_font_size
     if resolved_max_font_size is None:
         resolved_max_font_size = max(min_font_size, min(box_h, max(18, int(round(box_h * 0.95)))))
-    for font_size in range(int(resolved_max_font_size), int(min_font_size) - 1, -1):
+    if fixed_font_size:
+        font_sizes = [int(resolved_max_font_size)]
+    else:
+        font_sizes = range(int(resolved_max_font_size), int(min_font_size) - 1, -1)
+    for font_size in font_sizes:
         layout = layout_text_for_font_size(
             text=text,
             bbox=bbox,
@@ -285,9 +377,292 @@ def fit_text_to_box(
             pad_right_ratio=pad_right_ratio,
             pad_bottom_ratio=pad_bottom_ratio,
             pad_left_ratio=pad_left_ratio,
+            allow_hyphenation=allow_hyphenation,
+            hyphenation_min_word_length=hyphenation_min_word_length,
         )
         if layout is not None:
             return layout
+    return None
+
+
+def _unique_ratio_candidates(high: float, low: float) -> list[float]:
+    high_value = float(high)
+    low_value = max(0.0, min(high_value, float(low)))
+    candidates: list[float] = [high_value]
+    midpoint = high_value + (low_value - high_value) * 0.5
+    if abs(midpoint - high_value) > 1e-6:
+        candidates.append(midpoint)
+    if abs(low_value - candidates[-1]) > 1e-6:
+        candidates.append(low_value)
+    return candidates
+
+
+def _expand_value_candidates(max_expand_px: int, step_px: int) -> list[int]:
+    max_expand = max(0, int(max_expand_px))
+    if max_expand <= 0:
+        return [0]
+    step = max(4, int(step_px))
+    values = [0]
+    value = step
+    while value < max_expand:
+        values.append(value)
+        value += step
+    if values[-1] != max_expand:
+        values.append(max_expand)
+    return values
+
+
+def _expand_bbox_sides(
+    base_bbox: dict[str, int],
+    *,
+    expand_left: int,
+    expand_right: int,
+    expand_up: int,
+    expand_down: int,
+    image_shape: tuple[int, ...],
+) -> dict[str, int]:
+    base_x, base_y, base_w, base_h = _clamp_bbox(base_bbox, image_shape)
+    image_h, image_w = image_shape[:2]
+    x0 = max(0, base_x - max(0, int(expand_left)))
+    y0 = max(0, base_y - max(0, int(expand_up)))
+    x1 = min(image_w, base_x + base_w + max(0, int(expand_right)))
+    y1 = min(image_h, base_y + base_h + max(0, int(expand_down)))
+    return {
+        "x": int(x0),
+        "y": int(y0),
+        "w": max(1, int(x1 - x0)),
+        "h": max(1, int(y1 - y0)),
+    }
+
+
+def _boxes_intersect(a: dict[str, int], b: dict[str, int], *, margin: int = 0) -> bool:
+    ax = int(a.get("x", 0) or 0)
+    ay = int(a.get("y", 0) or 0)
+    aw = max(1, int(a.get("w", 0) or 0))
+    ah = max(1, int(a.get("h", 0) or 0))
+    bx = int(b.get("x", 0) or 0)
+    by = int(b.get("y", 0) or 0)
+    bw = max(1, int(b.get("w", 0) or 0))
+    bh = max(1, int(b.get("h", 0) or 0))
+    pad = max(0, int(margin))
+    ax0 = ax - pad
+    ay0 = ay - pad
+    ax1 = ax + aw + pad
+    ay1 = ay + ah + pad
+    bx0 = bx - pad
+    by0 = by - pad
+    bx1 = bx + bw + pad
+    by1 = by + bh + pad
+    return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
+
+
+def _collides_with_blocked(
+    bbox: dict[str, int],
+    blocked_boxes: list[dict[str, int]],
+    *,
+    collision_margin: int,
+) -> bool:
+    for blocked in blocked_boxes:
+        if not isinstance(blocked, dict):
+            continue
+        if _boxes_intersect(bbox, blocked, margin=collision_margin):
+            return True
+    return False
+
+
+def resolve_text_layout_with_overflow(
+    *,
+    text: str,
+    start_bbox: dict[str, int],
+    image_shape: tuple[int, ...],
+    font_path: Path,
+    min_font_size: int = 8,
+    max_font_size: int | None = None,
+    line_spacing_ratio: float | None = None,
+    min_line_spacing_ratio: float | None = None,
+    pad_top_ratio: float | None = None,
+    pad_right_ratio: float | None = None,
+    pad_bottom_ratio: float | None = None,
+    pad_left_ratio: float | None = None,
+    min_pad_top_ratio: float | None = None,
+    min_pad_right_ratio: float | None = None,
+    min_pad_bottom_ratio: float | None = None,
+    min_pad_left_ratio: float | None = None,
+    max_expand_right_ratio: float = 0.0,
+    max_expand_down_ratio: float = 0.0,
+    max_expand_left_ratio: float = 0.0,
+    max_expand_up_ratio: float = 0.0,
+    max_expand_right_px: int | None = None,
+    max_expand_down_px: int | None = None,
+    max_expand_left_px: int | None = None,
+    max_expand_up_px: int | None = None,
+    expand_step_px: int = 12,
+    blocked_boxes: list[dict[str, int]] | None = None,
+    allow_hyphenation: bool = False,
+    hyphenation_min_word_length: int = 8,
+    collision_margin: int = 2,
+    fixed_font_size: bool = False,
+    max_layout_attempts: int = 0,
+    max_layout_ms: int = 0,
+    debug_info: dict | None = None,
+) -> dict | None:
+    debug_meta = debug_info if isinstance(debug_info, dict) else None
+    if debug_meta is not None:
+        debug_meta.clear()
+
+    base_x, base_y, base_w, base_h = _clamp_bbox(start_bbox, image_shape)
+    base_bbox = {"x": base_x, "y": base_y, "w": base_w, "h": base_h}
+    high_line_spacing = float(line_spacing_ratio) if line_spacing_ratio is not None else 0.22
+    low_line_spacing = (
+        float(min_line_spacing_ratio)
+        if min_line_spacing_ratio is not None
+        else max(0.06, high_line_spacing * 0.7)
+    )
+    if fixed_font_size:
+        # Fixed-size mode must keep styling deterministic and only search box expansion.
+        line_spacing_candidates = [high_line_spacing]
+    else:
+        line_spacing_candidates = _unique_ratio_candidates(high_line_spacing, low_line_spacing)
+
+    high_top = float(pad_top_ratio) if pad_top_ratio is not None else 0.08
+    high_right = float(pad_right_ratio) if pad_right_ratio is not None else 0.04
+    high_bottom = float(pad_bottom_ratio) if pad_bottom_ratio is not None else 0.08
+    high_left = float(pad_left_ratio) if pad_left_ratio is not None else 0.04
+    low_top = float(min_pad_top_ratio) if min_pad_top_ratio is not None else max(0.0, high_top * 0.6)
+    low_right = float(min_pad_right_ratio) if min_pad_right_ratio is not None else max(0.0, high_right * 0.6)
+    low_bottom = float(min_pad_bottom_ratio) if min_pad_bottom_ratio is not None else max(0.0, high_bottom * 0.6)
+    low_left = float(min_pad_left_ratio) if min_pad_left_ratio is not None else max(0.0, high_left * 0.6)
+    if fixed_font_size:
+        padding_level_candidates = [0.0]
+    else:
+        padding_level_candidates = [0.0, 0.5, 1.0]
+
+    max_expand_right_ratio_px = max(0, int(round(base_w * max(0.0, float(max_expand_right_ratio)))))
+    max_expand_down_ratio_px = max(0, int(round(base_h * max(0.0, float(max_expand_down_ratio)))))
+    max_expand_left_ratio_px = max(0, int(round(base_w * max(0.0, float(max_expand_left_ratio)))))
+    max_expand_up_ratio_px = max(0, int(round(base_h * max(0.0, float(max_expand_up_ratio)))))
+    max_expand_right_abs_px = max(0, int(max_expand_right_px or 0))
+    max_expand_down_abs_px = max(0, int(max_expand_down_px or 0))
+    max_expand_left_abs_px = max(0, int(max_expand_left_px or 0))
+    max_expand_up_abs_px = max(0, int(max_expand_up_px or 0))
+    max_expand_right = max_expand_right_abs_px if max_expand_right_abs_px > 0 else max_expand_right_ratio_px
+    max_expand_down = max_expand_down_abs_px if max_expand_down_abs_px > 0 else max_expand_down_ratio_px
+    max_expand_left = max_expand_left_abs_px if max_expand_left_abs_px > 0 else max_expand_left_ratio_px
+    max_expand_up = max_expand_up_abs_px if max_expand_up_abs_px > 0 else max_expand_up_ratio_px
+    left_candidates = _expand_value_candidates(max_expand_left, expand_step_px)
+    right_candidates = _expand_value_candidates(max_expand_right, expand_step_px)
+    up_candidates = _expand_value_candidates(max_expand_up, expand_step_px)
+    down_candidates = _expand_value_candidates(max_expand_down, expand_step_px)
+
+    expansion_candidates: list[tuple[int, int, int, int]] = []
+    for expand_down in down_candidates:
+        for expand_right in right_candidates:
+            for expand_left in left_candidates:
+                for expand_up in up_candidates:
+                    expansion_candidates.append((expand_left, expand_right, expand_up, expand_down))
+    expansion_candidates = sorted(
+        set(expansion_candidates),
+        key=lambda item: (item[0] + item[1] + item[2] + item[3], item[3], item[1], item[0], item[2]),
+    )
+
+    blocked = [dict(box) for box in (blocked_boxes or []) if isinstance(box, dict) and box]
+    if fixed_font_size:
+        hyphenation_candidates = [False]
+    else:
+        hyphenation_candidates = [False, True] if allow_hyphenation else [False]
+    resolved_max_font = int(max_font_size) if max_font_size is not None else None
+    attempt_budget = max(0, int(max_layout_attempts))
+    time_budget_ms = max(0, int(max_layout_ms))
+    started = time.perf_counter()
+    attempt_count = 0
+
+    def _set_debug_reason(reason: str) -> None:
+        if debug_meta is None:
+            return
+        debug_meta["reason"] = str(reason)
+        debug_meta["attempts"] = int(attempt_count)
+        debug_meta["elapsed_ms"] = int(round((time.perf_counter() - started) * 1000.0))
+
+    def _budget_exceeded() -> bool:
+        if attempt_budget > 0 and attempt_count >= attempt_budget:
+            _set_debug_reason("layout_budget_attempts_exceeded")
+            return True
+        if time_budget_ms > 0:
+            elapsed_ms = int(round((time.perf_counter() - started) * 1000.0))
+            if elapsed_ms >= time_budget_ms:
+                _set_debug_reason("layout_budget_time_exceeded")
+                return True
+        return False
+
+    for expand_left, expand_right, expand_up, expand_down in expansion_candidates:
+        if _budget_exceeded():
+            return None
+        candidate_bbox = _expand_bbox_sides(
+            base_bbox,
+            expand_left=expand_left,
+            expand_right=expand_right,
+            expand_up=expand_up,
+            expand_down=expand_down,
+            image_shape=image_shape,
+        )
+        expanded = (expand_left + expand_right + expand_up + expand_down) > 0
+        if expanded and (not fixed_font_size) and _collides_with_blocked(candidate_bbox, blocked, collision_margin=collision_margin):
+            continue
+
+        for use_hyphenation in hyphenation_candidates:
+            for line_ratio in line_spacing_candidates:
+                for padding_level in padding_level_candidates:
+                    if _budget_exceeded():
+                        return None
+                    pad_top = high_top + (low_top - high_top) * padding_level
+                    pad_right = high_right + (low_right - high_right) * padding_level
+                    pad_bottom = high_bottom + (low_bottom - high_bottom) * padding_level
+                    pad_left = high_left + (low_left - high_left) * padding_level
+                    attempt_count += 1
+                    layout = fit_text_to_box(
+                        text=text,
+                        bbox=candidate_bbox,
+                        font_path=font_path,
+                        min_font_size=int(min_font_size),
+                        max_font_size=resolved_max_font,
+                        line_spacing_ratio=float(line_ratio),
+                        pad_top_ratio=float(max(0.0, pad_top)),
+                        pad_right_ratio=float(max(0.0, pad_right)),
+                        pad_bottom_ratio=float(max(0.0, pad_bottom)),
+                        pad_left_ratio=float(max(0.0, pad_left)),
+                        allow_hyphenation=use_hyphenation,
+                        hyphenation_min_word_length=hyphenation_min_word_length,
+                        fixed_font_size=fixed_font_size,
+                    )
+                    if layout is None:
+                        continue
+
+                    compacted = (
+                        padding_level > 1e-6
+                        or line_ratio < (high_line_spacing - 1e-6)
+                    )
+                    if use_hyphenation:
+                        strategy = "hyphenate"
+                    elif expanded:
+                        strategy = "expand"
+                    elif compacted:
+                        strategy = "compact"
+                    else:
+                        strategy = "fit"
+                    return {
+                        "layout": layout,
+                        "bbox": candidate_bbox,
+                        "strategy": strategy,
+                        "line_spacing_ratio": float(line_ratio),
+                        "padding_level": float(padding_level),
+                        "hyphenation": bool(use_hyphenation),
+                        "attempts": int(attempt_count),
+                        "elapsed_ms": int(round((time.perf_counter() - started) * 1000.0)),
+                    }
+    if fixed_font_size:
+        _set_debug_reason("fixed_font_overflow")
+    else:
+        _set_debug_reason("target_text_overflow")
     return None
 
 
@@ -338,8 +713,8 @@ def render_text_entries(
             for index, line in enumerate(lines):
                 line_y = base_y + index * (line_height + spacing)
                 if index == 0:
-                    draw.text((base_x, line_y), inline_prefix_text, font=font, fill=text_rgb)
-                draw.text((base_x + indent, line_y), line, font=font, fill=text_rgb)
+                    draw.text((base_x, line_y), inline_prefix_text, font=font, fill=text_rgb, anchor="lt")
+                draw.text((base_x + indent, line_y), line, font=font, fill=text_rgb, anchor="lt")
             continue
 
         marker_text = str(entry.get("render_marker_text", "") or "")
@@ -359,6 +734,7 @@ def render_text_entries(
                 marker_text,
                 font=marker_font,
                 fill=text_rgb,
+                anchor="lt",
             )
 
         x = int(entry.get("render_x", int(bbox["x"]) + int(layout["offset_x"])))
@@ -370,6 +746,7 @@ def render_text_entries(
             fill=text_rgb,
             spacing=int(layout["spacing"]),
             align="left",
+            anchor="lt",
         )
 
     rendered = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)

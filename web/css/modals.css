@@ -40,10 +40,24 @@
   background: #090a0c;
 }
 
+.image-modal-viewport {
+  max-height: calc(94vh - 110px);
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .image-modal-dialog img {
   max-height: calc(94vh - 110px);
+  max-width: 100%;
   width: auto;
+  height: auto;
   margin: 0 auto;
+  transform-origin: 50% 50%;
+  transition: transform 80ms ease-out;
+  will-change: transform;
 }
 
 .image-modal-caption {

@@ -293,6 +293,7 @@ function syncSlideTranslateStylesJsonFromTable() {
           ? payload.roles?.[scopeKey]
           : payload.slots?.[scopeKey];
     if (!style || typeof style !== "object") continue;
+    style.font_size_mode = "fixed";
 
     const current = {};
     for (const column of SLIDE_STYLE_COLUMNS) {
@@ -583,6 +584,16 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.speakerFilterMaxEdgeDensity.value = cfg.SPEAKER_FILTER_MAX_EDGE_DENSITY;
   el.speakerFilterMaxLaplacianVar.value = cfg.SPEAKER_FILTER_MAX_LAPLACIAN_VAR;
   el.speakerFilterMaxDurationSec.value = cfg.SPEAKER_FILTER_MAX_DURATION_SEC;
+  el.gcloudVertexProjectId.value = cfg.GCLOUD_VERTEX_PROJECTID
+    || cfg.GOOGLE_GEMINI_PROJECT_ID
+    || cfg.GCLOUD_VISION_PROJECTID
+    || cfg.GOOGLE_VISION_PROJECT_ID
+    || cfg.GCLOUD_TRANSLATE_PROJECTID
+    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
+    || cfg.GCLOUD_TTS_PROJECTID
+    || cfg.GOOGLE_TTS_PROJECT_ID
+    || cfg.GOOGLE_SPEECH_PROJECT_ID
+    || "";
   el.finalSlidePostprocessMode.value = cfg.FINAL_SLIDE_POSTPROCESS_MODE || "local";
   el.geminiEditModel.value = cfg.GEMINI_EDIT_MODEL || "gemini-3-pro-image-preview";
   el.geminiEditPrompt.value = cfg.GEMINI_EDIT_PROMPT || "";
@@ -595,16 +606,36 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderHomeQuickLanguageOptions(cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
-  el.googleVisionProjectId.value = cfg.GOOGLE_VISION_PROJECT_ID || cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.slideTranslateVertexProjectId.value = cfg.GCLOUD_VERTEX_PROJECTID
+    || cfg.GOOGLE_GEMINI_PROJECT_ID
+    || cfg.GCLOUD_VISION_PROJECTID
+    || cfg.GOOGLE_VISION_PROJECT_ID
+    || cfg.GCLOUD_TRANSLATE_PROJECTID
+    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
+    || cfg.GCLOUD_TTS_PROJECTID
+    || cfg.GOOGLE_TTS_PROJECT_ID
+    || cfg.GOOGLE_SPEECH_PROJECT_ID
+    || "";
+  el.slideTranslateVisionProjectId.value = cfg.GCLOUD_VISION_PROJECTID
+    || cfg.GOOGLE_VISION_PROJECT_ID
+    || cfg.GCLOUD_TRANSLATE_PROJECTID
+    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
+    || cfg.GCLOUD_VERTEX_PROJECTID
+    || cfg.GOOGLE_GEMINI_PROJECT_ID
+    || cfg.GCLOUD_TTS_PROJECTID
+    || cfg.GOOGLE_TTS_PROJECT_ID
+    || cfg.GOOGLE_SPEECH_PROJECT_ID
+    || "";
+  el.slideTranslateMaxFontSize.value = cfg.SLIDE_TRANSLATE_MAX_FONT_SIZE ?? 120;
   renderSlideTranslateStyleEditor(cfg.SLIDE_TRANSLATE_STYLES_JSON || "");
-  el.googleTranslateProjectId.value = cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.gcloudTranslateProjectId.value = cfg.GCLOUD_TRANSLATE_PROJECTID || cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GCLOUD_TTS_PROJECTID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.googleTranslateLocation.value = cfg.GOOGLE_TRANSLATE_LOCATION || "us-central1";
   el.geminiTextTranslateModel.value = cfg.GOOGLE_TRANSLATE_MODEL || "general/translation-llm";
   el.googleTranslateSourceLanguageCode.value = cfg.GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE || "";
   renderTermbaseEditor(cfg.TRANSLATION_TERMBASE_CSV || "");
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
-  el.googleTtsProjectId.value = cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.gcloudTtsProjectId.value = cfg.GCLOUD_TTS_PROJECTID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
@@ -663,6 +694,12 @@ export async function loadConfig(options = {}) {
 
 export async function saveConfig(options = {}) {
   const videoPath = (state.selectedVideoPath || "").trim();
+  const slideTranslateVertexProjectId = el.slideTranslateVertexProjectId.value.trim();
+  const slideTranslateVisionProjectId = el.slideTranslateVisionProjectId.value.trim();
+  const vertexProjectId = el.gcloudVertexProjectId.value.trim();
+  const gcloudTranslateProjectId = el.gcloudTranslateProjectId.value.trim();
+  const gcloudTtsProjectId = el.gcloudTtsProjectId.value.trim();
+  const resolvedVertexProjectId = slideTranslateVertexProjectId || vertexProjectId;
   const payload = {
     VIDEO_PATH: videoPath,
     ROI_X0: Number(el.roiX0.value),
@@ -700,6 +737,8 @@ export async function saveConfig(options = {}) {
     SPEAKER_FILTER_MAX_EDGE_DENSITY: Number(el.speakerFilterMaxEdgeDensity.value),
     SPEAKER_FILTER_MAX_LAPLACIAN_VAR: Number(el.speakerFilterMaxLaplacianVar.value),
     SPEAKER_FILTER_MAX_DURATION_SEC: Number(el.speakerFilterMaxDurationSec.value),
+    GCLOUD_VERTEX_PROJECTID: resolvedVertexProjectId,
+    GOOGLE_GEMINI_PROJECT_ID: resolvedVertexProjectId,
     FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
     GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
     GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
@@ -707,12 +746,15 @@ export async function saveConfig(options = {}) {
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
-    GOOGLE_VISION_PROJECT_ID: el.googleVisionProjectId.value.trim(),
+    GCLOUD_VISION_PROJECTID: slideTranslateVisionProjectId,
+    GOOGLE_VISION_PROJECT_ID: slideTranslateVisionProjectId,
+    SLIDE_TRANSLATE_MAX_FONT_SIZE: Number(el.slideTranslateMaxFontSize.value),
     SLIDE_TRANSLATE_STYLES_JSON: (() => {
       syncSlideTranslateStylesJsonFromTable();
       return el.slideTranslateStylesJson.value;
     })(),
-    GOOGLE_TRANSLATE_PROJECT_ID: el.googleTranslateProjectId.value.trim(),
+    GCLOUD_TRANSLATE_PROJECTID: gcloudTranslateProjectId,
+    GOOGLE_TRANSLATE_PROJECT_ID: gcloudTranslateProjectId,
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
     GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
@@ -722,7 +764,8 @@ export async function saveConfig(options = {}) {
     })(),
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
-    GOOGLE_TTS_PROJECT_ID: el.googleTtsProjectId.value.trim(),
+    GCLOUD_TTS_PROJECTID: gcloudTtsProjectId,
+    GOOGLE_TTS_PROJECT_ID: gcloudTtsProjectId,
     GOOGLE_TTS_LANGUAGE_CODE: (getSelectedTtsLanguageOption()?.tts_language_code || "").trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
@@ -763,6 +806,9 @@ export function syncSettingsFieldState() {
   const ttsEnabled = el.runStepTts.checked;
   const videoExportEnabled = el.runStepVideoExport.checked;
   const transcriptionProvider = el.transcriptionProvider.value;
+  const translationMode = el.finalSlideTranslationMode.value;
+  const geminiSlideTranslate = translationMode === "gemini";
+  const deterministicSlideTranslate = translationMode === "deterministic_glossary";
   const upscaleMode = el.finalSlideUpscaleMode.value;
   const localUpscale = upscaleMode === "swin2sr";
   const replicateUpscale = upscaleMode === "replicate_nightmare_realesrgan";
@@ -789,6 +835,8 @@ export function syncSettingsFieldState() {
     clearHealthStatus("transcription");
   }
 
+  const geminiProjectEnabled = editEnabled || (translateEnabled && geminiSlideTranslate);
+  el.gcloudVertexProjectId.disabled = !geminiProjectEnabled;
   el.finalSlidePostprocessMode.disabled = !editEnabled;
   el.geminiEditModel.disabled = !editEnabled;
   el.geminiEditPrompt.disabled = !editEnabled;
@@ -797,25 +845,25 @@ export function syncSettingsFieldState() {
     el.slideEditHealthCheck.disabled = !editApiEnabled;
   }
   if (!editApiEnabled) {
-    setHealthStatus("slideEdit", "idle", editEnabled ? "Only for gemini mode." : "Step disabled.", "");
+    setHealthStatus("slideEdit", "idle", editEnabled ? "Only for nano banana mode." : "Step disabled.", "");
   } else if (
-    el.slideEditHealthStatus?.textContent === "Only for gemini mode."
+    el.slideEditHealthStatus?.textContent === "Only for nano banana mode."
     || el.slideEditHealthStatus?.textContent === "Step disabled."
   ) {
     clearHealthStatus("slideEdit");
   }
 
   el.finalSlideTranslationMode.disabled = !translateEnabled;
-  const languageSelectionEnabled = translateEnabled || textTranslateEnabled || ttsEnabled;
-  const geminiSlideTranslate = el.finalSlideTranslationMode.value === "gemini";
-  const deterministicSlideTranslate = el.finalSlideTranslationMode.value === "deterministic_glossary";
+  const languageSelectionEnabled = translateEnabled || textTranslateEnabled || ttsEnabled || googleTranscription;
   if (el.finalSlideTargetLanguageSearch) {
     el.finalSlideTargetLanguageSearch.disabled = !languageSelectionEnabled;
   }
   el.finalSlideTargetLanguage.disabled = !languageSelectionEnabled;
   el.geminiTranslateModel.disabled = !translateEnabled || !geminiSlideTranslate;
   el.geminiTranslatePrompt.disabled = !translateEnabled || !geminiSlideTranslate;
-  el.googleVisionProjectId.disabled = !translateEnabled || !deterministicSlideTranslate;
+  el.slideTranslateVertexProjectId.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.slideTranslateVisionProjectId.disabled = !translateEnabled || !deterministicSlideTranslate;
+  el.slideTranslateMaxFontSize.disabled = !translateEnabled || !deterministicSlideTranslate;
   setSlideTranslateStyleEditorDisabled(!translateEnabled || !deterministicSlideTranslate);
   const slideTranslateApiEnabled = translateEnabled && el.finalSlideTranslationMode.value !== "none";
   if (el.slideTranslateHealthCheck) {
@@ -830,7 +878,7 @@ export function syncSettingsFieldState() {
     clearHealthStatus("slideTranslate");
   }
 
-  el.googleTranslateProjectId.disabled = !textTranslateEnabled;
+  el.gcloudTranslateProjectId.disabled = !textTranslateEnabled;
   el.googleTranslateLocation.disabled = !textTranslateEnabled;
   el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
   el.googleTranslateSourceLanguageCode.disabled = !textTranslateEnabled;
@@ -845,7 +893,7 @@ export function syncSettingsFieldState() {
 
   el.geminiTtsModel.disabled = !ttsEnabled;
   el.geminiTtsVoice.disabled = !ttsEnabled;
-  el.googleTtsProjectId.disabled = !ttsEnabled;
+  el.gcloudTtsProjectId.disabled = !ttsEnabled;
   el.googleTtsLanguageCode.disabled = !ttsEnabled;
   el.geminiTtsPrompt.disabled = !ttsEnabled;
   if (el.ttsHealthCheck) {

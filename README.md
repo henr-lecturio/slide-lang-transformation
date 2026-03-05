@@ -130,14 +130,14 @@ Wichtige Blöcke:
   - `RUN_STEP_TTS`
   - `RUN_STEP_VIDEO_EXPORT`
 - Transcript Translate:
-  - `GOOGLE_TRANSLATE_PROJECT_ID`
+  - `GCLOUD_TRANSLATE_PROJECTID`
   - `GOOGLE_TRANSLATE_LOCATION`
   - `GOOGLE_TRANSLATE_MODEL`
   - `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`
 - TTS:
   - `GEMINI_TTS_MODEL`
   - `GEMINI_TTS_VOICE`
-  - `GOOGLE_TTS_PROJECT_ID`
+  - `GCLOUD_TTS_PROJECTID`
   - `GOOGLE_TTS_LANGUAGE_CODE`
   - `config/prompts/gemini_tts_prompt.txt`
 - Video Export:
@@ -208,7 +208,7 @@ gcloud auth application-default set-quota-project <PROJECT_ID>
 - `aiplatform.googleapis.com`
 
 3. die Projekt-ID in der Konfiguration:
-- `GOOGLE_TTS_PROJECT_ID`
+- `GCLOUD_TTS_PROJECTID`
 
 4. einen Principal mit ausreichenden Rechten auf das Projekt
 - mindestens so, dass das Projekt als Quota-/Billing-Projekt genutzt werden darf
@@ -231,7 +231,7 @@ gcloud auth application-default set-quota-project <PROJECT_ID>
 - `translate.googleapis.com`
 
 3. passende Projektkonfiguration:
-- `GOOGLE_TRANSLATE_PROJECT_ID`
+- `GCLOUD_TRANSLATE_PROJECTID`
 - `GOOGLE_TRANSLATE_LOCATION`
 - `GOOGLE_TRANSLATE_MODEL`
 - optional `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`

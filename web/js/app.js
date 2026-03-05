@@ -20,6 +20,7 @@ import {
 import {
   addTermbaseRow,
   loadConfig,
+  renderSlideTranslateStyleEditor,
   saveConfig,
   syncSettingsFieldState,
   syncStepSections,
@@ -37,6 +38,7 @@ import {
   closeRoiStatusModal,
   closeStatusModal,
   closeVideoPicker,
+  handleImageModalWheel,
   openExportLabRunPicker,
   openExportLabSettingsModal,
   openExportLabStatusModal,
@@ -65,6 +67,7 @@ import {
   resetLabTestSettingsFromCurrentSettings,
   runLabAction,
   saveLabTestSettings,
+  setLabResultViewMode,
   stopLabJob,
   syncLabSettingsFieldState,
   syncLabTestSections,
@@ -167,12 +170,28 @@ function bindEvents() {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   }
 
+  function syncGeminiProjectIdFields(source) {
+    const value = String(source?.value || "").trim();
+    if (el.gcloudVertexProjectId && source !== el.gcloudVertexProjectId) {
+      el.gcloudVertexProjectId.value = value;
+    }
+    if (el.slideTranslateVertexProjectId && source !== el.slideTranslateVertexProjectId) {
+      el.slideTranslateVertexProjectId.value = value;
+    }
+  }
+
   async function applyHomeQuickSettings() {
     if (el.homeTranscriptionProvider && el.transcriptionProvider) {
       el.transcriptionProvider.value = el.homeTranscriptionProvider.value;
     }
     if (el.homeTargetLanguage && el.finalSlideTargetLanguage) {
-      el.finalSlideTargetLanguage.value = el.homeTargetLanguage.value;
+      const wantedCode = String(el.homeTargetLanguage.value || "").trim();
+      if (el.finalSlideTargetLanguageSearch) {
+        el.finalSlideTargetLanguageSearch.value = "";
+      }
+      const wanted = (Array.isArray(state.ttsLanguageOptions) ? state.ttsLanguageOptions : [])
+        .find((item) => item.tts_language_code === wantedCode);
+      renderTtsLanguageOptions("", wantedCode, wanted?.label || "");
       syncSelectedTtsLanguage();
     }
     if (el.homeGeminiTextTranslateModel && el.geminiTextTranslateModel) {
@@ -307,10 +326,57 @@ function bindEvents() {
     await runLabAction("upscale");
     showButtonSuccess(el.labRunUpscale, "Started");
   }));
+  if (el.labResultViewFinal) {
+    el.labResultViewFinal.addEventListener("click", () => setLabResultViewMode("result"));
+  }
+  if (el.labResultViewDebug) {
+    el.labResultViewDebug.addEventListener("click", () => setLabResultViewMode("ocr_debug"));
+  }
   el.labSettingsSave.addEventListener("click", () => runTask(async () => {
     saveLabTestSettings();
     showButtonSuccess(el.labSettingsSave, "Saved");
   }));
+  if (el.labSettingsSaveMain) {
+    el.labSettingsSaveMain.addEventListener("click", () => runTask(async () => {
+      saveLabTestSettings();
+      const settings = state.labTestSettings || {};
+
+      el.geminiEditModel.value = String(settings.slide_edit_model || el.geminiEditModel.value || "").trim();
+      el.geminiEditPrompt.value = String(settings.slide_edit_prompt ?? el.geminiEditPrompt.value ?? "");
+
+      const targetLabel = String(settings.target_language || "").trim();
+      const targetOption = (Array.isArray(state.ttsLanguageOptions) ? state.ttsLanguageOptions : [])
+        .find((item) => item.label === targetLabel);
+      if (el.finalSlideTargetLanguageSearch) {
+        el.finalSlideTargetLanguageSearch.value = "";
+      }
+      if (targetOption) {
+        renderTtsLanguageOptions("", targetOption.tts_language_code, targetOption.label);
+      } else {
+        renderTtsLanguageOptions("", el.finalSlideTargetLanguage.value || "", targetLabel);
+      }
+      syncSelectedTtsLanguage();
+
+      el.geminiTranslateModel.value = String(settings.slide_translate_model || el.geminiTranslateModel.value || "").trim();
+      el.geminiTranslatePrompt.value = String(settings.slide_translate_prompt ?? el.geminiTranslatePrompt.value ?? "");
+      const styleJson = String(settings.slide_translate_styles_json ?? "").trim();
+      if (styleJson) {
+        renderSlideTranslateStyleEditor(styleJson);
+      }
+
+      el.finalSlideUpscaleMode.value = String(settings.slide_upscale_mode || el.finalSlideUpscaleMode.value || "none").trim();
+      el.finalSlideUpscaleModel.value = String(settings.slide_upscale_model || el.finalSlideUpscaleModel.value || "").trim();
+      el.finalSlideUpscaleDevice.value = String(settings.slide_upscale_device || el.finalSlideUpscaleDevice.value || "auto").trim();
+      el.finalSlideUpscaleTileSize.value = Number(settings.slide_upscale_tile_size ?? el.finalSlideUpscaleTileSize.value ?? 256);
+      el.finalSlideUpscaleTileOverlap.value = Number(settings.slide_upscale_tile_overlap ?? el.finalSlideUpscaleTileOverlap.value ?? 24);
+      el.replicateNightmareRealesrganModelRef.value = String(settings.replicate_model_ref || el.replicateNightmareRealesrganModelRef.value || "").trim();
+      el.replicateNightmareRealesrganVersionId.value = String(settings.replicate_version_id || el.replicateNightmareRealesrganVersionId.value || "").trim();
+
+      syncSettingsFieldState();
+      await saveConfig({ syncActionState });
+      showButtonSuccess(el.labSettingsSaveMain, "Applied");
+    }));
+  }
   el.labSettingsReset.addEventListener("click", () => runTask(async () => {
     resetLabTestSettingsFromCurrentSettings();
     showButtonSuccess(el.labSettingsReset, "Reset");
@@ -370,6 +436,12 @@ function bindEvents() {
     syncSettingsFieldState();
     syncLabSettingsFieldState();
   });
+  if (el.gcloudVertexProjectId && el.slideTranslateVertexProjectId) {
+    el.gcloudVertexProjectId.addEventListener("input", () => syncGeminiProjectIdFields(el.gcloudVertexProjectId));
+    el.gcloudVertexProjectId.addEventListener("change", () => syncGeminiProjectIdFields(el.gcloudVertexProjectId));
+    el.slideTranslateVertexProjectId.addEventListener("input", () => syncGeminiProjectIdFields(el.slideTranslateVertexProjectId));
+    el.slideTranslateVertexProjectId.addEventListener("change", () => syncGeminiProjectIdFields(el.slideTranslateVertexProjectId));
+  }
 
   for (const input of [
     el.runStepEdit,
@@ -393,7 +465,7 @@ function bindEvents() {
     input.addEventListener("change", () => clearHealthStatus("transcription"));
   }
 
-  for (const input of [el.runStepEdit, el.finalSlidePostprocessMode, el.geminiEditModel, el.geminiEditPrompt]) {
+  for (const input of [el.runStepEdit, el.gcloudVertexProjectId, el.slideTranslateVertexProjectId, el.finalSlidePostprocessMode, el.geminiEditModel, el.geminiEditPrompt]) {
     input.addEventListener("input", () => clearHealthStatus("slideEdit"));
     input.addEventListener("change", () => clearHealthStatus("slideEdit"));
   }
@@ -403,6 +475,9 @@ function bindEvents() {
     el.finalSlideTranslationMode,
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
+    el.gcloudVertexProjectId,
+    el.slideTranslateVertexProjectId,
+    el.slideTranslateVisionProjectId,
     el.geminiTranslateModel,
     el.geminiTranslatePrompt,
   ]) {
@@ -430,7 +505,7 @@ function bindEvents() {
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
     el.geminiTextTranslateModel,
-    el.googleTranslateProjectId,
+    el.gcloudTranslateProjectId,
     el.googleTranslateLocation,
     el.googleTranslateSourceLanguageCode,
   ]) {
@@ -455,7 +530,7 @@ function bindEvents() {
   }
 
   for (const input of [
-    el.googleTtsProjectId,
+    el.gcloudTtsProjectId,
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
     el.geminiTtsModel,
@@ -536,6 +611,9 @@ function bindEvents() {
 
   el.imageModalClose.addEventListener("click", closeImageModal);
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
+  if (el.imageModalViewport) {
+    el.imageModalViewport.addEventListener("wheel", handleImageModalWheel, { passive: false });
+  }
   el.statusModalClose.addEventListener("click", closeStatusModal);
   el.statusModalBackdrop.addEventListener("click", closeStatusModal);
   el.labStatusModalClose.addEventListener("click", closeLabStatusModal);

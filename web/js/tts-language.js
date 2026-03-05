@@ -80,6 +80,9 @@ export function renderTtsLanguageOptions(filterText = "", preferredCode = "", pr
 export function syncSelectedTtsLanguage() {
   const selected = getSelectedTtsLanguageOption();
   el.googleTtsLanguageCode.value = selected ? selected.tts_language_code : "";
+  if (el.homeTargetLanguage) {
+    el.homeTargetLanguage.value = selected ? selected.tts_language_code : "";
+  }
   updateTtsLanguageHint();
 }
 

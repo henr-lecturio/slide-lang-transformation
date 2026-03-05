@@ -29,6 +29,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--font-path", required=True, help="Font file used for deterministic rendering.")
     parser.add_argument("--style-config-json", required=True, help="Role/slot style config JSON.")
     parser.add_argument(
+        "--global-max-font-size",
+        type=int,
+        default=120,
+        help="Global upper cap for rendered font sizes across all text elements.",
+    )
+    parser.add_argument(
+        "--layout-max-attempts",
+        type=int,
+        default=50000,
+        help="Max layout attempts per text element/group (0 disables attempt budget).",
+    )
+    parser.add_argument(
+        "--layout-max-ms",
+        type=int,
+        default=15000,
+        help="Max layout time in ms per text element/group (0 disables time budget).",
+    )
+    parser.add_argument(
+        "--max-expand-px",
+        type=int,
+        default=120,
+        help="Global right/down expansion limit in pixels for deterministic layout.",
+    )
+    parser.add_argument(
         "--needs-review-policy",
         default="mark_only",
         choices=["mark_only", "allow_partial"],
@@ -135,6 +159,14 @@ def main() -> int:
         str(font_path),
         "--style-config-json",
         str(style_config_json),
+        "--global-max-font-size",
+        str(max(8, int(args.global_max_font_size))),
+        "--layout-max-attempts",
+        str(max(0, int(args.layout_max_attempts))),
+        "--layout-max-ms",
+        str(max(0, int(args.layout_max_ms))),
+        "--max-expand-px",
+        str(max(0, int(args.max_expand_px))),
         "--vision-project-id",
         str(args.vision_project_id),
         "--vision-feature",

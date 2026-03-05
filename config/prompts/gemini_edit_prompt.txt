@@ -1,1 +1,1 @@
-Remove the arm in the bottom right corner.
+Remove the arm in the bottom right corner. Return only the edited image.

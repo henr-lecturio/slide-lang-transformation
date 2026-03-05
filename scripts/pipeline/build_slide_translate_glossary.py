@@ -23,6 +23,7 @@ from scripts.lib.slide_glossary import (
     write_json,
 )
 from scripts.lib.slide_ocr import ensure_cloud_vision_client, ocr_slide_fragments
+from scripts.lib.slide_style_classifier import classify_text_units
 from scripts.lib.translation_memory import DEFAULT_TERMBASE_PATH, load_termbase_entries
 
 
@@ -81,9 +82,14 @@ def ocr_unit_rows(ocr_docs: list[dict]) -> list[dict]:
                     "line_ids": unit.get("line_ids", []),
                     "line_count": unit.get("line_count", ""),
                     "list_marker_fragment_id": unit.get("list_marker_fragment_id", ""),
+                    "list_marker_inferred": unit.get("list_marker_inferred", ""),
                     "list_marker_text": unit.get("list_marker_text", ""),
                     "source_text": unit.get("source_text", ""),
                     "source_text_norm": unit.get("source_text_norm", ""),
+                    "classification_role": unit.get("classification_role", ""),
+                    "classification_reason": unit.get("classification_reason", ""),
+                    "graphic_embedded_candidate": unit.get("graphic_embedded_candidate", ""),
+                    "graphic_context_score": unit.get("graphic_context_score", ""),
                     "bbox_x": unit.get("bbox", {}).get("x", ""),
                     "bbox_y": unit.get("bbox", {}).get("y", ""),
                     "bbox_w": unit.get("bbox", {}).get("w", ""),
@@ -123,6 +129,7 @@ def main() -> int:
 
     ocr_docs: list[dict] = []
     candidate_by_norm: dict[str, dict] = {}
+    skipped_graphic_units = 0
     for fallback_index, slide_path in enumerate(slide_paths, start=1):
         event_id = parse_event_id_from_name(slide_path.name) or 0
         event_meta = events_by_id.get(event_id, {})
@@ -135,9 +142,23 @@ def main() -> int:
             slide_index=slide_index,
             feature=args.vision_feature,
         )
+        classifications = classify_text_units(
+            ocr_doc.get("text_units", []),
+            image_width=int(ocr_doc.get("image_width", 0) or 0),
+            image_height=int(ocr_doc.get("image_height", 0) or 0),
+        )
+        classification_by_unit_id = {int(row.get("unit_id", 0) or 0): row for row in classifications}
+        for unit in ocr_doc.get("text_units", []):
+            unit_id = int(unit.get("unit_id", 0) or 0)
+            classification = classification_by_unit_id.get(unit_id, {})
+            unit["classification_role"] = str(classification.get("role", "body") or "body")
+            unit["classification_reason"] = str(classification.get("classification_reason", "fallback_body") or "fallback_body")
         ocr_docs.append(ocr_doc)
 
         for unit in ocr_doc.get("text_units", []):
+            if str(unit.get("classification_role", "body") or "body") == "graphic_embedded":
+                skipped_graphic_units += 1
+                continue
             text_norm = str(unit.get("source_text_norm", "") or "").strip()
             text_raw = str(unit.get("source_text", "") or "").strip()
             if not text_norm or not is_translatable_text(text_norm):
@@ -161,7 +182,7 @@ def main() -> int:
             candidate["event_ids"].append(int(unit.get("event_id", 0) or 0))
             candidate["image_names"].append(str(ocr_doc.get("image_name", "") or ""))
             candidate["line_counts"].append(int(unit.get("line_count", 1) or 1))
-            if int(unit.get("list_marker_fragment_id", 0) or 0) > 0:
+            if int(unit.get("list_marker_fragment_id", 0) or 0) > 0 or bool(unit.get("list_marker_inferred", False)):
                 candidate["list_marker_occurrences"] += 1
             if text_raw and text_raw not in candidate["source_examples"] and len(candidate["source_examples"]) < 5:
                 candidate["source_examples"].append(text_raw)
@@ -274,9 +295,14 @@ def main() -> int:
             "line_ids",
             "line_count",
             "list_marker_fragment_id",
+            "list_marker_inferred",
             "list_marker_text",
             "source_text",
             "source_text_norm",
+            "classification_role",
+            "classification_reason",
+            "graphic_embedded_candidate",
+            "graphic_context_score",
             "bbox_x",
             "bbox_y",
             "bbox_w",
@@ -345,6 +371,7 @@ def main() -> int:
 
     print(f"[SlideTranslate] OCR slides processed: {len(ocr_docs)}")
     print(f"[SlideTranslate] Glossary candidates: {len(candidate_rows)}")
+    print(f"[SlideTranslate] Graphic-embedded units skipped: {skipped_graphic_units}")
     print(f"[SlideTranslate] Frozen glossary entries: {len(glossary_rows)}")
     print(f"[SlideTranslate] Target language: {target_language} ({target_language_code})")
     print(f"[SlideTranslate] Vision project: {vision_project_id_used}")

@@ -3,6 +3,26 @@
   gap: 16px;
 }
 
+.settings-global-block {
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  padding: 18px 20px 20px;
+}
+
+.settings-global-head {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-global-list {
+  padding-top: 14px;
+}
+
 .step-section {
   border: 1px solid var(--border);
   background: var(--surface-alt);
@@ -323,29 +343,29 @@
 
 .slide-style-table th:nth-child(2),
 .slide-style-table td:nth-child(2) {
-  width: 14%;
+  width: 13%;
 }
 
 .slide-style-table th:nth-child(3),
 .slide-style-table td:nth-child(3),
 .slide-style-table th:nth-child(4),
 .slide-style-table td:nth-child(4) {
-  width: 10%;
+  width: 8%;
 }
 
 .slide-style-table th:nth-child(5),
 .slide-style-table td:nth-child(5) {
-  width: 14%;
+  width: 11%;
 }
 
 .slide-style-table th:nth-child(6),
 .slide-style-table td:nth-child(6) {
-  width: 14%;
+  width: 12%;
 }
 
 .slide-style-table th:nth-child(7),
 .slide-style-table td:nth-child(7) {
-  width: 23%;
+  width: 27%;
 }
 
 .slide-style-table td input,

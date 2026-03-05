@@ -64,9 +64,14 @@ def ensure_cloud_translate_client(project_id: str, location: str):
             "Run: source .venv/bin/activate && pip install google-cloud-translate"
         ) from exc
 
-    quota_project_id = project_id.strip() or (os.environ.get("GOOGLE_CLOUD_PROJECT") or "").strip()
+    quota_project_id = (
+        project_id.strip()
+        or (os.environ.get("GCLOUD_TRANSLATE_PROJECTID") or "").strip()
+        or (os.environ.get("GOOGLE_TRANSLATE_PROJECT_ID") or "").strip()
+        or (os.environ.get("GOOGLE_CLOUD_PROJECT") or "").strip()
+    )
     if not quota_project_id:
-        raise RuntimeError("GOOGLE_TRANSLATE_PROJECT_ID / --project-id must not be empty.")
+        raise RuntimeError("GCLOUD_TRANSLATE_PROJECTID / --project-id must not be empty.")
     location = str(location or "").strip() or "us-central1"
     os.environ.setdefault("GOOGLE_CLOUD_PROJECT", quota_project_id)
 

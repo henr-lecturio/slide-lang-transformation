@@ -20,6 +20,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from scripts.pipeline.filter_and_merge_speaker_only import build_final_corner_cleanup_mask
+from scripts.lib.cloud_gemini_image import ensure_cloud_gemini_image_client
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
@@ -48,6 +49,16 @@ def parse_args() -> argparse.Namespace:
         "--source-manifest-csv",
         default="",
         help="Optional final image source manifest. Slides with source_mode_final=full are copied through unchanged.",
+    )
+    parser.add_argument(
+        "--project-id",
+        default="",
+        help="Google Cloud project id for Vertex AI Gemini image editing.",
+    )
+    parser.add_argument(
+        "--location",
+        default="",
+        help="Google Cloud location for Vertex AI Gemini image editing (e.g. global or us-central1).",
     )
     parser.add_argument("--mask-debug-dir", default="", help="Optional output directory for binary masks.")
     parser.add_argument(
@@ -78,21 +89,12 @@ def load_prompt(path: Path) -> str:
     return text
 
 
-def ensure_client():
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError as exc:  # pragma: no cover - import error path depends on env
-        raise RuntimeError(
-            "google-genai is not installed in this environment. "
-            "Run: source .venv/bin/activate && pip install google-genai"
-        ) from exc
-
-    api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set in the environment.")
-
-    return genai.Client(api_key=api_key), types
+def ensure_client(project_id: str, location: str):
+    client, types, project_id_used, _default_project, location_used = ensure_cloud_gemini_image_client(
+        project_id=project_id,
+        location=location,
+    )
+    return client, types, project_id_used, location_used
 
 
 def slide_index_from_name(path: Path) -> int | None:
@@ -240,7 +242,9 @@ def main() -> int:
     if not input_dir.exists():
         raise FileNotFoundError(input_dir)
 
-    client, types = ensure_client()
+    client, types, project_id_used, location_used = ensure_client(args.project_id, args.location)
+    print(f"[GeminiEdit] Vertex project: {project_id_used}", flush=True)
+    print(f"[GeminiEdit] Vertex location: {location_used}", flush=True)
     source_modes = load_source_manifest(source_manifest_csv)
     clear_pngs(output_dir)
     if mask_debug_dir is not None:

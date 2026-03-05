@@ -49,7 +49,7 @@
               <div class="quick-settings-head">Quick Settings</div>
               <div class="quick-settings-grid">
                 <label class="quick-setting-field" for="home_transcription_provider">
-                  <span>Transcription Provider</span>
+                  <span>Transcription Model</span>
                   <select id="home_transcription_provider">
                     <option value="whisper">whisper</option>
                     <option value="google_chirp_3">google_chirp_3</option>
@@ -225,7 +225,13 @@
               </div>
             </section>
             <section class="lab-preview-panel">
-              <div class="slide-compare-label">Result</div>
+              <div class="lab-preview-label-row">
+                <div class="slide-compare-label">Result</div>
+                <div class="lab-result-view-toggle" role="group" aria-label="Image Lab result view">
+                  <button id="lab-result-view-final" class="lab-result-view-btn is-active" type="button">Result</button>
+                  <button id="lab-result-view-debug" class="lab-result-view-btn" type="button">OCR Debug</button>
+                </div>
+              </div>
               <div class="image-wrap lab-preview-wrap">
                 <img id="lab-result-image" alt="Latest lab result image" />
               </div>
@@ -319,6 +325,25 @@
 
       <section id="panel-settings" class="panel">
         <section class="card">
+          <section class="settings-global-block" aria-label="Language settings">
+            <div class="settings-global-head">Language</div>
+            <div class="settings-list settings-global-list">
+              <div class="settings-row">
+                <label class="settings-key" for="google_speech_language_codes">GOOGLE_SPEECH_LANGUAGE_CODES</label>
+                <div class="settings-value"><input id="google_speech_language_codes" type="text" /></div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-key" for="final_slide_target_language_search">TARGET_LANGUAGE_SEARCH</label>
+                <div class="settings-value"><input id="final_slide_target_language_search" type="search" placeholder="Search language..." autocomplete="off" /></div>
+              </div>
+              <div class="settings-row">
+                <label class="settings-key" for="final_slide_target_language">TARGET_LANGUAGE</label>
+                <div class="settings-value">
+                  <select id="final_slide_target_language"></select>
+                </div>
+              </div>
+            </div>
+          </section>
           <div class="step-sections">
             <section class="step-section is-forced" data-step-section="slide-detection">
               <div class="step-section-head">
@@ -369,7 +394,11 @@
               <div id="step-section-body-transcription" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
-                    <label class="settings-key" for="transcription_provider">TRANSCRIPTION_PROVIDER</label>
+                    <label class="settings-key" for="google_speech_project_id">GOOGLE_SPEECH_PROJECT_ID</label>
+                    <div class="settings-value"><input id="google_speech_project_id" type="text" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="transcription_provider">TRANSCRIPTION_MODEL</label>
                     <div class="settings-value">
                       <select id="transcription_provider">
                         <option value="whisper">whisper</option>
@@ -396,20 +425,12 @@
                   </div>
                   <div class="settings-subhead">Google Speech</div>
                   <div class="settings-row">
-                    <label class="settings-key" for="google_speech_project_id">GOOGLE_SPEECH_PROJECT_ID</label>
-                    <div class="settings-value"><input id="google_speech_project_id" type="text" /></div>
-                  </div>
-                  <div class="settings-row">
                     <label class="settings-key" for="google_speech_location">GOOGLE_SPEECH_LOCATION</label>
                     <div class="settings-value"><input id="google_speech_location" type="text" /></div>
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="google_speech_model">GOOGLE_SPEECH_MODEL</label>
                     <div class="settings-value"><input id="google_speech_model" type="text" /></div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="google_speech_language_codes">GOOGLE_SPEECH_LANGUAGE_CODES</label>
-                    <div class="settings-value"><input id="google_speech_language_codes" type="text" /></div>
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="google_speech_chunk_sec">GOOGLE_SPEECH_CHUNK_SEC</label>
@@ -461,15 +482,15 @@
               <div id="step-section-body-text-translate" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
-                    <label class="settings-key" for="google_translate_project_id">GOOGLE_TRANSLATE_PROJECT_ID</label>
-                    <div class="settings-value"><input id="google_translate_project_id" type="text" /></div>
+                    <label class="settings-key" for="gcloud_translate_projectid">GCLOUD_TRANSLATE_PROJECTID</label>
+                    <div class="settings-value"><input id="gcloud_translate_projectid" type="text" /></div>
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="google_translate_location">GOOGLE_TRANSLATE_LOCATION</label>
                     <div class="settings-value"><input id="google_translate_location" type="text" /></div>
                   </div>
                   <div class="settings-row">
-                    <label class="settings-key" for="gemini_text_translate_model">GOOGLE_TRANSLATE_MODEL</label>
+                    <label class="settings-key" for="gemini_text_translate_model">TRANSCRIPT_TRANSLATE_MODEL</label>
                     <div class="settings-value">
                       <select id="gemini_text_translate_model">
                         <option value="general/translation-llm">general/translation-llm</option>
@@ -477,7 +498,7 @@
                     </div>
                   </div>
                   <div class="settings-row">
-                    <label class="settings-key" for="google_translate_source_language_code">GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE</label>
+                    <label class="settings-key" for="google_translate_source_language_code">SOURCE_LANG_CODE</label>
                     <div class="settings-value"><input id="google_translate_source_language_code" type="text" placeholder="Optional, e.g. en" /></div>
                   </div>
                   <div class="settings-row termbase-settings-row">
@@ -650,17 +671,21 @@
               <div id="step-section-body-edit" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
+                    <label class="settings-key" for="gcloud_vertex_projectid">GCLOUD_VERTEX_PROJECTID</label>
+                    <div class="settings-value"><input id="gcloud_vertex_projectid" type="text" placeholder="Google Cloud project id for nano banana" /></div>
+                  </div>
+                  <div class="settings-row">
                     <label class="settings-key" for="final_slide_postprocess_mode">FINAL_SLIDE_POSTPROCESS_MODE</label>
                     <div class="settings-value">
                       <select id="final_slide_postprocess_mode">
                         <option value="local">local</option>
-                        <option value="gemini">gemini</option>
+                        <option value="gemini">nano banana</option>
                         <option value="none">none</option>
                       </select>
                     </div>
                   </div>
                   <div class="settings-row">
-                    <label class="settings-key" for="gemini_edit_model">GEMINI_EDIT_MODEL</label>
+                    <label class="settings-key" for="gemini_edit_model">SLIDE_EDIT_MODEL</label>
                     <div class="settings-value">
                       <select id="gemini_edit_model">
                         <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
@@ -670,7 +695,7 @@
                     </div>
                   </div>
                   <div class="settings-row settings-row-textarea">
-                    <label class="settings-key" for="gemini_edit_prompt">GEMINI_EDIT_PROMPT</label>
+                    <label class="settings-key" for="gemini_edit_prompt">SLIDE_EDIT_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_edit_prompt" rows="10"></textarea></div>
                   </div>
                   <div class="settings-row settings-row-inline">
@@ -709,33 +734,31 @@
                   <span class="step-section-chevron" aria-hidden="true"></span>
                 </button>
                   </div>
-                  <div class="step-section-subtitle muted">Translates the final slide images via Gemini or deterministic glossary rendering.</div>
+                  <div class="step-section-subtitle muted">Translates the final slide images via nano banana or Google OCR + Glossary rendering.</div>
                 </div>
               </div>
               <div id="step-section-body-translate" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
-                    <label class="settings-key" for="final_slide_target_language_search">TARGET_LANGUAGE_SEARCH</label>
-                    <div class="settings-value"><input id="final_slide_target_language_search" type="search" placeholder="Search language..." autocomplete="off" /></div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="final_slide_target_language">TARGET_LANGUAGE</label>
-                    <div class="settings-value">
-                      <select id="final_slide_target_language"></select>
-                    </div>
-                  </div>
-                  <div class="settings-row">
                     <label class="settings-key" for="final_slide_translation_mode">FINAL_SLIDE_TRANSLATION_MODE</label>
                     <div class="settings-value">
                       <select id="final_slide_translation_mode">
                         <option value="none">none</option>
-                        <option value="gemini">gemini</option>
-                        <option value="deterministic_glossary">deterministic_glossary</option>
+                        <option value="gemini">nano banana</option>
+                        <option value="deterministic_glossary">Google OCR + Glossary</option>
                       </select>
                     </div>
                   </div>
                   <div class="settings-row">
-                    <label class="settings-key" for="gemini_translate_model">GEMINI_TRANSLATE_MODEL</label>
+                    <label class="settings-key" for="slide_translate_vertex_projectid">GCLOUD_VERTEX_PROJECTID</label>
+                    <div class="settings-value"><input id="slide_translate_vertex_projectid" type="text" placeholder="Google Cloud project id for nano banana" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="slide_translate_vision_projectid">GCLOUD_VISION_PROJECTID</label>
+                    <div class="settings-value"><input id="slide_translate_vision_projectid" type="text" placeholder="Google Cloud project id for Google OCR + Glossary" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_translate_model">SLIDE_TRANSLATE_MODEL</label>
                     <div class="settings-value">
                       <select id="gemini_translate_model">
                         <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
@@ -745,12 +768,12 @@
                     </div>
                   </div>
                   <div class="settings-row settings-row-textarea">
-                    <label class="settings-key" for="gemini_translate_prompt">GEMINI_TRANSLATE_PROMPT</label>
+                    <label class="settings-key" for="gemini_translate_prompt">SLIDE_TRANSLATE_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_translate_prompt" rows="10"></textarea></div>
                   </div>
                   <div class="settings-row">
-                    <label class="settings-key" for="google_vision_project_id">GOOGLE_VISION_PROJECT_ID</label>
-                    <div class="settings-value"><input id="google_vision_project_id" type="text" placeholder="Google project for Vision OCR" /></div>
+                    <label class="settings-key" for="slide_translate_max_font_size">SLIDE_TRANSLATE_MAX_FONT_SIZE</label>
+                    <div class="settings-value"><input id="slide_translate_max_font_size" type="number" min="8" step="1" /></div>
                   </div>
                   <div class="settings-row termbase-settings-row">
                     <label class="settings-key" for="slide_translate_styles_json">Slide Translate Styling</label>
@@ -923,8 +946,8 @@
               <div id="step-section-body-tts" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
-                    <label class="settings-key" for="google_tts_project_id">GOOGLE_TTS_PROJECT_ID</label>
-                    <div class="settings-value"><input id="google_tts_project_id" type="text" /></div>
+                    <label class="settings-key" for="gcloud_tts_projectid">GCLOUD_TTS_PROJECTID</label>
+                    <div class="settings-value"><input id="gcloud_tts_projectid" type="text" /></div>
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="google_tts_language_code">TTS_OUTPUT_LANGUAGE_CODE</label>
@@ -934,7 +957,7 @@
                     </div>
                   </div>
                   <div class="settings-row">
-                    <label class="settings-key" for="gemini_tts_model">GEMINI_TTS_MODEL</label>
+                    <label class="settings-key" for="gemini_tts_model">TTS_MODEL</label>
                     <div class="settings-value"><input id="gemini_tts_model" type="text" /></div>
                   </div>
                   <div class="settings-row">
@@ -942,7 +965,7 @@
                     <div class="settings-value"><input id="gemini_tts_voice" type="text" /></div>
                   </div>
                   <div class="settings-row settings-row-textarea">
-                    <label class="settings-key" for="gemini_tts_prompt">GEMINI_TTS_PROMPT</label>
+                    <label class="settings-key" for="gemini_tts_prompt">TTS_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_tts_prompt" rows="8"></textarea></div>
                   </div>
                   <div class="settings-row settings-row-inline">
@@ -1058,7 +1081,9 @@
       <div id="image-modal-backdrop" class="image-modal-backdrop"></div>
       <div class="image-modal-dialog" role="dialog" aria-modal="true" aria-label="Image preview">
         <button id="image-modal-close" class="image-modal-close" type="button" aria-label="Close preview">×</button>
-        <img id="image-modal-img" alt="Image preview" />
+        <div id="image-modal-viewport" class="image-modal-viewport">
+          <img id="image-modal-img" alt="Image preview" />
+        </div>
         <div id="image-modal-caption" class="image-modal-caption"></div>
       </div>
     </div>
@@ -1104,6 +1129,7 @@
           <div class="lab-settings-head-actions">
             <button id="lab-settings-reset" type="button">Reset from Settings</button>
             <button id="lab-settings-save" type="button">Save Test Settings</button>
+            <button id="lab-settings-save-main" type="button">Save to Main Settings</button>
             <button id="lab-settings-close" class="modal-close" type="button" aria-label="Close test settings">×</button>
           </div>
         </div>
@@ -1153,7 +1179,7 @@
                       <span class="step-section-chevron" aria-hidden="true"></span>
                     </button>
                   </div>
-                  <div class="step-section-subtitle muted">Uses the current <strong>FINAL_SLIDE_TRANSLATION_MODE</strong> from Settings. Gemini fields are ignored in deterministic mode.</div>
+                  <div class="step-section-subtitle muted">Uses the current <strong>FINAL_SLIDE_TRANSLATION_MODE</strong> from Settings.</div>
                 </div>
               </div>
               <div id="lab-step-section-body-slide-translate" class="step-section-body" hidden>

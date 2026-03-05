@@ -112,10 +112,15 @@ export async function loadOverlay() {
   const data = await apiGet("/api/overlay");
   if (!data.exists) {
     el.overlayImage.removeAttribute("src");
+    el.overlayImage.onclick = null;
+    el.overlayImage.style.removeProperty("cursor");
     return;
   }
   const v = data.mtime || Date.now();
   el.overlayImage.src = `${data.url}?v=${v}`;
+  el.overlayImage.style.cursor = "zoom-in";
+  const overlayName = String(data.url || "").split("/").pop() || "roi_overlay.png";
+  el.overlayImage.onclick = () => openImageModal(data.url, overlayName);
 }
 
 export async function regenerateOverlay() {

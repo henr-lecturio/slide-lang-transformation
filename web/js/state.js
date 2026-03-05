@@ -8,6 +8,8 @@ export const state = {
   labImages: [],
   labSelectedImage: null,
   labTestSettings: null,
+  labCurrent: null,
+  labResultViewMode: "result",
   labStepSectionExpanded: {},
   latestInfoExpanded: false,
   exportLabRuns: [],
