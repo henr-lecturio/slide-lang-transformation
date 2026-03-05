@@ -2353,6 +2353,78 @@ def start_run() -> tuple[bool, str]:
     return True, "started"
 
 
+def retry_run() -> tuple[bool, str]:
+    with RUN_LOCK:
+        status = RUN_STATE.get("status", "idle")
+        if status not in ("error", "stopped"):
+            return False, f"Cannot retry: run status is '{status}', expected 'error' or 'stopped'"
+        error_step = RUN_STATE.get("error_step") or ""
+        run_id = RUN_STATE.get("run_id") or ""
+        if not run_id:
+            return False, "Cannot retry: no run_id recorded"
+        run_dir = RUNS_DIR / run_id
+        if not run_dir.exists():
+            return False, f"Cannot retry: run directory not found: {run_dir}"
+
+        # Determine the step to resume from: use the error_step if available,
+        # otherwise fall back to the last running/pending step
+        resume_step = error_step
+        if not resume_step:
+            # Find first non-done/non-skipped step
+            for step_id, _label in STEP_DEFS:
+                st = RUN_STATE["step_statuses"].get(step_id, {}).get("status", "pending")
+                if st not in ("done", "skipped"):
+                    resume_step = step_id
+                    break
+        if not resume_step:
+            return False, "Cannot retry: no failed or pending step found"
+
+        proc = RUN_STATE.get("process")
+        if proc is not None and proc.poll() is None:
+            return False, "Run already in progress"
+
+        # Reset state for retry
+        RUN_STATE["status"] = "running"
+        RUN_STATE["started_at"] = _now()
+        RUN_STATE["finished_at"] = None
+        RUN_STATE["exit_code"] = None
+        RUN_STATE["log_tail"].clear()
+        RUN_STATE["current_step"] = None
+        RUN_STATE["current_detail"] = ""
+        RUN_STATE["stop_requested"] = False
+        RUN_STATE["stopping"] = False
+        RUN_STATE["error_step"] = None
+
+        # Reset steps from resume_step onward to pending; keep prior steps as done/skipped
+        reached = False
+        for step_id, _label in STEP_DEFS:
+            if step_id == resume_step:
+                reached = True
+            if reached:
+                RUN_STATE["step_statuses"][step_id] = {"status": "pending", "detail": ""}
+
+        process = subprocess.Popen(
+            ["bash", "scripts/run_pipeline.sh"],
+            cwd=str(ROOT_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={
+                **os.environ,
+                "PYTHONUNBUFFERED": "1",
+                "RESUME_FROM_STEP": resume_step,
+                "RESUME_RUN_DIR": str(run_dir),
+            },
+            start_new_session=True,
+        )
+        RUN_STATE["process"] = process
+
+    thread = threading.Thread(target=_run_worker, args=(process,), daemon=True)
+    thread.start()
+    return True, "retrying"
+
+
 def run_overlay(time_sec: float) -> tuple[int, str]:
     env = parse_env(CONFIG_PATH)
     video_path = (env.get("VIDEO_PATH", "") or "").strip()
@@ -3776,6 +3848,12 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/runs/stop":
                 ok, msg = stop_run()
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_run_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_run_state()})
+
+            if path == "/api/runs/retry":
+                ok, msg = retry_run()
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_run_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_run_state()})

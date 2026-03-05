@@ -85,6 +85,7 @@ import {
   loadRuns,
   pollCurrent,
   regenerateOverlay,
+  retryRun,
   startRun,
   stopRun,
 } from "./runs.js";
@@ -117,6 +118,9 @@ function syncActionState() {
   if (el.stopRun) {
     el.stopRun.disabled = state.currentRunStatus !== "running";
     el.stopRun.textContent = state.currentRunStatus === "stopping" ? "Stopping..." : "Stop Run";
+  }
+  if (el.retryRun) {
+    el.retryRun.disabled = state.currentRunStatus !== "error" && state.currentRunStatus !== "stopped";
   }
   syncLabActionState();
   syncExportLabActionState();
@@ -281,6 +285,12 @@ function bindEvents() {
 
   el.openStatus.addEventListener("click", openStatusModal);
   el.stopRun.addEventListener("click", () => runTask(stopRun));
+  if (el.retryRun) {
+    el.retryRun.addEventListener("click", () => runTask(async () => {
+      await retryRun();
+      showButtonSuccess(el.retryRun, "Retrying");
+    }));
+  }
 
   el.refreshRuns.addEventListener("click", () => runTaskImmediate(async () => {
     await loadRuns();

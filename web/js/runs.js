@@ -642,6 +642,11 @@ export async function stopRun() {
   setStatusHandler(current);
 }
 
+export async function retryRun() {
+  await apiPost("/api/runs/retry", {});
+  await loadRuns();
+}
+
 export async function pollCurrent() {
   try {
     const current = await apiGet("/api/runs/current");

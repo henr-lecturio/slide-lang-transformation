@@ -217,6 +217,31 @@ is_truthy() {
   esac
 }
 
+# --- Resume support ---
+RESUME_FROM_STEP="${RESUME_FROM_STEP:-}"
+RESUME_RUN_DIR="${RESUME_RUN_DIR:-}"
+_RESUME_REACHED=0
+
+if [ -n "$RESUME_FROM_STEP" ] && [ -z "$RESUME_RUN_DIR" ]; then
+  echo "ERROR: RESUME_FROM_STEP requires RESUME_RUN_DIR to be set." >&2
+  exit 1
+fi
+
+should_skip_step() {
+  local step_id="$1"
+  if [ -z "$RESUME_FROM_STEP" ]; then
+    return 1  # no resume mode → run everything
+  fi
+  if [ "$_RESUME_REACHED" = "1" ]; then
+    return 1  # already past the resume point → run
+  fi
+  if [ "$step_id" = "$RESUME_FROM_STEP" ]; then
+    _RESUME_REACHED=1
+    return 1  # this is the step to resume from → run
+  fi
+  return 0  # not yet reached → skip
+}
+
 is_gemini_text_translate_model() {
   local model_text="${1:-}"
   model_text="${model_text,,}"
@@ -291,8 +316,13 @@ fi
 VIDEO_NAME="$(basename "$VIDEO_ABS")"
 VIDEO_BASE="${VIDEO_NAME%.*}"
 
-RUN_ID="$(date +%Y-%m-%d_%H-%M-%S)"
-RUN_DIR="$ROOT_DIR/output/runs/$RUN_ID"
+if [ -n "$RESUME_RUN_DIR" ]; then
+  RUN_DIR="$RESUME_RUN_DIR"
+  RUN_ID="$(basename "$RUN_DIR")"
+else
+  RUN_ID="$(date +%Y-%m-%d_%H-%M-%S)"
+  RUN_DIR="$ROOT_DIR/output/runs/$RUN_ID"
+fi
 LATEST_LINK="$ROOT_DIR/output/latest"
 DATASET_DIR="$RUN_DIR/dataset"
 OUT_BASE="$RUN_DIR/slitranet"
@@ -301,141 +331,154 @@ OUT_DIR="$OUT_BASE/transitions"
 PHASE_DIR="$DATASET_DIR/videos/$PHASE"
 ROI_FILE="$DATASET_DIR/videos/${PHASE}_bounding_box_list.txt"
 
-mkdir -p "$RUN_DIR" "$PRED_DIR" "$OUT_DIR" "$OUT_BASE/keyframes/full" "$OUT_BASE/keyframes/slide"
-cp "$CONFIG_FILE" "$RUN_DIR/config_used.env"
-if grep -q '^VIDEO_PATH=' "$RUN_DIR/config_used.env"; then
-  sed -i "s|^VIDEO_PATH=.*$|VIDEO_PATH=\"$VIDEO_PATH_RESOLVED\"|" "$RUN_DIR/config_used.env"
-else
-  printf '\nVIDEO_PATH="%s"\n' "$VIDEO_PATH_RESOLVED" >> "$RUN_DIR/config_used.env"
+if [ -z "$RESUME_RUN_DIR" ]; then
+  mkdir -p "$RUN_DIR" "$PRED_DIR" "$OUT_DIR" "$OUT_BASE/keyframes/full" "$OUT_BASE/keyframes/slide"
+  cp "$CONFIG_FILE" "$RUN_DIR/config_used.env"
+  if grep -q '^VIDEO_PATH=' "$RUN_DIR/config_used.env"; then
+    sed -i "s|^VIDEO_PATH=.*$|VIDEO_PATH=\"$VIDEO_PATH_RESOLVED\"|" "$RUN_DIR/config_used.env"
+  else
+    printf '\nVIDEO_PATH="%s"\n' "$VIDEO_PATH_RESOLVED" >> "$RUN_DIR/config_used.env"
+  fi
 fi
 
-step_start slide-detection
-step_detail slide-detection "prepare-dataset"
-DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/pipeline/prepare_dataset.sh"
-step_detail slide-detection "check-weights"
-bash "$ROOT_DIR/scripts/pipeline/check_weights.sh"
+if should_skip_step slide-detection; then
+  step_skip slide-detection "resumed"
+else
+  step_start slide-detection
+  step_detail slide-detection "prepare-dataset"
+  DATASET_DIR="$DATASET_DIR" VIDEO_PATH_OVERRIDE="$VIDEO_PATH_RESOLVED" bash "$ROOT_DIR/scripts/pipeline/prepare_dataset.sh"
+  step_detail slide-detection "check-weights"
+  bash "$ROOT_DIR/scripts/pipeline/check_weights.sh"
 
-step_detail slide-detection "cuda-check"
-if ! "$PYTHON_BIN" - <<'PY'
+  step_detail slide-detection "cuda-check"
+  if ! "$PYTHON_BIN" - <<'PY'
 import torch
 raise SystemExit(0 if torch.cuda.is_available() else 1)
 PY
-then
-  echo "ERROR: torch.cuda.is_available() is False." >&2
-  echo "The original SliTraNet inference script uses .cuda() and needs a CUDA-capable runtime." >&2
-  exit 1
-fi
+  then
+    echo "ERROR: torch.cuda.is_available() is False." >&2
+    echo "The original SliTraNet inference script uses .cuda() and needs a CUDA-capable runtime." >&2
+    exit 1
+  fi
 
-step_detail slide-detection "slitranet-inference"
-pushd "$ROOT_DIR/slitranet" >/dev/null
-"$PYTHON_BIN" test_SliTraNet.py \
-  --dataset_dir "$DATASET_DIR" \
-  --phase "$PHASE" \
-  --pred_dir "$PRED_DIR" \
-  --out_dir "$OUT_DIR" \
-  --model_path_2D "$ROOT_DIR/weights/Frame_similarity_ResNet18_gray.pth" \
-  --model_path_1 "$ROOT_DIR/weights/Slide_video_detection_3DResNet50.pth" \
-  --model_path_2 "$ROOT_DIR/weights/Slide_transition_detection_3DResNet50.pth"
-popd >/dev/null
+  step_detail slide-detection "slitranet-inference"
+  pushd "$ROOT_DIR/slitranet" >/dev/null
+  "$PYTHON_BIN" test_SliTraNet.py \
+    --dataset_dir "$DATASET_DIR" \
+    --phase "$PHASE" \
+    --pred_dir "$PRED_DIR" \
+    --out_dir "$OUT_DIR" \
+    --model_path_2D "$ROOT_DIR/weights/Frame_similarity_ResNet18_gray.pth" \
+    --model_path_1 "$ROOT_DIR/weights/Slide_video_detection_3DResNet50.pth" \
+    --model_path_2 "$ROOT_DIR/weights/Slide_transition_detection_3DResNet50.pth"
+  popd >/dev/null
 
-TRANSITIONS_FILE="$OUT_DIR/${VIDEO_BASE}_transitions.txt"
-if [ ! -f "$TRANSITIONS_FILE" ]; then
-  echo "ERROR: Expected output file not found: $TRANSITIONS_FILE" >&2
-  exit 1
-fi
-STAGE1_FILE="$PRED_DIR/${VIDEO_BASE}_results.txt"
-STAGE1_ARGS=()
-if [ -f "$STAGE1_FILE" ]; then
-  STAGE1_ARGS+=(--stage1-file "$STAGE1_FILE")
-else
-  echo "WARN: Stage-1 result file not found, initial event will be skipped: $STAGE1_FILE" >&2
-fi
+  TRANSITIONS_FILE="$OUT_DIR/${VIDEO_BASE}_transitions.txt"
+  if [ ! -f "$TRANSITIONS_FILE" ]; then
+    echo "ERROR: Expected output file not found: $TRANSITIONS_FILE" >&2
+    exit 1
+  fi
+  STAGE1_FILE="$PRED_DIR/${VIDEO_BASE}_results.txt"
+  STAGE1_ARGS=()
+  if [ -f "$STAGE1_FILE" ]; then
+    STAGE1_ARGS+=(--stage1-file "$STAGE1_FILE")
+  else
+    echo "WARN: Stage-1 result file not found, initial event will be skipped: $STAGE1_FILE" >&2
+  fi
 
-step_detail slide-detection "postprocess"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/postprocess_slitranet.py" \
-  --video "$PHASE_DIR/$VIDEO_NAME" \
-  --roi-file "$ROI_FILE" \
-  --transitions-file "$TRANSITIONS_FILE" \
-  "${STAGE1_ARGS[@]}" \
-  --out-csv "$OUT_BASE/slide_changes.csv" \
-  --out-full-dir "$OUT_BASE/keyframes/full" \
-  --out-slide-dir "$OUT_BASE/keyframes/slide" \
-  --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}" \
-  --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
-  --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
-refresh_latest_link
-step_done slide-detection
+  step_detail slide-detection "postprocess"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/postprocess_slitranet.py" \
+    --video "$PHASE_DIR/$VIDEO_NAME" \
+    --roi-file "$ROI_FILE" \
+    --transitions-file "$TRANSITIONS_FILE" \
+    "${STAGE1_ARGS[@]}" \
+    --out-csv "$OUT_BASE/slide_changes.csv" \
+    --out-full-dir "$OUT_BASE/keyframes/full" \
+    --out-slide-dir "$OUT_BASE/keyframes/slide" \
+    --settle-frames "${KEYFRAME_SETTLE_FRAMES:-4}" \
+    --stable-end-guard-frames "${KEYFRAME_STABLE_END_GUARD_FRAMES:-2}" \
+    --stable-lookahead-frames "${KEYFRAME_STABLE_LOOKAHEAD_FRAMES:-2}"
+  refresh_latest_link
+  step_done slide-detection
+fi
 
 TRANSCRIPT_JSON="$OUT_BASE/transcript_segments.json"
 TRANSCRIPT_CSV="$OUT_BASE/transcript_segments.csv"
 TRANSCRIPT_TRANSLATED_JSON="$OUT_BASE/transcript_segments_translated.json"
 TRANSCRIPT_TRANSLATED_CSV="$OUT_BASE/transcript_segments_translated.csv"
-echo "[ASR] Preparing transcription step ..."
-echo "[Step] transcription: run"
-step_start transcription
-case "${TRANSCRIPTION_PROVIDER:-whisper}" in
-  whisper)
-    run_whisper_transcription "faster-whisper"
-    ;;
-  google_chirp_3)
-    if [ -z "${GOOGLE_SPEECH_PROJECT_ID:-}" ]; then
-      echo "ERROR: GOOGLE_SPEECH_PROJECT_ID must not be empty when TRANSCRIPTION_PROVIDER=google_chirp_3." >&2
-      exit 1
-    fi
-    google_speech_fallback=0
-    if is_truthy "${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}"; then
-      google_speech_fallback=1
-    fi
-    TRANSCRIPT_ARGS=(
-      --video "$PHASE_DIR/$VIDEO_NAME"
-      --out-json "$TRANSCRIPT_JSON"
-      --out-csv "$TRANSCRIPT_CSV"
-      --project-id "${GOOGLE_SPEECH_PROJECT_ID}"
-      --location "${GOOGLE_SPEECH_LOCATION:-global}"
-      --model "${GOOGLE_SPEECH_MODEL:-chirp_3}"
-      --language-codes "${GOOGLE_SPEECH_LANGUAGE_CODES:-en-US}"
-      --chunk-sec "${GOOGLE_SPEECH_CHUNK_SEC:-55}"
-      --chunk-overlap-sec "${GOOGLE_SPEECH_CHUNK_OVERLAP_SEC:-0.75}"
-    )
-    step_detail transcription "google-chirp-3"
-    GOOGLE_SPEECH_LOG="$(mktemp)"
-    set +e
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}" 2>&1 | tee "$GOOGLE_SPEECH_LOG"
-    GOOGLE_SPEECH_EXIT="${PIPESTATUS[0]}"
-    set -e
-    if [ "${GOOGLE_SPEECH_EXIT:-1}" -ne 0 ]; then
-      if [ "$google_speech_fallback" = "1" ] && grep -Eq "\\[ASR\\] ERROR_CODE: (SERVICE_DISABLED|PERMISSION_DENIED)|SERVICE_DISABLED|PERMISSION_DENIED" "$GOOGLE_SPEECH_LOG"; then
-        echo "[ASR] Google Speech unavailable (permission/service). Falling back to faster-whisper ..."
-        run_whisper_transcription "google-chirp-3->faster-whisper-fallback"
-      else
-        rm -f "$GOOGLE_SPEECH_LOG"
-        exit "$GOOGLE_SPEECH_EXIT"
+
+if should_skip_step transcription; then
+  step_skip transcription "resumed"
+else
+  echo "[ASR] Preparing transcription step ..."
+  echo "[Step] transcription: run"
+  step_start transcription
+  case "${TRANSCRIPTION_PROVIDER:-whisper}" in
+    whisper)
+      run_whisper_transcription "faster-whisper"
+      ;;
+    google_chirp_3)
+      if [ -z "${GOOGLE_SPEECH_PROJECT_ID:-}" ]; then
+        echo "ERROR: GOOGLE_SPEECH_PROJECT_ID must not be empty when TRANSCRIPTION_PROVIDER=google_chirp_3." >&2
+        exit 1
       fi
-    fi
-    if [ "${GOOGLE_SPEECH_EXIT:-1}" -eq 0 ]; then
-      transcript_segment_count="$(transcript_nonempty_segment_count "$TRANSCRIPT_JSON")"
-      if [ "${transcript_segment_count:-0}" -le 0 ]; then
-        if [ "$google_speech_fallback" = "1" ]; then
-          echo "[ASR] Google Speech returned no transcript segments. Falling back to faster-whisper ..."
-          run_whisper_transcription "google-chirp-3-empty->faster-whisper-fallback"
+      google_speech_fallback=0
+      if is_truthy "${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}"; then
+        google_speech_fallback=1
+      fi
+      TRANSCRIPT_ARGS=(
+        --video "$PHASE_DIR/$VIDEO_NAME"
+        --out-json "$TRANSCRIPT_JSON"
+        --out-csv "$TRANSCRIPT_CSV"
+        --project-id "${GOOGLE_SPEECH_PROJECT_ID}"
+        --location "${GOOGLE_SPEECH_LOCATION:-global}"
+        --model "${GOOGLE_SPEECH_MODEL:-chirp_3}"
+        --language-codes "${GOOGLE_SPEECH_LANGUAGE_CODES:-en-US}"
+        --chunk-sec "${GOOGLE_SPEECH_CHUNK_SEC:-55}"
+        --chunk-overlap-sec "${GOOGLE_SPEECH_CHUNK_OVERLAP_SEC:-0.75}"
+      )
+      step_detail transcription "google-chirp-3"
+      GOOGLE_SPEECH_LOG="$(mktemp)"
+      set +e
+      "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}" 2>&1 | tee "$GOOGLE_SPEECH_LOG"
+      GOOGLE_SPEECH_EXIT="${PIPESTATUS[0]}"
+      set -e
+      if [ "${GOOGLE_SPEECH_EXIT:-1}" -ne 0 ]; then
+        if [ "$google_speech_fallback" = "1" ] && grep -Eq "\\[ASR\\] ERROR_CODE: (SERVICE_DISABLED|PERMISSION_DENIED)|SERVICE_DISABLED|PERMISSION_DENIED" "$GOOGLE_SPEECH_LOG"; then
+          echo "[ASR] Google Speech unavailable (permission/service). Falling back to faster-whisper ..."
+          run_whisper_transcription "google-chirp-3->faster-whisper-fallback"
         else
-          echo "ERROR: Google Speech returned no transcript segments." >&2
           rm -f "$GOOGLE_SPEECH_LOG"
-          exit 1
+          exit "$GOOGLE_SPEECH_EXIT"
         fi
       fi
-    fi
-    rm -f "$GOOGLE_SPEECH_LOG"
-    ;;
-  *)
-    echo "ERROR: TRANSCRIPTION_PROVIDER must be one of: whisper, google_chirp_3" >&2
-    exit 1
-    ;;
-esac
-step_done transcription
-echo "[ASR] Transcription step finished."
+      if [ "${GOOGLE_SPEECH_EXIT:-1}" -eq 0 ]; then
+        transcript_segment_count="$(transcript_nonempty_segment_count "$TRANSCRIPT_JSON")"
+        if [ "${transcript_segment_count:-0}" -le 0 ]; then
+          if [ "$google_speech_fallback" = "1" ]; then
+            echo "[ASR] Google Speech returned no transcript segments. Falling back to faster-whisper ..."
+            run_whisper_transcription "google-chirp-3-empty->faster-whisper-fallback"
+          else
+            echo "ERROR: Google Speech returned no transcript segments." >&2
+            rm -f "$GOOGLE_SPEECH_LOG"
+            exit 1
+          fi
+        fi
+      fi
+      rm -f "$GOOGLE_SPEECH_LOG"
+      ;;
+    *)
+      echo "ERROR: TRANSCRIPTION_PROVIDER must be one of: whisper, google_chirp_3" >&2
+      exit 1
+      ;;
+  esac
+  step_done transcription
+  echo "[ASR] Transcription step finished."
+fi
 
-if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
+if should_skip_step text-translate; then
+  step_skip text-translate "resumed"
+elif [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
   if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
     echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when transcript translation is enabled." >&2
     exit 1
@@ -487,23 +530,28 @@ fi
 
 SLIDE_TEXT_MAP_JSON="$OUT_BASE/slide_text_map.json"
 SLIDE_TEXT_MAP_CSV="$OUT_BASE/slide_text_map.csv"
-echo "[ASR] Mapping transcript to slide windows ..."
-echo "[Step] transcript-mapping: run"
-step_start transcript-mapping
-step_detail transcript-mapping "map-transcript-to-slides"
-MAP_TRANSCRIPT_ARGS=(
-  --video "$PHASE_DIR/$VIDEO_NAME" \
-  --slide-csv "$OUT_BASE/slide_changes.csv" \
-  --transcript-json "$TRANSCRIPT_JSON" \
-  --out-json "$SLIDE_TEXT_MAP_JSON" \
-  --out-csv "$SLIDE_TEXT_MAP_CSV"
-)
-if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
-  MAP_TRANSCRIPT_ARGS+=(--translated-transcript-json "$TRANSCRIPT_TRANSLATED_JSON")
+
+if should_skip_step transcript-mapping; then
+  step_skip transcript-mapping "resumed"
+else
+  echo "[ASR] Mapping transcript to slide windows ..."
+  echo "[Step] transcript-mapping: run"
+  step_start transcript-mapping
+  step_detail transcript-mapping "map-transcript-to-slides"
+  MAP_TRANSCRIPT_ARGS=(
+    --video "$PHASE_DIR/$VIDEO_NAME" \
+    --slide-csv "$OUT_BASE/slide_changes.csv" \
+    --transcript-json "$TRANSCRIPT_JSON" \
+    --out-json "$SLIDE_TEXT_MAP_JSON" \
+    --out-csv "$SLIDE_TEXT_MAP_CSV"
+  )
+  if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
+    MAP_TRANSCRIPT_ARGS+=(--translated-transcript-json "$TRANSCRIPT_TRANSLATED_JSON")
+  fi
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/map_transcript_to_slides.py" "${MAP_TRANSCRIPT_ARGS[@]}"
+  step_done transcript-mapping
+  echo "[ASR] Slide text mapping finished."
 fi
-"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/map_transcript_to_slides.py" "${MAP_TRANSCRIPT_ARGS[@]}"
-step_done transcript-mapping
-echo "[ASR] Slide text mapping finished."
 
 SLIDE_TEXT_MAP_FINAL_JSON="$OUT_BASE/slide_text_map_final.json"
 SLIDE_TEXT_MAP_FINAL_CSV="$OUT_BASE/slide_text_map_final.csv"
@@ -598,32 +646,38 @@ if [ -f "$STAGE1_FILE" ]; then
   FILTER_ARGS+=(--stage1-file "$STAGE1_FILE")
 fi
 
-echo "[ASR] Filtering speaker-only slides and merging transcript ..."
-step_start finalize-slides
-step_detail finalize-slides "speaker-filter-and-final-export"
-rm -f "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp" "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp" "$SLIDE_FILTER_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV.__tmp"
-rm -rf "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_FULL_DIR.__tmp"
-"$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
-publish_file "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp" "$SLIDE_TEXT_MAP_FINAL_JSON"
-publish_file "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp" "$SLIDE_TEXT_MAP_FINAL_CSV"
-publish_file "$SLIDE_FILTER_MANIFEST_CSV.__tmp" "$SLIDE_FILTER_MANIFEST_CSV"
-publish_file "$FINAL_SOURCE_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV"
-publish_dir "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR"
-publish_dir "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_DIR"
-publish_dir "$FINAL_FULL_DIR.__tmp" "$FINAL_FULL_DIR"
-if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
-  cp "$SLIDE_TEXT_MAP_FINAL_JSON" "$TEXT_TRANSLATED_JSON.__tmp"
-  cp "$SLIDE_TEXT_MAP_FINAL_CSV" "$TEXT_TRANSLATED_CSV.__tmp"
-  publish_file "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_JSON"
-  publish_file "$TEXT_TRANSLATED_CSV.__tmp" "$TEXT_TRANSLATED_CSV"
+if should_skip_step finalize-slides; then
+  step_skip finalize-slides "resumed"
+else
+  echo "[ASR] Filtering speaker-only slides and merging transcript ..."
+  step_start finalize-slides
+  step_detail finalize-slides "speaker-filter-and-final-export"
+  rm -f "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp" "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp" "$SLIDE_FILTER_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV.__tmp"
+  rm -rf "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_FULL_DIR.__tmp"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/filter_and_merge_speaker_only.py" "${FILTER_ARGS[@]}"
+  publish_file "$SLIDE_TEXT_MAP_FINAL_JSON.__tmp" "$SLIDE_TEXT_MAP_FINAL_JSON"
+  publish_file "$SLIDE_TEXT_MAP_FINAL_CSV.__tmp" "$SLIDE_TEXT_MAP_FINAL_CSV"
+  publish_file "$SLIDE_FILTER_MANIFEST_CSV.__tmp" "$SLIDE_FILTER_MANIFEST_CSV"
+  publish_file "$FINAL_SOURCE_MANIFEST_CSV.__tmp" "$FINAL_SOURCE_MANIFEST_CSV"
+  publish_dir "$FINAL_SLIDE_RAW_DIR.__tmp" "$FINAL_SLIDE_RAW_DIR"
+  publish_dir "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_DIR"
+  publish_dir "$FINAL_FULL_DIR.__tmp" "$FINAL_FULL_DIR"
+  if [ -f "$TRANSCRIPT_TRANSLATED_JSON" ]; then
+    cp "$SLIDE_TEXT_MAP_FINAL_JSON" "$TEXT_TRANSLATED_JSON.__tmp"
+    cp "$SLIDE_TEXT_MAP_FINAL_CSV" "$TEXT_TRANSLATED_CSV.__tmp"
+    publish_file "$TEXT_TRANSLATED_JSON.__tmp" "$TEXT_TRANSLATED_JSON"
+    publish_file "$TEXT_TRANSLATED_CSV.__tmp" "$TEXT_TRANSLATED_CSV"
+  fi
+  step_done finalize-slides
+  if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "local" ]; then
+    step_done edit "local cleanup applied within finalize-slides"
+  fi
+  echo "[ASR] Speaker-only filtering finished."
 fi
-step_done finalize-slides
-if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "local" ]; then
-  step_done edit "local cleanup applied within finalize-slides"
-fi
-echo "[ASR] Speaker-only filtering finished."
 
-if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
+if should_skip_step edit; then
+  step_skip edit "resumed"
+elif [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
   if [ -z "${GEMINI_API_KEY:-}" ]; then
     echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GEMINI_API_KEY (Gemini Developer API)." >&2
     exit 1
@@ -653,7 +707,9 @@ elif [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "none" ]; then
   step_skip edit "mode=none"
 fi
 
-if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
+if should_skip_step translate; then
+  step_skip translate "resumed"
+elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
   case "$FINAL_SLIDE_TRANSLATION_MODE" in
     none)
       step_skip translate "mode=none"
@@ -798,7 +854,9 @@ else
   step_skip translate "disabled"
 fi
 
-if [ "$RUN_STEP_UPSCALE" = "1" ]; then
+if should_skip_step upscale; then
+  step_skip upscale "resumed"
+elif [ "$RUN_STEP_UPSCALE" = "1" ]; then
   case "$FINAL_SLIDE_UPSCALE_MODE" in
     none)
       step_skip upscale "mode=none"
@@ -893,7 +951,9 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "0" ]; then
   TTS_LANGUAGE_LABEL="source language of the text"
 fi
 
-if [ "$RUN_STEP_TTS" = "1" ]; then
+if should_skip_step tts; then
+  step_skip tts "resumed"
+elif [ "$RUN_STEP_TTS" = "1" ]; then
   if [ -z "${GCLOUD_TTS_PROJECTID:-}" ]; then
     echo "ERROR: TTS requires GCLOUD_TTS_PROJECTID (or GOOGLE_SPEECH_PROJECT_ID) in the environment/config." >&2
     exit 1
@@ -925,7 +985,14 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
   publish_file "$TTS_MANIFEST_CSV.__tmp" "$TTS_MANIFEST_CSV"
   step_done tts
   echo "[TTS] Voiceover generation finished."
+else
+  echo "[Step] tts: skipped"
+  step_skip tts "disabled"
+fi
 
+if should_skip_step tts-alignment; then
+  step_skip tts-alignment "resumed"
+elif [ "$RUN_STEP_TTS" = "1" ]; then
   echo "[TTSAlign] Aligning transcript TTS back to transcript segments ..."
   step_start tts-alignment
   step_detail tts-alignment "${TTS_ALIGNMENT_WHISPER_MODEL:-small}"
@@ -948,8 +1015,6 @@ if [ "$RUN_STEP_TTS" = "1" ]; then
   step_done tts-alignment
   echo "[TTSAlign] Alignment finished."
 else
-  echo "[Step] tts: skipped"
-  step_skip tts "disabled"
   step_skip tts-alignment "disabled"
 fi
 
@@ -970,7 +1035,9 @@ VIDEO_LANG_SLUG="$(lang_slug "$FINAL_SLIDE_TARGET_LANGUAGE")"
 VIDEO_EXPORT_MP4="$VIDEO_EXPORT_DIR/final_${VIDEO_LANG_SLUG}.mp4"
 VIDEO_EXPORT_SRT="$VIDEO_EXPORT_DIR/final_${VIDEO_LANG_SLUG}.srt"
 
-if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
+if should_skip_step video-export; then
+  step_skip video-export "resumed"
+elif [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
   echo "[VideoExport] Building narrated slide video from $EXPORT_IMAGE_LABEL images ..."
   step_start video-export
   step_detail video-export "$EXPORT_IMAGE_LABEL"

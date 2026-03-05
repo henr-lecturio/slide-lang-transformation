@@ -12,6 +12,7 @@ export const el = {
   saveSettings: document.getElementById("save-settings"),
   openStatus: document.getElementById("open-status"),
   stopRun: document.getElementById("stop-run"),
+  retryRun: document.getElementById("retry-run"),
   statusSummary: document.getElementById("status-summary"),
   runSteps: document.getElementById("run-steps"),
   roiX0: document.getElementById("roi_x0"),
