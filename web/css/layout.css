@@ -366,6 +366,24 @@ h3 {
   flex-wrap: wrap;
 }
 
+.toggle-small {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  font-size: 1rem;
+  width: fit-content;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.toggle-small input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  cursor: pointer;
+}
+
 .lab-toolbar {
   display: flex;
   align-items: center;

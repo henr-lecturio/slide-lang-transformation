@@ -205,7 +205,7 @@
 }
 
 .slide-text-main {
-  font-size: 1rem;
+  font-size: 1.2rem;
   white-space: pre-wrap;
   line-height: 1.7;
 }
@@ -216,7 +216,7 @@
 }
 
 .slide-text-original {
-  font-size: 0.75rem;
+  font-size: 1rem;
   white-space: pre-wrap;
   line-height: 1.45;
   color: var(--text-muted);
