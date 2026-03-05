@@ -193,13 +193,33 @@
 }
 
 .slide-text {
-  font-size: 1.25rem;
   min-height: 100%;
   padding: 16px 18px;
   border-radius: var(--radius-sm);
   background: var(--surface-alt);
+  display: grid;
+  align-content: start;
+  gap: 10px;
   white-space: pre-wrap;
   line-height: 1.7;
+}
+
+.slide-text-main {
+  font-size: 1rem;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.slide-text-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.slide-text-original {
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .slide-missing {

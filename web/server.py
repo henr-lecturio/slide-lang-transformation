@@ -457,6 +457,24 @@ def resolve_gemini_location_from_mapping(values: dict | None = None) -> str:
     return resolve_cloud_gemini_location(location_hint)
 
 
+def is_gemini_text_translate_model(model: str) -> bool:
+    return str(model or "").strip().lower().startswith("gemini-")
+
+
+def resolve_transcript_translate_model_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    model = _map_get(mapping, "TRANSCRIPT_TRANSLATE_MODEL")
+    return model or "gemini-2.5-pro"
+
+
+def resolve_cloud_translate_model_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    model = _map_get(mapping, "GOOGLE_TRANSLATE_MODEL")
+    if not model or is_gemini_text_translate_model(model):
+        return "general/translation-llm"
+    return model
+
+
 load_local_env(LOCAL_ENV_PATH)
 
 
@@ -1366,6 +1384,14 @@ def start_export_lab_job(run_id: str, overrides: dict | None = None) -> tuple[bo
         str(_export_lab_value_float(overrides, "video_export_thumbnail_duration_sec", float(env.get("VIDEO_EXPORT_THUMBNAIL_DURATION_SEC", "2.0") or "2.0"))),
         "--thumbnail-fade-sec",
         str(_export_lab_value_float(overrides, "video_export_thumbnail_fade_sec", float(env.get("VIDEO_EXPORT_THUMBNAIL_FADE_SEC", "0.3") or "0.3"))),
+        "--thumbnail-text-leadin-sec",
+        str(
+            _export_lab_value_float(
+                overrides,
+                "video_export_thumbnail_text_leadin_sec",
+                float(env.get("VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC", "1.0") or "1.0"),
+            )
+        ),
         "--intro-color",
         _export_lab_value_str(overrides, "video_export_intro_color", env.get("VIDEO_EXPORT_INTRO_COLOR", "white") or "white"),
         "--outro-hold-sec",
@@ -1732,7 +1758,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                 "--translate-location",
                 str(env.get("GOOGLE_TRANSLATE_LOCATION", "us-central1") or "us-central1"),
                 "--translate-model",
-                str(env.get("GOOGLE_TRANSLATE_MODEL", "general/translation-llm") or "general/translation-llm"),
+                resolve_cloud_translate_model_from_mapping(env),
                 "--font-path",
                 str(font_path),
                 "--style-config-json",
@@ -2283,8 +2309,13 @@ def start_run() -> tuple[bool, str]:
             return False, "SLIDE_TRANSLATE_LAYOUT_MAX_MS must be an integer >= 0"
     if transcription_provider == "google_chirp_3" and not (env.get("GOOGLE_SPEECH_PROJECT_ID", "") or "").strip():
         return False, "GOOGLE_SPEECH_PROJECT_ID must be set when TRANSCRIPTION_PROVIDER=google_chirp_3"
-    if run_step_text_translate and not resolve_translate_project_id_from_mapping(env):
-        return False, "GCLOUD_TRANSLATE_PROJECTID must be set when Transcript Translate is enabled"
+    if run_step_text_translate:
+        transcript_translate_model = resolve_transcript_translate_model_from_mapping(env)
+        if is_gemini_text_translate_model(transcript_translate_model):
+            if not gemini_api_key:
+                return False, "GEMINI_API_KEY must be set when Transcript Translate uses gemini_* models"
+        elif not resolve_translate_project_id_from_mapping(env):
+            return False, "GCLOUD_TRANSLATE_PROJECTID must be set when Transcript Translate uses Cloud Translation"
     if run_step_tts and not resolve_tts_project_id_from_mapping(env):
         return False, "GCLOUD_TTS_PROJECTID must be set when TTS is enabled"
     with RUN_LOCK:
@@ -2390,6 +2421,55 @@ def make_silent_wav_bytes(duration_sec: float = 1.2, sample_rate: int = 16000) -
         wf.setframerate(sample_rate)
         wf.writeframes(b"\x00\x00" * frame_count)
     return payload.getvalue()
+
+
+def make_transcription_health_wav_bytes(sample_rate: int = 16000) -> bytes:
+    filter_expr = "flite=text='hello this is a transcription health check':voice=slt"
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        filter_expr,
+        "-t",
+        "2.0",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "s16le",
+        "pipe:1",
+    ]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except Exception:
+        return make_silent_wav_bytes(sample_rate=sample_rate)
+    if result.returncode == 0 and result.stdout:
+        frame_bytes = result.stdout[: (len(result.stdout) // 2) * 2]
+        payload = io.BytesIO()
+        with wave.open(payload, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(frame_bytes)
+        return payload.getvalue()
+    return make_silent_wav_bytes(sample_rate=sample_rate)
+
+
+def count_nonempty_transcription_results(response) -> int:
+    count = 0
+    for result in getattr(response, "results", []) or []:
+        alternatives = getattr(result, "alternatives", []) or []
+        for alternative in alternatives:
+            transcript = str(getattr(alternative, "transcript", "") or "").strip()
+            if transcript:
+                count += 1
+                break
+    return count
 
 
 def ensure_gemini_client(values: dict | None = None):
@@ -2536,10 +2616,29 @@ def run_transcription_health_check(payload: dict) -> dict:
         request = cloud_speech.RecognizeRequest(
             recognizer=recognizer,
             config=config,
-            content=make_silent_wav_bytes(),
+            content=make_transcription_health_wav_bytes(),
         )
         response = client.recognize(request=request)
         latency_ms = int(round((time.perf_counter() - start) * 1000))
+        results_count = len(getattr(response, "results", []) or [])
+        nonempty_results_count = count_nonempty_transcription_results(response)
+        if nonempty_results_count <= 0:
+            return {
+                "ok": False,
+                "error_type": "NoResults",
+                "error_message": (
+                    "Speech API reachable but returned no transcript for the health sample. "
+                    "Check model/location compatibility and project quota."
+                ),
+                "provider": provider,
+                "project_id": project_id,
+                "location": location,
+                "model": model,
+                "language_codes": language_codes,
+                "latency_ms": latency_ms,
+                "results_count": results_count,
+                "nonempty_results_count": nonempty_results_count,
+            }
         return {
             "ok": True,
             "provider": provider,
@@ -2548,7 +2647,8 @@ def run_transcription_health_check(payload: dict) -> dict:
             "model": model,
             "language_codes": language_codes,
             "latency_ms": latency_ms,
-            "results_count": len(getattr(response, "results", []) or []),
+            "results_count": results_count,
+            "nonempty_results_count": nonempty_results_count,
             "message": "Transcription API reachable.",
         }
     except Exception as exc:  # noqa: BLE001
@@ -2671,7 +2771,7 @@ def run_slide_translate_health_check(payload: dict) -> dict:
         vision_project_id = resolve_vision_project_id_from_mapping(merged)
         translate_project_id = resolve_translate_project_id_from_mapping(merged) or vision_project_id
         translate_location = str(merged.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip() or "us-central1"
-        translate_model = str(merged.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip() or "general/translation-llm"
+        translate_model = resolve_cloud_translate_model_from_mapping(merged)
         source_language_code = str(merged.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
         if not vision_project_id:
             raise ValueError("GCLOUD_VISION_PROJECTID must not be empty")
@@ -2735,49 +2835,94 @@ def run_slide_translate_health_check(payload: dict) -> dict:
 
 
 def run_text_translate_health_check(payload: dict) -> dict:
-    project_id = _first_non_empty(
-        payload.get("GCLOUD_TRANSLATE_PROJECTID", ""),
-        payload.get("GOOGLE_TRANSLATE_PROJECT_ID", ""),
-    )
-    location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip()
-    model = str(payload.get("GOOGLE_TRANSLATE_MODEL", "") or "").strip()
+    model = str(
+        payload.get("TRANSCRIPT_TRANSLATE_MODEL", payload.get("GOOGLE_TRANSLATE_MODEL", ""))
+        or ""
+    ).strip()
     source_language_code = str(payload.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
     target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
-    if not project_id:
-        raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty")
-    if not location:
-        raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
     if not model:
-        raise ValueError("GOOGLE_TRANSLATE_MODEL must not be empty")
+        raise ValueError("TRANSCRIPT_TRANSLATE_MODEL must not be empty")
     if not target_language:
         raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
+    provider = "gemini_api_key" if is_gemini_text_translate_model(model) else "google_cloud_translate"
 
     start = time.perf_counter()
     try:
-        client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
-            project_id,
-            location,
-        )
         target_language_code, _tts_language_code = resolve_target_language_codes(target_language)
         glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
         source_text = "Code of Conduct and Compliance training starts on Monday."
         protected_text, placeholder_map, term_hits = apply_termbase_placeholders(source_text, glossary_entries)
-        translated = translate_texts_llm(
-            client,
-            project_id=resolved_project,
-            location=resolved_location,
-            model=model,
-            contents=[protected_text],
-            target_language_code=target_language_code,
-            source_language_code=source_language_code,
-        )
-        if len(translated) != 1:
-            raise RuntimeError("Cloud Translation health check returned an unexpected translation count.")
-        translated_text = str(translated[0] or "").strip()
+        resolved_project = ""
+        resolved_location = ""
+        translated_text = ""
+        if provider == "google_cloud_translate":
+            project_id = _first_non_empty(
+                payload.get("GCLOUD_TRANSLATE_PROJECTID", ""),
+                payload.get("GOOGLE_TRANSLATE_PROJECT_ID", ""),
+            )
+            location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip()
+            if not project_id:
+                raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty when using Cloud Translation")
+            if not location:
+                raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty when using Cloud Translation")
+            client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
+                project_id,
+                location,
+            )
+            translated = translate_texts_llm(
+                client,
+                project_id=resolved_project,
+                location=resolved_location,
+                model=model,
+                contents=[protected_text],
+                target_language_code=target_language_code,
+                source_language_code=source_language_code,
+            )
+            if len(translated) != 1:
+                raise RuntimeError("Cloud Translation health check returned an unexpected translation count.")
+            translated_text = str(translated[0] or "").strip()
+        else:
+            merged = parse_env(CONFIG_PATH)
+            if isinstance(payload, dict):
+                merged.update(payload)
+            client, _types, resolved_project, _default_project, resolved_location = ensure_gemini_client(merged)
+            response = client.models.generate_content(
+                model=model,
+                contents=[
+                    "Translate the source text to the target language. Preserve placeholders like __TERM_0001__ exactly. "
+                    "Return strict JSON only: {\"translated_text\":\"...\"}",
+                    (
+                        f"Target language: {target_language}\n"
+                        f"Target language code: {target_language_code}\n"
+                        f"Source language code: {source_language_code or '-'}\n"
+                        f"Source text: {json.dumps(protected_text, ensure_ascii=False)}"
+                    ),
+                ],
+                config={"response_mime_type": "application/json"},
+            )
+            raw = strip_code_fences(extract_gemini_response_text(response))
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Failed to parse Gemini translation JSON: {raw[:220]}") from exc
+            if isinstance(parsed, dict):
+                translated_text = str(parsed.get("translated_text", "") or "").strip()
+                if not translated_text:
+                    translations = parsed.get("translations")
+                    if isinstance(translations, list) and translations:
+                        first = translations[0]
+                        if isinstance(first, dict):
+                            translated_text = str(first.get("translated_text", "") or "").strip()
+            else:
+                translated_text = ""
+            if not translated_text:
+                raise RuntimeError("Gemini translation JSON did not include translated_text.")
         translated_text = restore_termbase_placeholders(translated_text, placeholder_map)
         latency_ms = int(round((time.perf_counter() - start) * 1000))
         return {
             "ok": True,
+            "provider": provider,
             "project_id_used": resolved_project,
             "location": resolved_location,
             "model": model,
@@ -3064,6 +3209,7 @@ class Handler(BaseHTTPRequestHandler):
                     "GCLOUD_TRANSLATE_PROJECTID": resolve_translate_project_id_from_mapping(env),
                     "GOOGLE_TRANSLATE_LOCATION": env.get("GOOGLE_TRANSLATE_LOCATION", "us-central1"),
                     "GOOGLE_TRANSLATE_MODEL": env.get("GOOGLE_TRANSLATE_MODEL", "general/translation-llm"),
+                    "TRANSCRIPT_TRANSLATE_MODEL": env.get("TRANSCRIPT_TRANSLATE_MODEL", "gemini-2.5-pro"),
                     "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": env.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", ""),
                     "TRANSLATION_TERMBASE_CSV": read_text_file(TRANSLATION_TERMBASE_PATH).rstrip("\n"),
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
@@ -3098,6 +3244,7 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_INTRO_FADE_SEC", "0.4")),
                     "VIDEO_EXPORT_THUMBNAIL_DURATION_SEC": float(env.get("VIDEO_EXPORT_THUMBNAIL_DURATION_SEC", "2.0")),
                     "VIDEO_EXPORT_THUMBNAIL_FADE_SEC": float(env.get("VIDEO_EXPORT_THUMBNAIL_FADE_SEC", "0.3")),
+                    "VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC": float(env.get("VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC", "1.0")),
                     "VIDEO_EXPORT_INTRO_COLOR": env.get("VIDEO_EXPORT_INTRO_COLOR", "white"),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(env.get("VIDEO_EXPORT_OUTRO_HOLD_SEC", "1.5")),
                     "VIDEO_EXPORT_OUTRO_FADE_SEC": float(env.get("VIDEO_EXPORT_OUTRO_FADE_SEC", "1.5")),
@@ -3313,6 +3460,9 @@ class Handler(BaseHTTPRequestHandler):
                     ).strip(),
                     "GOOGLE_TRANSLATE_LOCATION": str(data["GOOGLE_TRANSLATE_LOCATION"]).strip(),
                     "GOOGLE_TRANSLATE_MODEL": str(data["GOOGLE_TRANSLATE_MODEL"]).strip(),
+                    "TRANSCRIPT_TRANSLATE_MODEL": str(
+                        data.get("TRANSCRIPT_TRANSLATE_MODEL", "gemini-2.5-pro")
+                    ).strip(),
                     "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": str(data["GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE"]).strip(),
                     "GEMINI_TTS_MODEL": str(data["GEMINI_TTS_MODEL"]).strip(),
                     "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
@@ -3341,6 +3491,7 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_INTRO_FADE_SEC": float(data["VIDEO_EXPORT_INTRO_FADE_SEC"]),
                     "VIDEO_EXPORT_THUMBNAIL_DURATION_SEC": float(data["VIDEO_EXPORT_THUMBNAIL_DURATION_SEC"]),
                     "VIDEO_EXPORT_THUMBNAIL_FADE_SEC": float(data["VIDEO_EXPORT_THUMBNAIL_FADE_SEC"]),
+                    "VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC": float(data["VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC"]),
                     "VIDEO_EXPORT_INTRO_COLOR": str(data["VIDEO_EXPORT_INTRO_COLOR"]).strip(),
                     "VIDEO_EXPORT_OUTRO_HOLD_SEC": float(data["VIDEO_EXPORT_OUTRO_HOLD_SEC"]),
                     "VIDEO_EXPORT_OUTRO_FADE_SEC": float(data["VIDEO_EXPORT_OUTRO_FADE_SEC"]),
@@ -3461,12 +3612,17 @@ class Handler(BaseHTTPRequestHandler):
                     normalize_slide_translate_styles_json(slide_translate_styles_json)
                 if cfg["SLIDE_TRANSLATE_MAX_FONT_SIZE"] < 8:
                     raise ValueError("SLIDE_TRANSLATE_MAX_FONT_SIZE must be >= 8")
-                if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and not (
+                if not cfg["TRANSCRIPT_TRANSLATE_MODEL"]:
+                    raise ValueError("TRANSCRIPT_TRANSLATE_MODEL must not be empty")
+                transcript_uses_gemini = is_gemini_text_translate_model(cfg["TRANSCRIPT_TRANSLATE_MODEL"])
+                if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and not transcript_uses_gemini and not (
                     cfg["GCLOUD_TRANSLATE_PROJECTID"]
                     or cfg["GCLOUD_TTS_PROJECTID"]
                     or cfg["GOOGLE_SPEECH_PROJECT_ID"]
                 ):
-                    raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty when Transcript Translate is enabled")
+                    raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty when Transcript Translate uses Cloud Translation")
+                if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and transcript_uses_gemini and not resolve_gemini_api_key_from_mapping(merged_cfg):
+                    raise ValueError("GEMINI_API_KEY must be set in .env.local when Transcript Translate uses gemini_* models")
                 if not cfg["GOOGLE_TRANSLATE_LOCATION"]:
                     raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
                 if not cfg["GOOGLE_TRANSLATE_MODEL"]:
@@ -3533,6 +3689,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("VIDEO_EXPORT_THUMBNAIL_DURATION_SEC must be > 0")
                 if cfg["VIDEO_EXPORT_THUMBNAIL_FADE_SEC"] < 0:
                     raise ValueError("VIDEO_EXPORT_THUMBNAIL_FADE_SEC must be >= 0")
+                if cfg["VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC"] < 0:
+                    raise ValueError("VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC must be >= 0")
                 if not cfg["VIDEO_EXPORT_INTRO_COLOR"]:
                     raise ValueError("VIDEO_EXPORT_INTRO_COLOR must not be empty")
                 if cfg["VIDEO_EXPORT_OUTRO_HOLD_SEC"] < 0:

@@ -75,6 +75,7 @@ GCLOUD_VISION_PROJECTID="${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-
 GCLOUD_TRANSLATE_PROJECTID="${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}}}}"
 GOOGLE_TRANSLATE_LOCATION="${GOOGLE_TRANSLATE_LOCATION:-us-central1}"
 GOOGLE_TRANSLATE_MODEL="${GOOGLE_TRANSLATE_MODEL:-general/translation-llm}"
+TRANSCRIPT_TRANSLATE_MODEL="${TRANSCRIPT_TRANSLATE_MODEL:-gemini-2.5-pro}"
 GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE="${GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE:-}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
 GCLOUD_VERTEX_PROJECTID="${GCLOUD_VERTEX_PROJECTID:-${GOOGLE_GEMINI_PROJECT_ID:-${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}}}}}}"
@@ -120,6 +121,7 @@ VIDEO_EXPORT_INTRO_WHITE_SEC="${VIDEO_EXPORT_INTRO_WHITE_SEC:-1.0}"
 VIDEO_EXPORT_INTRO_FADE_SEC="${VIDEO_EXPORT_INTRO_FADE_SEC:-0.4}"
 VIDEO_EXPORT_THUMBNAIL_DURATION_SEC="${VIDEO_EXPORT_THUMBNAIL_DURATION_SEC:-2.0}"
 VIDEO_EXPORT_THUMBNAIL_FADE_SEC="${VIDEO_EXPORT_THUMBNAIL_FADE_SEC:-0.3}"
+VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC="${VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC:-1.0}"
 VIDEO_EXPORT_INTRO_COLOR="${VIDEO_EXPORT_INTRO_COLOR:-white}"
 VIDEO_EXPORT_OUTRO_HOLD_SEC="${VIDEO_EXPORT_OUTRO_HOLD_SEC:-1.5}"
 VIDEO_EXPORT_OUTRO_FADE_SEC="${VIDEO_EXPORT_OUTRO_FADE_SEC:-1.5}"
@@ -206,6 +208,69 @@ publish_file() {
   rm -f "$final_file"
   mv "$tmp_file" "$final_file"
   refresh_latest_link
+}
+
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|True|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_gemini_text_translate_model() {
+  local model_text="${1:-}"
+  model_text="${model_text,,}"
+  case "$model_text" in
+    gemini-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_whisper_transcription() {
+  local detail="${1:-faster-whisper}"
+  local -a whisper_args=(
+    --video "$PHASE_DIR/$VIDEO_NAME"
+    --out-json "$TRANSCRIPT_JSON"
+    --out-csv "$TRANSCRIPT_CSV"
+    --model "${WHISPER_MODEL:-medium}"
+    --device "${WHISPER_DEVICE:-cuda}"
+    --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
+  )
+  if [ -n "${WHISPER_LANGUAGE:-}" ]; then
+    whisper_args+=(--language "$WHISPER_LANGUAGE")
+  fi
+  step_detail transcription "$detail"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_whisper.py" "${whisper_args[@]}"
+}
+
+transcript_nonempty_segment_count() {
+  local transcript_json="$1"
+  if [ ! -f "$transcript_json" ]; then
+    echo 0
+    return
+  fi
+  "$PYTHON_BIN" - "$transcript_json" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+count = 0
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    segments = payload.get("segments") if isinstance(payload, dict) else None
+    if isinstance(segments, list):
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            text = str(segment.get("text") or "").strip()
+            translated = str(segment.get("translated_text") or "").strip()
+            if text or translated:
+                count += 1
+except Exception:
+    count = 0
+print(count)
+PY
 }
 
 VIDEO_PATH_RESOLVED="${VIDEO_PATH_ARG:-${VIDEO_PATH:-}}"
@@ -310,24 +375,16 @@ echo "[Step] transcription: run"
 step_start transcription
 case "${TRANSCRIPTION_PROVIDER:-whisper}" in
   whisper)
-    TRANSCRIPT_ARGS=(
-      --video "$PHASE_DIR/$VIDEO_NAME"
-      --out-json "$TRANSCRIPT_JSON"
-      --out-csv "$TRANSCRIPT_CSV"
-      --model "${WHISPER_MODEL:-medium}"
-      --device "${WHISPER_DEVICE:-cuda}"
-      --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
-    )
-    if [ -n "${WHISPER_LANGUAGE:-}" ]; then
-      TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
-    fi
-    step_detail transcription "faster-whisper"
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+    run_whisper_transcription "faster-whisper"
     ;;
   google_chirp_3)
     if [ -z "${GOOGLE_SPEECH_PROJECT_ID:-}" ]; then
       echo "ERROR: GOOGLE_SPEECH_PROJECT_ID must not be empty when TRANSCRIPTION_PROVIDER=google_chirp_3." >&2
       exit 1
+    fi
+    google_speech_fallback=0
+    if is_truthy "${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}"; then
+      google_speech_fallback=1
     fi
     TRANSCRIPT_ARGS=(
       --video "$PHASE_DIR/$VIDEO_NAME"
@@ -347,28 +404,25 @@ case "${TRANSCRIPTION_PROVIDER:-whisper}" in
     GOOGLE_SPEECH_EXIT="${PIPESTATUS[0]}"
     set -e
     if [ "${GOOGLE_SPEECH_EXIT:-1}" -ne 0 ]; then
-      google_speech_fallback=0
-      case "${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}" in
-        1|true|TRUE|True|yes|YES|on|ON) google_speech_fallback=1 ;;
-      esac
       if [ "$google_speech_fallback" = "1" ] && grep -Eq "\\[ASR\\] ERROR_CODE: (SERVICE_DISABLED|PERMISSION_DENIED)|SERVICE_DISABLED|PERMISSION_DENIED" "$GOOGLE_SPEECH_LOG"; then
         echo "[ASR] Google Speech unavailable (permission/service). Falling back to faster-whisper ..."
-        TRANSCRIPT_ARGS=(
-          --video "$PHASE_DIR/$VIDEO_NAME"
-          --out-json "$TRANSCRIPT_JSON"
-          --out-csv "$TRANSCRIPT_CSV"
-          --model "${WHISPER_MODEL:-medium}"
-          --device "${WHISPER_DEVICE:-cuda}"
-          --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
-        )
-        if [ -n "${WHISPER_LANGUAGE:-}" ]; then
-          TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
-        fi
-        step_detail transcription "google-chirp-3->faster-whisper-fallback"
-        "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+        run_whisper_transcription "google-chirp-3->faster-whisper-fallback"
       else
         rm -f "$GOOGLE_SPEECH_LOG"
         exit "$GOOGLE_SPEECH_EXIT"
+      fi
+    fi
+    if [ "${GOOGLE_SPEECH_EXIT:-1}" -eq 0 ]; then
+      transcript_segment_count="$(transcript_nonempty_segment_count "$TRANSCRIPT_JSON")"
+      if [ "${transcript_segment_count:-0}" -le 0 ]; then
+        if [ "$google_speech_fallback" = "1" ]; then
+          echo "[ASR] Google Speech returned no transcript segments. Falling back to faster-whisper ..."
+          run_whisper_transcription "google-chirp-3-empty->faster-whisper-fallback"
+        else
+          echo "ERROR: Google Speech returned no transcript segments." >&2
+          rm -f "$GOOGLE_SPEECH_LOG"
+          exit 1
+        fi
       fi
     fi
     rm -f "$GOOGLE_SPEECH_LOG"
@@ -382,15 +436,30 @@ step_done transcription
 echo "[ASR] Transcription step finished."
 
 if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
-  if [ -z "${GCLOUD_TRANSLATE_PROJECTID:-}" ]; then
-    echo "ERROR: transcript translation requires GCLOUD_TRANSLATE_PROJECTID (or GCLOUD_TTS_PROJECTID / GOOGLE_SPEECH_PROJECT_ID)." >&2
-    exit 1
-  fi
   if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then
     echo "ERROR: FINAL_SLIDE_TARGET_LANGUAGE must not be empty when transcript translation is enabled." >&2
     exit 1
   fi
-  echo "[TranscriptTranslate] Translating transcript segments to $FINAL_SLIDE_TARGET_LANGUAGE with model $GOOGLE_TRANSLATE_MODEL ..."
+  TRANSCRIPT_TRANSLATE_PROVIDER="google_cloud_translate"
+  if is_gemini_text_translate_model "${TRANSCRIPT_TRANSLATE_MODEL:-}"; then
+    TRANSCRIPT_TRANSLATE_PROVIDER="gemini_api_key"
+  fi
+  if [ "$TRANSCRIPT_TRANSLATE_PROVIDER" = "google_cloud_translate" ]; then
+    if [ -z "${GCLOUD_TRANSLATE_PROJECTID:-}" ]; then
+      echo "ERROR: transcript translation requires GCLOUD_TRANSLATE_PROJECTID (or GCLOUD_TTS_PROJECTID / GOOGLE_SPEECH_PROJECT_ID) when using Cloud Translation." >&2
+      exit 1
+    fi
+    if [ -z "${GOOGLE_TRANSLATE_LOCATION:-}" ]; then
+      echo "ERROR: GOOGLE_TRANSLATE_LOCATION must not be empty when transcript translation uses Cloud Translation." >&2
+      exit 1
+    fi
+  else
+    if [ -z "${GEMINI_API_KEY:-}" ]; then
+      echo "ERROR: transcript translation with gemini_* models requires GEMINI_API_KEY." >&2
+      exit 1
+    fi
+  fi
+  echo "[TranscriptTranslate] Translating transcript segments to $FINAL_SLIDE_TARGET_LANGUAGE with provider $TRANSCRIPT_TRANSLATE_PROVIDER and model $TRANSCRIPT_TRANSLATE_MODEL ..."
   step_start text-translate
   step_detail text-translate "$FINAL_SLIDE_TARGET_LANGUAGE"
   rm -f "$TRANSCRIPT_TRANSLATED_JSON.__tmp" "$TRANSCRIPT_TRANSLATED_CSV.__tmp"
@@ -400,7 +469,8 @@ if [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
     --out-csv "$TRANSCRIPT_TRANSLATED_CSV.__tmp" \
     --project-id "$GCLOUD_TRANSLATE_PROJECTID" \
     --location "$GOOGLE_TRANSLATE_LOCATION" \
-    --model "$GOOGLE_TRANSLATE_MODEL" \
+    --model "$TRANSCRIPT_TRANSLATE_MODEL" \
+    --provider "$TRANSCRIPT_TRANSLATE_PROVIDER" \
     --source-language-code "$GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE" \
     --termbase-file "$TRANSLATION_TERMBASE_FILE" \
     --tm-db "$TRANSLATION_MEMORY_DB" \
@@ -928,6 +998,7 @@ if [ "$RUN_STEP_VIDEO_EXPORT" = "1" ]; then
     --intro-fade-sec "$VIDEO_EXPORT_INTRO_FADE_SEC" \
     --thumbnail-duration-sec "$VIDEO_EXPORT_THUMBNAIL_DURATION_SEC" \
     --thumbnail-fade-sec "$VIDEO_EXPORT_THUMBNAIL_FADE_SEC" \
+    --thumbnail-text-leadin-sec "$VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC" \
     --intro-color "$VIDEO_EXPORT_INTRO_COLOR" \
     --outro-hold-sec "$VIDEO_EXPORT_OUTRO_HOLD_SEC" \
     --outro-fade-sec "$VIDEO_EXPORT_OUTRO_FADE_SEC" \

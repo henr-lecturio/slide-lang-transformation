@@ -62,6 +62,7 @@
                 <label class="quick-setting-field" for="home_gemini_text_translate_model">
                   <span>Transcript Translate Model</span>
                   <select id="home_gemini_text_translate_model">
+                    <option value="gemini-2.5-pro">gemini-2.5-pro</option>
                     <option value="general/translation-llm">general/translation-llm</option>
                   </select>
                 </label>
@@ -151,6 +152,10 @@
                 <option value="compare">compare</option>
               </select>
             </label>
+            <label>
+              <input id="latest-show-original-text" type="checkbox" checked />
+              Show Original Text
+            </label>
           </div>
           <div id="latest-slides-list" class="slides-list"></div>
         </section>
@@ -188,6 +193,10 @@
                   <option value="single">single</option>
                   <option value="compare">compare</option>
                 </select>
+              </label>
+              <label>
+                <input id="run-show-original-text" type="checkbox" checked />
+                Show Original Text
               </label>
             </div>
 
@@ -493,6 +502,7 @@
                     <label class="settings-key" for="gemini_text_translate_model">TRANSCRIPT_TRANSLATE_MODEL</label>
                     <div class="settings-value">
                       <select id="gemini_text_translate_model">
+                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
                         <option value="general/translation-llm">general/translation-llm</option>
                       </select>
                     </div>
@@ -1026,6 +1036,10 @@
                     <div class="settings-value"><input id="video_export_thumbnail_fade_sec" type="number" min="0" step="0.05" /></div>
                   </div>
                   <div class="settings-row">
+                    <label class="settings-key" for="video_export_thumbnail_text_leadin_sec">VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC</label>
+                    <div class="settings-value"><input id="video_export_thumbnail_text_leadin_sec" type="number" min="0" step="0.05" /></div>
+                  </div>
+                  <div class="settings-row">
                     <label class="settings-key" for="video_export_intro_color">VIDEO_EXPORT_INTRO_COLOR</label>
                     <div class="settings-value"><input id="video_export_intro_color" type="text" /></div>
                   </div>
@@ -1342,6 +1356,10 @@
                   <div class="settings-row">
                     <label class="settings-key" for="export_lab_video_export_thumbnail_fade_sec">VIDEO_EXPORT_THUMBNAIL_FADE_SEC</label>
                     <div class="settings-value"><input id="export_lab_video_export_thumbnail_fade_sec" type="number" step="0.1" min="0" /></div>
+                  </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="export_lab_video_export_thumbnail_text_leadin_sec">VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC</label>
+                    <div class="settings-value"><input id="export_lab_video_export_thumbnail_text_leadin_sec" type="number" step="0.1" min="0" /></div>
                   </div>
                 </div>
               </div>

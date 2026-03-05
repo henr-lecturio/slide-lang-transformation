@@ -144,7 +144,6 @@ function collectSlideTranslateHealthPayload() {
       ? (el.gcloudTranslateProjectId.value.trim() || visionProjectId)
       : "",
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
-    GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
   };
 }
@@ -153,7 +152,7 @@ function collectTextTranslateHealthPayload() {
   return {
     GCLOUD_TRANSLATE_PROJECTID: el.gcloudTranslateProjectId.value.trim(),
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
-    GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    TRANSCRIPT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
   };
@@ -258,8 +257,9 @@ export async function testTextTranslateHealth() {
     const translated = String(result.translated_text || "").trim();
     const preview = translated.length > 90 ? `${translated.slice(0, 87)}...` : translated;
     const meta = [
-      `project=${result.project_id_used || "-"}`,
-      `location=${result.location || "-"}`,
+      `provider=${result.provider || "-"}`,
+      result.project_id_used ? `project=${result.project_id_used}` : "",
+      result.location ? `location=${result.location}` : "",
       `model=${result.model || "-"}`,
       `target=${result.target_language_code || result.target_language || "-"}`,
       result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",

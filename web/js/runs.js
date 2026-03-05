@@ -404,7 +404,28 @@ function createSlideDetailsPanel(facts) {
   return wrap;
 }
 
-async function renderFinalSlides(runId, target, slideSourceMode, displayMode) {
+function createSlideTextBlock(item, showOriginalText) {
+  const wrap = document.createElement("div");
+  wrap.className = "slide-text";
+  const translatedText = String(item.translated_text || "").trim();
+  const originalText = String(item.text || "").trim();
+  const main = document.createElement("div");
+  main.className = "slide-text-main";
+  main.textContent = translatedText || originalText || "(no text)";
+  wrap.appendChild(main);
+  if (showOriginalText && originalText) {
+    const divider = document.createElement("div");
+    divider.className = "slide-text-divider";
+    wrap.appendChild(divider);
+    const original = document.createElement("div");
+    original.className = "slide-text-original";
+    original.textContent = originalText;
+    wrap.appendChild(original);
+  }
+  return wrap;
+}
+
+async function renderFinalSlides(runId, target, slideSourceMode, displayMode, showOriginalText) {
   if (!runId) {
     target.innerHTML = "";
     return;
@@ -458,11 +479,8 @@ async function renderFinalSlides(runId, target, slideSourceMode, displayMode) {
     const controls = createImageModeToggle(runId, item);
     if (controls) media.appendChild(controls);
     media.appendChild(createSlideDetailsPanel(detailsFacts));
-    const textWrap = document.createElement("div");
-    textWrap.className = "slide-text";
-    textWrap.textContent = item.translated_text || item.text || "(no text)";
     row.appendChild(media);
-    row.appendChild(textWrap);
+    row.appendChild(createSlideTextBlock(item, showOriginalText));
     target.appendChild(row);
   }
 }
@@ -527,7 +545,13 @@ export async function loadLatestSlides() {
     await renderBaseEvents(runId, el.latestSlidesList);
     return;
   }
-  await renderFinalSlides(runId, el.latestSlidesList, state.latestFinalSourceMode, state.latestFinalDisplayMode);
+  await renderFinalSlides(
+    runId,
+    el.latestSlidesList,
+    state.latestFinalSourceMode,
+    state.latestFinalDisplayMode,
+    Boolean(state.latestShowOriginalText),
+  );
 }
 
 export async function loadRunSlides() {
@@ -540,7 +564,13 @@ export async function loadRunSlides() {
     await renderBaseEvents(runId, el.runSlidesList);
     return;
   }
-  await renderFinalSlides(runId, el.runSlidesList, state.runFinalSourceMode, state.runFinalDisplayMode);
+  await renderFinalSlides(
+    runId,
+    el.runSlidesList,
+    state.runFinalSourceMode,
+    state.runFinalDisplayMode,
+    Boolean(state.runShowOriginalText),
+  );
 }
 
 export async function loadRunDetails() {

@@ -18,6 +18,7 @@ from scripts.lib.cloud_translate import (
     resolve_target_language_codes,
     translate_texts_llm,
 )
+from scripts.lib.cloud_gemini_image import ensure_cloud_gemini_image_client, resolve_gemini_api_key
 from scripts.lib.translation_memory import (
     DEFAULT_TERMBASE_PATH,
     DEFAULT_TM_DB_PATH,
@@ -37,9 +38,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-json", required=True, help="Input transcript_segments.json path.")
     parser.add_argument("--out-json", required=True, help="Output JSON path.")
     parser.add_argument("--out-csv", required=True, help="Output CSV path.")
-    parser.add_argument("--project-id", required=True, help="Google Cloud project id for Translation LLM.")
+    parser.add_argument("--project-id", default="", help="Google Cloud project id for Translation LLM.")
     parser.add_argument("--location", default="us-central1", help="Google Cloud Translation location, e.g. us-central1.")
-    parser.add_argument("--model", default="general/translation-llm", help="Google Cloud Translation LLM model id or full model path.")
+    parser.add_argument(
+        "--model",
+        default="gemini-2.5-pro",
+        help="Translation model id. Use Cloud model (e.g. general/translation-llm) or Gemini model (e.g. gemini-2.5-pro).",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["auto", "google_cloud_translate", "gemini_api_key"],
+        default="auto",
+        help="Translation backend selection. Default auto chooses by model prefix (gemini-* => gemini_api_key).",
+    )
     parser.add_argument("--source-language-code", default="", help="Optional source language code. Leave empty for auto-detect.")
     parser.add_argument("--target-language", required=True, help="Target language label, e.g. French (France).")
     parser.add_argument("--termbase-file", default=str(DEFAULT_TERMBASE_PATH), help="CSV termbase path.")
@@ -105,9 +116,112 @@ def build_translation_chunks(segments: list[dict[str, Any]], chunk_size: int, ch
     return chunks
 
 
-def translate_chunk(
+def resolve_provider(model: str, provider: str) -> str:
+    requested = str(provider or "").strip().lower()
+    if requested in {"google_cloud_translate", "gemini_api_key"}:
+        return requested
+    model_text = str(model or "").strip().lower()
+    if model_text.startswith("gemini-"):
+        return "gemini_api_key"
+    return "google_cloud_translate"
+
+
+def extract_response_text(response: Any) -> str:
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) or []:
+            part_text = getattr(part, "text", None)
+            if isinstance(part_text, str) and part_text.strip():
+                return part_text.strip()
+    raise RuntimeError("Gemini response did not contain text.")
+
+
+def strip_code_fences(text: str) -> str:
+    stripped = str(text or "").strip()
+    if stripped.startswith("```") and stripped.endswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def translate_texts_gemini(
     client,
     *,
+    model: str,
+    contents: list[str],
+    target_language: str,
+    target_language_code: str,
+    source_language_code: str = "",
+) -> list[str]:
+    source_code = str(source_language_code or "").strip()
+    payload = {
+        "target_language": str(target_language or "").strip(),
+        "target_language_code": str(target_language_code or "").strip(),
+        "source_language_code": source_code,
+        "items": [
+            {"index": idx, "text": str(text or "")}
+            for idx, text in enumerate(contents)
+        ],
+    }
+    prompt = (
+        "Translate each item in items to the target language.\n"
+        "Preserve placeholders like __TERM_0001__ exactly.\n"
+        "Return strict JSON only in this shape:\n"
+        '{"translations":[{"index":0,"translated_text":"..."}]}\n'
+        "Do not add explanations."
+    )
+    response = client.models.generate_content(
+        model=str(model),
+        contents=[
+            prompt,
+            f"Input JSON:\n{json.dumps(payload, ensure_ascii=False)}",
+        ],
+        config={"response_mime_type": "application/json"},
+    )
+    raw = strip_code_fences(extract_response_text(response))
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse Gemini translation JSON: {raw[:220]}") from exc
+
+    entries_raw = parsed.get("translations") if isinstance(parsed, dict) else parsed
+    if not isinstance(entries_raw, list):
+        raise RuntimeError("Gemini translation response must include a translations list.")
+
+    by_index: dict[int, str] = {}
+    for entry in entries_raw:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            idx = int(entry.get("index", -1))
+        except Exception:  # noqa: BLE001
+            continue
+        translated_text = str(entry.get("translated_text", "") or "").strip()
+        if idx < 0:
+            continue
+        if not translated_text:
+            raise RuntimeError(f"Gemini translation response contained empty translated_text for index={idx}.")
+        by_index[idx] = translated_text
+
+    out: list[str] = []
+    for idx in range(len(contents)):
+        translated = str(by_index.get(idx, "") or "").strip()
+        if not translated:
+            raise RuntimeError(f"Gemini translation response is missing index={idx}.")
+        out.append(translated)
+    return out
+
+
+def translate_chunk(
+    cloud_client,
+    gemini_client,
+    *,
+    provider: str,
     project_id: str,
     location: str,
     model: str,
@@ -116,18 +230,28 @@ def translate_chunk(
     source_language_code: str,
     pending_segments: list[dict[str, Any]],
 ) -> dict[int, str]:
-    translated_list = translate_texts_llm(
-        client,
-        project_id=project_id,
-        location=location,
-        model=model,
-        contents=[str(item["protected_text"]) for item in pending_segments],
-        target_language_code=target_language_code,
-        source_language_code=source_language_code,
-    )
+    if provider == "google_cloud_translate":
+        translated_list = translate_texts_llm(
+            cloud_client,
+            project_id=project_id,
+            location=location,
+            model=model,
+            contents=[str(item["protected_text"]) for item in pending_segments],
+            target_language_code=target_language_code,
+            source_language_code=source_language_code,
+        )
+    else:
+        translated_list = translate_texts_gemini(
+            gemini_client,
+            model=model,
+            contents=[str(item["protected_text"]) for item in pending_segments],
+            target_language=target_language,
+            target_language_code=target_language_code,
+            source_language_code=source_language_code,
+        )
     if len(translated_list) != len(pending_segments):
         raise RuntimeError(
-            "Cloud Translation returned a mismatched translation count "
+            "Translation provider returned a mismatched translation count "
             f"(expected={len(pending_segments)}, got={len(translated_list)})."
         )
 
@@ -136,7 +260,7 @@ def translate_chunk(
         segment_id = int(pending["segment_id"])
         translated_text = str(translated_text or "").strip()
         if not translated_text:
-            raise RuntimeError(f"Cloud Translation did not return translated_text for segment_id={segment_id}.")
+            raise RuntimeError(f"Translation provider did not return translated_text for segment_id={segment_id}.")
         out[segment_id] = translated_text
     return out
 
@@ -182,10 +306,25 @@ def main() -> int:
 
     termbase_entries = load_termbase_entries(termbase_file, target_language)
     target_language_code, _tts_language_code = resolve_target_language_codes(target_language)
-    client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
-        str(args.project_id),
-        str(args.location),
-    )
+    provider = resolve_provider(str(args.model), str(args.provider))
+    cloud_client = None
+    gemini_client = None
+    resolved_project = ""
+    resolved_location = ""
+    if provider == "google_cloud_translate":
+        cloud_client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
+            str(args.project_id),
+            str(args.location),
+        )
+    else:
+        api_key = resolve_gemini_api_key("")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY must not be empty when transcript translate uses gemini_* models.")
+        gemini_client, _types, resolved_project, _default_project, resolved_location = ensure_cloud_gemini_image_client(
+            api_key=api_key,
+            project_id="",
+            location="",
+        )
     tm_conn = init_translation_memory(tm_db_path)
 
     translated_rows: list[dict[str, Any]] = []
@@ -234,7 +373,9 @@ def main() -> int:
             flush=True,
         )
         translated_map = translate_chunk(
-            client,
+            cloud_client,
+            gemini_client,
+            provider=provider,
             project_id=resolved_project,
             location=resolved_location,
             model=str(args.model),
@@ -294,6 +435,7 @@ def main() -> int:
 
     payload = {
         "source_json": str(input_json),
+        "provider": provider,
         "target_language": target_language,
         "target_language_code": target_language_code,
         "project_id": resolved_project,

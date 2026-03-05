@@ -75,6 +75,7 @@ function defaultExportLabTestSettingsFromCurrentUi() {
     video_export_tail_pad_sec: Number(el.videoExportTailPadSec.value || 0.35),
     video_export_thumbnail_duration_sec: Number(el.videoExportThumbnailDurationSec.value || 2.0),
     video_export_thumbnail_fade_sec: Number(el.videoExportThumbnailFadeSec.value || 0.3),
+    video_export_thumbnail_text_leadin_sec: Number(el.videoExportThumbnailTextLeadinSec.value || 1.0),
     video_export_intro_white_sec: Number(el.videoExportIntroWhiteSec.value || 1.0),
     video_export_intro_fade_sec: Number(el.videoExportIntroFadeSec.value || 0.4),
     video_export_intro_color: String(el.videoExportIntroColor.value || "white").trim(),
@@ -102,6 +103,7 @@ function normalizeExportLabTestSettings(raw = {}) {
     video_export_tail_pad_sec: normalizeNumber(raw.video_export_tail_pad_sec, fallback.video_export_tail_pad_sec, 0),
     video_export_thumbnail_duration_sec: normalizeNumber(raw.video_export_thumbnail_duration_sec, fallback.video_export_thumbnail_duration_sec, 0.04),
     video_export_thumbnail_fade_sec: normalizeNumber(raw.video_export_thumbnail_fade_sec, fallback.video_export_thumbnail_fade_sec, 0),
+    video_export_thumbnail_text_leadin_sec: normalizeNumber(raw.video_export_thumbnail_text_leadin_sec, fallback.video_export_thumbnail_text_leadin_sec, 0),
     video_export_intro_white_sec: normalizeNumber(raw.video_export_intro_white_sec, fallback.video_export_intro_white_sec, 0),
     video_export_intro_fade_sec: normalizeNumber(raw.video_export_intro_fade_sec, fallback.video_export_intro_fade_sec, 0),
     video_export_intro_color: String(raw.video_export_intro_color || fallback.video_export_intro_color || "white").trim(),
@@ -131,6 +133,7 @@ function applyExportLabTestSettingsToForm() {
   el.exportLabVideoExportTailPadSec.value = state.exportLabTestSettings.video_export_tail_pad_sec;
   el.exportLabVideoExportThumbnailDurationSec.value = state.exportLabTestSettings.video_export_thumbnail_duration_sec;
   el.exportLabVideoExportThumbnailFadeSec.value = state.exportLabTestSettings.video_export_thumbnail_fade_sec;
+  el.exportLabVideoExportThumbnailTextLeadinSec.value = state.exportLabTestSettings.video_export_thumbnail_text_leadin_sec;
   el.exportLabVideoExportIntroWhiteSec.value = state.exportLabTestSettings.video_export_intro_white_sec;
   el.exportLabVideoExportIntroFadeSec.value = state.exportLabTestSettings.video_export_intro_fade_sec;
   el.exportLabVideoExportIntroColor.value = state.exportLabTestSettings.video_export_intro_color;
@@ -150,6 +153,7 @@ function readExportLabTestSettingsFromForm() {
     video_export_tail_pad_sec: el.exportLabVideoExportTailPadSec.value,
     video_export_thumbnail_duration_sec: el.exportLabVideoExportThumbnailDurationSec.value,
     video_export_thumbnail_fade_sec: el.exportLabVideoExportThumbnailFadeSec.value,
+    video_export_thumbnail_text_leadin_sec: el.exportLabVideoExportThumbnailTextLeadinSec.value,
     video_export_intro_white_sec: el.exportLabVideoExportIntroWhiteSec.value,
     video_export_intro_fade_sec: el.exportLabVideoExportIntroFadeSec.value,
     video_export_intro_color: el.exportLabVideoExportIntroColor.value,

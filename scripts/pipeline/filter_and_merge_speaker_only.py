@@ -1260,9 +1260,7 @@ def main() -> int:
     leading_no_slide_parts: list[str] = []
     leading_no_slide_translated_parts: list[str] = []
     leading_no_slide_ids: set[int] = set()
-    post_thumbnail_parts: list[str] = []
-    post_thumbnail_translated_parts: list[str] = []
-    post_thumbnail_ids: set[int] = set()
+    thumbnail_received_merged_text = False
 
     for row in rows:
         event_id = int(row["event_id"])
@@ -1302,12 +1300,24 @@ def main() -> int:
         if is_no_slide or is_speaker_only:
             if kept_rows:
                 if len(kept_rows) == 1:
+                    target = kept_rows[0]
+                    target["slide_end"] = max(float(target["slide_end"]), float(row["slide_end"]))
                     if text:
-                        post_thumbnail_parts.append(text)
+                        if target["text"]:
+                            target["text"] = f"{target['text']} {text}".strip()
+                        else:
+                            target["text"] = text
                     if translated_text:
-                        post_thumbnail_translated_parts.append(translated_text)
-                    post_thumbnail_ids.update(src_ids)
-                    action = "queued_for_next_after_thumbnail"
+                        if target.get("translated_text"):
+                            target["translated_text"] = f"{target['translated_text']} {translated_text}".strip()
+                        else:
+                            target["translated_text"] = translated_text
+                    target["source_segment_ids"] = sorted(set(target["source_segment_ids"]).union(src_ids))
+                    target["segments_count"] = len(target["source_segment_ids"])
+                    merge_target = int(target["event_id"])
+                    action = "merged_to_thumbnail"
+                    if text or translated_text:
+                        thumbnail_received_merged_text = True
                 else:
                     target = kept_rows[-1]
                     target["slide_end"] = max(float(target["slide_end"]), float(row["slide_end"]))
@@ -1336,11 +1346,6 @@ def main() -> int:
             keep_row = dict(row)
             keep_row["source_segment_ids"] = sorted(src_ids)
             keep_row["segments_count"] = len(keep_row["source_segment_ids"])
-            if kept_rows and len(kept_rows) == 1 and (post_thumbnail_parts or post_thumbnail_ids):
-                prepend_text_to_row(keep_row, post_thumbnail_parts, post_thumbnail_translated_parts, post_thumbnail_ids)
-                post_thumbnail_parts.clear()
-                post_thumbnail_translated_parts.clear()
-                post_thumbnail_ids.clear()
             kept_rows.append(keep_row)
 
         manifest_rows.append(
@@ -1370,10 +1375,11 @@ def main() -> int:
 
     if kept_rows:
         thumbnail_row = kept_rows[0]
-        thumbnail_row["text"] = ""
-        thumbnail_row["translated_text"] = ""
-        thumbnail_row["source_segment_ids"] = []
-        thumbnail_row["segments_count"] = 0
+        if not thumbnail_received_merged_text:
+            thumbnail_row["text"] = ""
+            thumbnail_row["translated_text"] = ""
+            thumbnail_row["source_segment_ids"] = []
+            thumbnail_row["segments_count"] = 0
         if len(kept_rows) >= 2 and (leading_no_slide_parts or leading_no_slide_ids):
             prepend_text_to_row(kept_rows[1], leading_no_slide_parts, leading_no_slide_translated_parts, leading_no_slide_ids)
             leading_no_slide_parts.clear()
@@ -1464,7 +1470,9 @@ def main() -> int:
         "original_event_count": len(rows),
         "final_event_count": len(final_rows),
         "kept_slide_event_count": len([r for r in final_rows if int(r["event_id"]) > 0]),
-        "removed_event_count": len([r for r in manifest_rows if r["action"] in {"merged_to_previous", "leading_no_previous"}]),
+        "removed_event_count": len(
+            [r for r in manifest_rows if r["action"] in {"merged_to_previous", "merged_to_thumbnail", "leading_no_previous"}]
+        ),
         "final_source_mode_auto": str(args.final_source_mode_auto),
         "events": final_rows,
     }

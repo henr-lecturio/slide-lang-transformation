@@ -1,6 +1,7 @@
 import { el } from "./dom.js";
 import { state } from "./state.js";
 import { formatRunIdLabel, getInitialActiveTab, setActiveTab, showButtonSuccess, syncSettingsKeyTooltips } from "./ui-core.js";
+import { syncRunFavicon } from "./favicon.js";
 import {
   clearHealthStatus,
   testSlideEditHealth,
@@ -91,6 +92,7 @@ import {
 function setStatus(current) {
   const status = current.status || "idle";
   state.currentRunStatus = status;
+  syncRunFavicon(status);
   state.currentRunId = current.run_id || null;
   const runId = current.run_id ? `, run ${formatRunIdLabel(current.run_id)}` : "";
   if (el.statusSummary) {
@@ -568,6 +570,12 @@ function bindEvents() {
     state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
     runTaskImmediate(loadLatestSlides);
   });
+  if (el.latestShowOriginalText) {
+    el.latestShowOriginalText.addEventListener("change", () => {
+      state.latestShowOriginalText = el.latestShowOriginalText.checked;
+      runTaskImmediate(loadLatestSlides);
+    });
+  }
 
   el.latestInfoToggle.addEventListener("click", () => {
     state.latestInfoExpanded = !state.latestInfoExpanded;
@@ -590,6 +598,12 @@ function bindEvents() {
     state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
     runTaskImmediate(loadRunSlides);
   });
+  if (el.runShowOriginalText) {
+    el.runShowOriginalText.addEventListener("change", () => {
+      state.runShowOriginalText = el.runShowOriginalText.checked;
+      runTaskImmediate(loadRunSlides);
+    });
+  }
 
   el.imageModalClose.addEventListener("click", closeImageModal);
   el.imageModalBackdrop.addEventListener("click", closeImageModal);
@@ -680,11 +694,13 @@ async function init() {
     ? el.latestFinalSourceMode.value
     : "processed";
   state.latestFinalDisplayMode = el.latestFinalDisplayMode.value === "compare" ? "compare" : "single";
+  state.latestShowOriginalText = Boolean(el.latestShowOriginalText?.checked ?? true);
   state.runSlidesMode = el.runViewMode.value === "base" ? "base" : "final";
   state.runFinalSourceMode = ["raw", "translated"].includes(el.runFinalSourceMode.value)
     ? el.runFinalSourceMode.value
     : "processed";
   state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
+  state.runShowOriginalText = Boolean(el.runShowOriginalText?.checked ?? true);
   syncSettingsFieldState();
   syncLabActionState();
   syncExportLabActionState();

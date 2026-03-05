@@ -82,6 +82,15 @@ def duration_to_seconds(value) -> float:
     return float(seconds) + float(nanos) / 1_000_000_000.0
 
 
+def estimate_segment_duration_sec(text: str) -> float:
+    cleaned = clean_text(text)
+    words = len(cleaned.split())
+    chars = len(cleaned)
+    words_based = words / 2.8 if words > 0 else 0.0
+    chars_based = chars / 16.0 if chars > 0 else 0.0
+    return max(0.2, min(12.0, max(words_based, chars_based, 0.35)))
+
+
 def parse_language_codes(raw: str) -> list[str]:
     items = [part.strip() for part in (raw or "").split(",")]
     items = [item for item in items if item]
@@ -207,6 +216,7 @@ def main() -> int:
         segments: list[dict] = []
         accepted_end_global = 0.0
         segment_id = 1
+        missing_timing_fallback_count = 0
 
         with wave.open(str(wav_path), "rb") as wf:
             sample_rate = wf.getframerate()
@@ -233,15 +243,29 @@ def main() -> int:
                 response = client.recognize(request=request)
 
                 local_prev_end = 0.0
+                nonempty_results: list[tuple[object, str]] = []
                 for result in response.results:
                     if not result.alternatives:
                         continue
                     transcript = clean_text(result.alternatives[0].transcript)
                     if not transcript:
                         continue
+                    nonempty_results.append((result, transcript))
+
+                result_count = len(nonempty_results)
+                for result_index, (result, transcript) in enumerate(nonempty_results, start=1):
                     local_end = duration_to_seconds(getattr(result, "result_end_offset", None))
-                    global_end = chunk_start_sec + local_end
                     local_start = local_prev_end
+                    if local_end <= local_start + 1e-3:
+                        remaining_after = result_count - result_index
+                        reserve_tail_sec = max(0.0, float(remaining_after) * 0.15)
+                        max_allowed_end = max(local_start + 0.15, chunk_duration_sec - reserve_tail_sec)
+                        est_duration = estimate_segment_duration_sec(transcript)
+                        local_end = min(max_allowed_end, local_start + est_duration)
+                        missing_timing_fallback_count += 1
+                    local_end = min(chunk_duration_sec, max(local_end, local_start + 0.001))
+
+                    global_end = chunk_start_sec + local_end
                     global_start = chunk_start_sec + local_start
                     local_prev_end = max(local_prev_end, local_end)
 
@@ -275,6 +299,7 @@ def main() -> int:
         "location": location,
         "language_codes": language_codes,
         "segment_count": len(segments),
+        "timing_fallback_segments": missing_timing_fallback_count,
         "segments": segments,
     }
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -282,6 +307,8 @@ def main() -> int:
         write_segments_csv(out_csv, segments)
 
     print(f"[ASR] Segments: {len(segments)}", flush=True)
+    if missing_timing_fallback_count > 0:
+        print(f"[ASR] Timing fallback used for {missing_timing_fallback_count} segments.", flush=True)
     print(f"[ASR] Wrote transcript JSON: {out_json}", flush=True)
     if out_csv is not None:
         print(f"[ASR] Wrote transcript CSV: {out_csv}", flush=True)

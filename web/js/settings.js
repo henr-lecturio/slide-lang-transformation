@@ -33,6 +33,7 @@ let slideTranslateStyleEditorModel = {
   roles: {},
   slots: {},
 };
+let lastLoadedConfig = {};
 
 function isStepSectionEnabled(section) {
   const inputId = section?.dataset?.stepInput || "";
@@ -545,6 +546,7 @@ function renderHomeQuickLanguageOptions(preferredCode = "", preferredLabel = "")
 }
 
 export function setConfig(cfg, { syncActionState = () => {} } = {}) {
+  lastLoadedConfig = { ...(cfg || {}) };
   state.selectedVideoPath = cfg.VIDEO_PATH || "";
   el.roiX0.value = cfg.ROI_X0;
   el.roiY0.value = cfg.ROI_Y0;
@@ -608,7 +610,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderSlideTranslateStyleEditor(cfg.SLIDE_TRANSLATE_STYLES_JSON || "");
   el.gcloudTranslateProjectId.value = cfg.GCLOUD_TRANSLATE_PROJECTID || cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GCLOUD_TTS_PROJECTID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.googleTranslateLocation.value = cfg.GOOGLE_TRANSLATE_LOCATION || "us-central1";
-  el.geminiTextTranslateModel.value = cfg.GOOGLE_TRANSLATE_MODEL || "general/translation-llm";
+  el.geminiTextTranslateModel.value = cfg.TRANSCRIPT_TRANSLATE_MODEL || "gemini-2.5-pro";
   el.googleTranslateSourceLanguageCode.value = cfg.GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE || "";
   renderTermbaseEditor(cfg.TRANSLATION_TERMBASE_CSV || "");
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
@@ -630,6 +632,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.videoExportIntroFadeSec.value = cfg.VIDEO_EXPORT_INTRO_FADE_SEC ?? 0.4;
   el.videoExportThumbnailDurationSec.value = cfg.VIDEO_EXPORT_THUMBNAIL_DURATION_SEC ?? 2.0;
   el.videoExportThumbnailFadeSec.value = cfg.VIDEO_EXPORT_THUMBNAIL_FADE_SEC ?? 0.3;
+  el.videoExportThumbnailTextLeadinSec.value = cfg.VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC ?? 1.0;
   el.videoExportIntroColor.value = cfg.VIDEO_EXPORT_INTRO_COLOR || "white";
   el.videoExportOutroHoldSec.value = cfg.VIDEO_EXPORT_OUTRO_HOLD_SEC ?? 1.5;
   el.videoExportOutroFadeSec.value = cfg.VIDEO_EXPORT_OUTRO_FADE_SEC ?? 1.5;
@@ -640,7 +643,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.videoExportFps.value = cfg.VIDEO_EXPORT_FPS ?? 30;
   el.videoExportBgColor.value = cfg.VIDEO_EXPORT_BG_COLOR || "white";
   if (el.homeGeminiTextTranslateModel) {
-    el.homeGeminiTextTranslateModel.value = cfg.GOOGLE_TRANSLATE_MODEL || "general/translation-llm";
+    el.homeGeminiTextTranslateModel.value = cfg.TRANSCRIPT_TRANSLATE_MODEL || "gemini-2.5-pro";
   }
   if (el.homeFinalSlideUpscaleMode) {
     el.homeFinalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
@@ -729,7 +732,8 @@ export async function saveConfig(options = {}) {
     GCLOUD_TRANSLATE_PROJECTID: gcloudTranslateProjectId,
     GOOGLE_TRANSLATE_PROJECT_ID: gcloudTranslateProjectId,
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
-    GOOGLE_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GOOGLE_TRANSLATE_MODEL: String(lastLoadedConfig.GOOGLE_TRANSLATE_MODEL || "general/translation-llm").trim(),
+    TRANSCRIPT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
     TRANSLATION_TERMBASE_CSV: (() => {
       syncTermbaseCsvFromTable();
@@ -756,6 +760,7 @@ export async function saveConfig(options = {}) {
     VIDEO_EXPORT_INTRO_FADE_SEC: Number(el.videoExportIntroFadeSec.value),
     VIDEO_EXPORT_THUMBNAIL_DURATION_SEC: Number(el.videoExportThumbnailDurationSec.value),
     VIDEO_EXPORT_THUMBNAIL_FADE_SEC: Number(el.videoExportThumbnailFadeSec.value),
+    VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC: Number(el.videoExportThumbnailTextLeadinSec.value),
     VIDEO_EXPORT_INTRO_COLOR: el.videoExportIntroColor.value.trim(),
     VIDEO_EXPORT_OUTRO_HOLD_SEC: Number(el.videoExportOutroHoldSec.value),
     VIDEO_EXPORT_OUTRO_FADE_SEC: Number(el.videoExportOutroFadeSec.value),
@@ -788,6 +793,11 @@ export function syncSettingsFieldState() {
   const replicateNightmareUpscale = upscaleMode === "replicate_nightmare_realesrgan";
   const slideUpscaleApiEnabled = upscaleEnabled && upscaleMode !== "none";
   const googleTranscription = transcriptionProvider === "google_chirp_3";
+  const textTranslateModel = String(el.geminiTextTranslateModel.value || "").trim().toLowerCase();
+  const textTranslateUsesGeminiApi = textTranslateModel.startsWith("gemini-");
+  const cloudTranslateConfigEnabled = (textTranslateEnabled && !textTranslateUsesGeminiApi)
+    || (translateEnabled && deterministicSlideTranslate);
+  const sourceLanguageConfigEnabled = textTranslateEnabled || (translateEnabled && deterministicSlideTranslate);
 
   el.whisperModel.disabled = googleTranscription;
   el.whisperDevice.disabled = googleTranscription;
@@ -848,10 +858,10 @@ export function syncSettingsFieldState() {
     clearHealthStatus("slideTranslate");
   }
 
-  el.gcloudTranslateProjectId.disabled = !textTranslateEnabled;
-  el.googleTranslateLocation.disabled = !textTranslateEnabled;
+  el.gcloudTranslateProjectId.disabled = !cloudTranslateConfigEnabled;
+  el.googleTranslateLocation.disabled = !cloudTranslateConfigEnabled;
   el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
-  el.googleTranslateSourceLanguageCode.disabled = !textTranslateEnabled;
+  el.googleTranslateSourceLanguageCode.disabled = !sourceLanguageConfigEnabled;
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.disabled = !textTranslateEnabled;
   }

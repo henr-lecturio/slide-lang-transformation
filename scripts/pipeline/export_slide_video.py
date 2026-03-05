@@ -26,8 +26,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tail-pad-sec", type=float, default=0.35, help="Silence tail added after each voiced slide.")
     parser.add_argument("--intro-white-sec", type=float, default=1.0, help="Initial white screen duration before the first slide fades in.")
     parser.add_argument("--intro-fade-sec", type=float, default=0.4, help="Crossfade duration from white intro to the first slide.")
-    parser.add_argument("--thumbnail-duration-sec", type=float, default=2.0, help="Display duration for slide 1 (thumbnail) before slide 2 appears.")
+    parser.add_argument(
+        "--thumbnail-duration-sec",
+        type=float,
+        default=2.0,
+        help="Display duration for slide 1 only when it has no mapped text (fallback thumbnail hold).",
+    )
     parser.add_argument("--thumbnail-fade-sec", type=float, default=0.3, help="Crossfade duration between slide 1 (thumbnail) and slide 2.")
+    parser.add_argument(
+        "--thumbnail-text-leadin-sec",
+        type=float,
+        default=1.0,
+        help="Additional wait before speech starts when slide 1 has mapped text.",
+    )
     parser.add_argument("--intro-color", default="white", help="Color used for the intro still before the first slide fades in.")
     parser.add_argument("--outro-hold-sec", type=float, default=1.5, help="Hold duration for the last slide after spoken audio ends.")
     parser.add_argument("--outro-fade-sec", type=float, default=1.5, help="Fade-out duration for the last slide at the end of the export.")
@@ -292,6 +303,17 @@ def fuzzy_phrase_match(
     return best[1], best[2]
 
 
+def event_phrase_text(event: dict[str, Any]) -> str:
+    translated = str(event.get("translated_text", "") or "").strip()
+    if translated:
+        return translated
+    return str(event.get("text", "") or "").strip()
+
+
+def event_has_mapped_text(event: dict[str, Any]) -> bool:
+    return bool(event_phrase_text(event))
+
+
 def build_slide_phrase_matches(
     events: list[dict[str, Any]],
     alignment_by_segment: dict[int, dict[str, Any]],
@@ -300,10 +322,7 @@ def build_slide_phrase_matches(
     matches: dict[int, dict[str, Any]] = {}
     min_global_idx = 0
     for slide_index, event in enumerate(events, start=1):
-        if slide_index == 1:
-            matches[slide_index] = {"matched": False}
-            continue
-        phrase_text = str(event.get("translated_text", "") or "").strip() or str(event.get("text", "") or "").strip()
+        phrase_text = event_phrase_text(event)
         target_tokens = text_to_tokens(phrase_text)
         if not target_tokens:
             matches[slide_index] = {"matched": False}
@@ -455,11 +474,17 @@ def build_master_audio_timeline_rows(
     min_slide_sec: float,
     tail_pad_sec: float,
     thumbnail_duration_sec: float,
+    thumbnail_text_leadin_sec: float,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     alignment_rows = sorted_alignment_rows(alignment_by_segment)
     phrase_matches = build_slide_phrase_matches(events, alignment_by_segment, words)
-    audio_time_offset = max(0.0, float(thumbnail_duration_sec))
+    thumbnail_has_mapped_text = bool(events) and event_has_mapped_text(events[0])
+    audio_time_offset = (
+        max(0.0, float(thumbnail_text_leadin_sec))
+        if thumbnail_has_mapped_text
+        else max(0.0, float(thumbnail_duration_sec))
+    )
     current_start = 0.0
 
     def audio_time_to_video_time(raw_time: float) -> float:
@@ -477,7 +502,8 @@ def build_master_audio_timeline_rows(
     for idx, event in enumerate(events, start=1):
         event_id = int(event.get("event_id", 0) or 0)
         bucket_id = str(event.get("bucket_id", "") or "")
-        if idx == 1:
+        use_fallback_thumbnail_timing = idx == 1 and not thumbnail_has_mapped_text
+        if use_fallback_thumbnail_timing:
             translated_text = ""
             original_text = ""
             subtitle_text = ""
@@ -487,7 +513,7 @@ def build_master_audio_timeline_rows(
             subtitle_text = translated_text or original_text
         image_path = find_image(image_dir, idx, event_id)
 
-        if idx == 1:
+        if use_fallback_thumbnail_timing:
             end_sec = current_start + max(0.04, float(thumbnail_duration_sec))
         elif idx < len(events):
             current_match = phrase_matches.get(idx, {})
@@ -523,7 +549,7 @@ def build_master_audio_timeline_rows(
             end_sec = max(end_candidates)
 
         current_match = phrase_matches.get(idx, {})
-        if idx == 1:
+        if use_fallback_thumbnail_timing:
             audio_clip_start = 0.0
             audio_clip_end = 0.0
             audio_clip_duration = 0.0
@@ -547,8 +573,6 @@ def build_master_audio_timeline_rows(
                 audio_clip_start = current_start
                 audio_clip_end = max(audio_clip_start, end_sec)
                 audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
-        if idx == 1:
-            pass
         clip_duration = max(0.04, end_sec - current_start)
 
         rows.append(
@@ -582,14 +606,17 @@ def build_segmented_timeline_rows(
     min_slide_sec: float,
     tail_pad_sec: float,
     thumbnail_duration_sec: float,
+    thumbnail_text_leadin_sec: float,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     current_start = 0.0
+    thumbnail_has_mapped_text = bool(events) and event_has_mapped_text(events[0])
 
     for idx, event in enumerate(events, start=1):
         event_id = int(event.get("event_id", 0) or 0)
         bucket_id = str(event.get("bucket_id", "") or "")
-        if idx == 1:
+        use_fallback_thumbnail_timing = idx == 1 and not thumbnail_has_mapped_text
+        if use_fallback_thumbnail_timing:
             translated_text = ""
             original_text = ""
             subtitle_text = ""
@@ -602,14 +629,22 @@ def build_segmented_timeline_rows(
         audio_clip_start = 0.0
         audio_clip_end = 0.0
         audio_clip_duration = 0.0
-        if idx != 1 and audio_window is not None:
+        if not use_fallback_thumbnail_timing and audio_window is not None:
             audio_clip_start = max(0.0, float(audio_window[0]))
             audio_clip_end = max(audio_clip_start, float(audio_window[1]))
             audio_clip_duration = max(0.0, audio_clip_end - audio_clip_start)
-        if idx == 1:
+        audio_lead_in_sec = (
+            max(0.0, float(thumbnail_text_leadin_sec))
+            if idx == 1 and thumbnail_has_mapped_text and audio_clip_duration > 0.0
+            else 0.0
+        )
+        if use_fallback_thumbnail_timing:
             clip_duration = max(0.04, float(thumbnail_duration_sec))
         else:
-            clip_duration = max(min_slide_sec, audio_clip_duration + tail_pad_sec if audio_clip_duration > 0 else min_slide_sec)
+            clip_duration = max(
+                min_slide_sec,
+                audio_lead_in_sec + audio_clip_duration + tail_pad_sec if audio_clip_duration > 0 else min_slide_sec,
+            )
         start_sec = current_start
         end_sec = current_start + clip_duration
         current_start = end_sec
@@ -991,6 +1026,7 @@ def main() -> int:
     min_slide_sec = max(0.1, float(args.min_slide_sec))
     tail_pad_sec = max(0.0, float(args.tail_pad_sec))
     thumbnail_duration_sec = max(0.04, float(args.thumbnail_duration_sec))
+    thumbnail_text_leadin_sec = max(0.0, float(args.thumbnail_text_leadin_sec))
     intro_white_sec = max(0.0, float(args.intro_white_sec))
     intro_fade_sec = max(0.0, float(args.intro_fade_sec))
     thumbnail_fade_sec = max(0.0, float(args.thumbnail_fade_sec))
@@ -1001,6 +1037,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="slide_export_", dir=str(out_video.parent)) as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
         use_master_audio = bool(alignment_by_segment) and full_audio_path is not None and full_audio_path.exists()
+        thumbnail_has_mapped_text = bool(events) and event_has_mapped_text(events[0])
         if use_master_audio:
             base_timeline_rows = build_master_audio_timeline_rows(
                 events,
@@ -1012,6 +1049,7 @@ def main() -> int:
                 min_slide_sec,
                 tail_pad_sec,
                 thumbnail_duration_sec,
+                thumbnail_text_leadin_sec,
             )
             timeline_rows = apply_intro_outro_timing(
                 base_timeline_rows,
@@ -1022,14 +1060,12 @@ def main() -> int:
             )
             for row in timeline_rows:
                 row["audio_source_name"] = full_audio_path.name
-            audio_timeline_offset = next(
-                (
-                    float(row.get("video_start_sec", 0.0) or 0.0)
-                    for row in timeline_rows
-                    if float(row.get("audio_clip_duration_sec", 0.0) or 0.0) > 0.0
-                ),
-                0.0,
+            master_audio_offset = (
+                thumbnail_text_leadin_sec
+                if thumbnail_has_mapped_text
+                else thumbnail_duration_sec
             )
+            audio_timeline_offset = max(0.0, float(intro_white_sec) + float(master_audio_offset))
             video_only, _segment_count = render_segment_videos(
                 base_timeline_rows,
                 image_dir,
@@ -1083,6 +1119,12 @@ def main() -> int:
                 min_slide_sec,
                 tail_pad_sec,
                 thumbnail_duration_sec,
+                thumbnail_text_leadin_sec,
+            )
+            thumbnail_segment_audio_lead_in_sec = (
+                thumbnail_text_leadin_sec
+                if thumbnail_has_mapped_text
+                else 0.0
             )
             concat_list = tmp_dir / "concat.txt"
             concat_lines: list[str] = []
@@ -1124,7 +1166,17 @@ def main() -> int:
                 )
                 audio_clip_duration = float(row["audio_clip_duration_sec"])
                 audio_clip_start = float(row["audio_clip_start_sec"])
+                audio_lead_in_sec = (
+                    thumbnail_segment_audio_lead_in_sec
+                    if idx == 1 and audio_clip_duration > 0.0
+                    else 0.0
+                )
                 if full_audio_path is not None and full_audio_path.exists() and audio_clip_duration > 0:
+                    audio_filters: list[str] = []
+                    if audio_lead_in_sec > 0.0:
+                        delay_ms = int(round(audio_lead_in_sec * 1000.0))
+                        audio_filters.append(f"adelay={delay_ms}|{delay_ms}")
+                    audio_filters.append("apad")
                     run_cmd(
                         [
                             "ffmpeg",
@@ -1136,7 +1188,7 @@ def main() -> int:
                             "-t",
                             f"{audio_clip_duration:.3f}",
                             "-af",
-                            "apad",
+                            ",".join(audio_filters),
                             "-t",
                             f"{clip_duration:.3f}",
                             "-c:a",
@@ -1220,6 +1272,7 @@ def main() -> int:
         "intro_fade_sec": intro_fade_sec,
         "thumbnail_duration_sec": thumbnail_duration_sec,
         "thumbnail_fade_sec": thumbnail_fade_sec,
+        "thumbnail_text_leadin_sec": thumbnail_text_leadin_sec,
         "intro_color": str(args.intro_color),
         "outro_hold_sec": outro_hold_sec,
         "outro_fade_sec": outro_fade_sec,
