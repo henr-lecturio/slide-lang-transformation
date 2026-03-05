@@ -8,6 +8,7 @@ import json
 import math
 import os
 import subprocess
+import sys
 import tempfile
 import wave
 from pathlib import Path
@@ -133,6 +134,17 @@ def iter_chunk_ranges(total_frames: int, sample_rate: int, chunk_sec: float, ove
         if end >= total_frames:
             break
         start += step_frames
+
+
+def classify_google_speech_error(exc: Exception) -> str:
+    text = str(exc or "").upper()
+    if "SERVICE_DISABLED" in text:
+        return "SERVICE_DISABLED"
+    if "CLOUD SPEECH-TO-TEXT API HAS NOT BEEN USED" in text and "DISABLED" in text:
+        return "SERVICE_DISABLED"
+    if "PERMISSION_DENIED" in text or "STATUSCODE.PERMISSION_DENIED" in text:
+        return "PERMISSION_DENIED"
+    return "UNKNOWN"
 
 
 def main() -> int:
@@ -277,4 +289,18 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:  # noqa: BLE001
+        error_code = classify_google_speech_error(exc)
+        print(f"[ASR] ERROR_CODE: {error_code}", file=sys.stderr, flush=True)
+        if error_code == "SERVICE_DISABLED":
+            print(
+                "[ASR] ERROR: Cloud Speech-to-Text API is disabled for the configured project. "
+                "Enable speech.googleapis.com or use whisper.",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            print(f"[ASR] ERROR: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1)

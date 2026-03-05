@@ -170,16 +170,6 @@ function bindEvents() {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   }
 
-  function syncGeminiProjectIdFields(source) {
-    const value = String(source?.value || "").trim();
-    if (el.gcloudVertexProjectId && source !== el.gcloudVertexProjectId) {
-      el.gcloudVertexProjectId.value = value;
-    }
-    if (el.slideTranslateVertexProjectId && source !== el.slideTranslateVertexProjectId) {
-      el.slideTranslateVertexProjectId.value = value;
-    }
-  }
-
   async function applyHomeQuickSettings() {
     if (el.homeTranscriptionProvider && el.transcriptionProvider) {
       el.transcriptionProvider.value = el.homeTranscriptionProvider.value;
@@ -436,12 +426,6 @@ function bindEvents() {
     syncSettingsFieldState();
     syncLabSettingsFieldState();
   });
-  if (el.gcloudVertexProjectId && el.slideTranslateVertexProjectId) {
-    el.gcloudVertexProjectId.addEventListener("input", () => syncGeminiProjectIdFields(el.gcloudVertexProjectId));
-    el.gcloudVertexProjectId.addEventListener("change", () => syncGeminiProjectIdFields(el.gcloudVertexProjectId));
-    el.slideTranslateVertexProjectId.addEventListener("input", () => syncGeminiProjectIdFields(el.slideTranslateVertexProjectId));
-    el.slideTranslateVertexProjectId.addEventListener("change", () => syncGeminiProjectIdFields(el.slideTranslateVertexProjectId));
-  }
 
   for (const input of [
     el.runStepEdit,
@@ -465,7 +449,7 @@ function bindEvents() {
     input.addEventListener("change", () => clearHealthStatus("transcription"));
   }
 
-  for (const input of [el.runStepEdit, el.gcloudVertexProjectId, el.slideTranslateVertexProjectId, el.finalSlidePostprocessMode, el.geminiEditModel, el.geminiEditPrompt]) {
+  for (const input of [el.runStepEdit, el.finalSlidePostprocessMode, el.geminiEditModel, el.geminiEditPrompt]) {
     input.addEventListener("input", () => clearHealthStatus("slideEdit"));
     input.addEventListener("change", () => clearHealthStatus("slideEdit"));
   }
@@ -475,8 +459,6 @@ function bindEvents() {
     el.finalSlideTranslationMode,
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
-    el.gcloudVertexProjectId,
-    el.slideTranslateVertexProjectId,
     el.slideTranslateVisionProjectId,
     el.geminiTranslateModel,
     el.geminiTranslatePrompt,

@@ -76,6 +76,7 @@ GCLOUD_TRANSLATE_PROJECTID="${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PRO
 GOOGLE_TRANSLATE_LOCATION="${GOOGLE_TRANSLATE_LOCATION:-us-central1}"
 GOOGLE_TRANSLATE_MODEL="${GOOGLE_TRANSLATE_MODEL:-general/translation-llm}"
 GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE="${GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE:-}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
 GCLOUD_VERTEX_PROJECTID="${GCLOUD_VERTEX_PROJECTID:-${GOOGLE_GEMINI_PROJECT_ID:-${GCLOUD_VISION_PROJECTID:-${GOOGLE_VISION_PROJECT_ID:-${GCLOUD_TRANSLATE_PROJECTID:-${GOOGLE_TRANSLATE_PROJECT_ID:-${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}}}}}}}"
 GOOGLE_GEMINI_LOCATION="${GOOGLE_GEMINI_LOCATION:-${GOOGLE_TRANSLATE_LOCATION:-global}}"
 GOOGLE_VISION_LOCATION="${GOOGLE_VISION_LOCATION:-global}"
@@ -111,6 +112,7 @@ RUN_STEP_UPSCALE="${RUN_STEP_UPSCALE:-1}"
 RUN_STEP_TEXT_TRANSLATE="${RUN_STEP_TEXT_TRANSLATE:-1}"
 RUN_STEP_TTS="${RUN_STEP_TTS:-1}"
 RUN_STEP_VIDEO_EXPORT="${RUN_STEP_VIDEO_EXPORT:-1}"
+GOOGLE_SPEECH_FALLBACK_TO_WHISPER="${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}"
 REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND="${REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND:-0.000225}"
 VIDEO_EXPORT_MIN_SLIDE_SEC="${VIDEO_EXPORT_MIN_SLIDE_SEC:-1.2}"
 VIDEO_EXPORT_TAIL_PAD_SEC="${VIDEO_EXPORT_TAIL_PAD_SEC:-0.35}"
@@ -339,7 +341,37 @@ case "${TRANSCRIPTION_PROVIDER:-whisper}" in
       --chunk-overlap-sec "${GOOGLE_SPEECH_CHUNK_OVERLAP_SEC:-0.75}"
     )
     step_detail transcription "google-chirp-3"
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}"
+    GOOGLE_SPEECH_LOG="$(mktemp)"
+    set +e
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_google_speech.py" "${TRANSCRIPT_ARGS[@]}" 2>&1 | tee "$GOOGLE_SPEECH_LOG"
+    GOOGLE_SPEECH_EXIT="${PIPESTATUS[0]}"
+    set -e
+    if [ "${GOOGLE_SPEECH_EXIT:-1}" -ne 0 ]; then
+      google_speech_fallback=0
+      case "${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}" in
+        1|true|TRUE|True|yes|YES|on|ON) google_speech_fallback=1 ;;
+      esac
+      if [ "$google_speech_fallback" = "1" ] && grep -Eq "\\[ASR\\] ERROR_CODE: (SERVICE_DISABLED|PERMISSION_DENIED)|SERVICE_DISABLED|PERMISSION_DENIED" "$GOOGLE_SPEECH_LOG"; then
+        echo "[ASR] Google Speech unavailable (permission/service). Falling back to faster-whisper ..."
+        TRANSCRIPT_ARGS=(
+          --video "$PHASE_DIR/$VIDEO_NAME"
+          --out-json "$TRANSCRIPT_JSON"
+          --out-csv "$TRANSCRIPT_CSV"
+          --model "${WHISPER_MODEL:-medium}"
+          --device "${WHISPER_DEVICE:-cuda}"
+          --compute-type "${WHISPER_COMPUTE_TYPE:-float16}"
+        )
+        if [ -n "${WHISPER_LANGUAGE:-}" ]; then
+          TRANSCRIPT_ARGS+=(--language "$WHISPER_LANGUAGE")
+        fi
+        step_detail transcription "google-chirp-3->faster-whisper-fallback"
+        "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/transcribe_whisper.py" "${TRANSCRIPT_ARGS[@]}"
+      else
+        rm -f "$GOOGLE_SPEECH_LOG"
+        exit "$GOOGLE_SPEECH_EXIT"
+      fi
+    fi
+    rm -f "$GOOGLE_SPEECH_LOG"
     ;;
   *)
     echo "ERROR: TRANSCRIPTION_PROVIDER must be one of: whisper, google_chirp_3" >&2
@@ -522,8 +554,8 @@ fi
 echo "[ASR] Speaker-only filtering finished."
 
 if [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" ]; then
-  if [ -z "${GCLOUD_VERTEX_PROJECTID:-}" ]; then
-    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)." >&2
+  if [ -z "${GEMINI_API_KEY:-}" ]; then
+    echo "ERROR: FINAL_SLIDE_POSTPROCESS_MODE=gemini requires GEMINI_API_KEY (Gemini Developer API)." >&2
     exit 1
   fi
 
@@ -557,8 +589,8 @@ if [ "$RUN_STEP_TRANSLATE" = "1" ]; then
       step_skip translate "mode=none"
       ;;
     gemini)
-      if [ -z "${GCLOUD_VERTEX_PROJECTID:-}" ]; then
-        echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)." >&2
+      if [ -z "${GEMINI_API_KEY:-}" ]; then
+        echo "ERROR: FINAL_SLIDE_TRANSLATION_MODE=gemini requires GEMINI_API_KEY (Gemini Developer API)." >&2
         exit 1
       fi
       if [ -z "${FINAL_SLIDE_TARGET_LANGUAGE:-}" ]; then

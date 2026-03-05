@@ -584,16 +584,6 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.speakerFilterMaxEdgeDensity.value = cfg.SPEAKER_FILTER_MAX_EDGE_DENSITY;
   el.speakerFilterMaxLaplacianVar.value = cfg.SPEAKER_FILTER_MAX_LAPLACIAN_VAR;
   el.speakerFilterMaxDurationSec.value = cfg.SPEAKER_FILTER_MAX_DURATION_SEC;
-  el.gcloudVertexProjectId.value = cfg.GCLOUD_VERTEX_PROJECTID
-    || cfg.GOOGLE_GEMINI_PROJECT_ID
-    || cfg.GCLOUD_VISION_PROJECTID
-    || cfg.GOOGLE_VISION_PROJECT_ID
-    || cfg.GCLOUD_TRANSLATE_PROJECTID
-    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
-    || cfg.GCLOUD_TTS_PROJECTID
-    || cfg.GOOGLE_TTS_PROJECT_ID
-    || cfg.GOOGLE_SPEECH_PROJECT_ID
-    || "";
   el.finalSlidePostprocessMode.value = cfg.FINAL_SLIDE_POSTPROCESS_MODE || "local";
   el.geminiEditModel.value = cfg.GEMINI_EDIT_MODEL || "gemini-3-pro-image-preview";
   el.geminiEditPrompt.value = cfg.GEMINI_EDIT_PROMPT || "";
@@ -606,22 +596,10 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderHomeQuickLanguageOptions(cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
-  el.slideTranslateVertexProjectId.value = cfg.GCLOUD_VERTEX_PROJECTID
-    || cfg.GOOGLE_GEMINI_PROJECT_ID
-    || cfg.GCLOUD_VISION_PROJECTID
-    || cfg.GOOGLE_VISION_PROJECT_ID
-    || cfg.GCLOUD_TRANSLATE_PROJECTID
-    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
-    || cfg.GCLOUD_TTS_PROJECTID
-    || cfg.GOOGLE_TTS_PROJECT_ID
-    || cfg.GOOGLE_SPEECH_PROJECT_ID
-    || "";
   el.slideTranslateVisionProjectId.value = cfg.GCLOUD_VISION_PROJECTID
     || cfg.GOOGLE_VISION_PROJECT_ID
     || cfg.GCLOUD_TRANSLATE_PROJECTID
     || cfg.GOOGLE_TRANSLATE_PROJECT_ID
-    || cfg.GCLOUD_VERTEX_PROJECTID
-    || cfg.GOOGLE_GEMINI_PROJECT_ID
     || cfg.GCLOUD_TTS_PROJECTID
     || cfg.GOOGLE_TTS_PROJECT_ID
     || cfg.GOOGLE_SPEECH_PROJECT_ID
@@ -694,12 +672,9 @@ export async function loadConfig(options = {}) {
 
 export async function saveConfig(options = {}) {
   const videoPath = (state.selectedVideoPath || "").trim();
-  const slideTranslateVertexProjectId = el.slideTranslateVertexProjectId.value.trim();
   const slideTranslateVisionProjectId = el.slideTranslateVisionProjectId.value.trim();
-  const vertexProjectId = el.gcloudVertexProjectId.value.trim();
   const gcloudTranslateProjectId = el.gcloudTranslateProjectId.value.trim();
   const gcloudTtsProjectId = el.gcloudTtsProjectId.value.trim();
-  const resolvedVertexProjectId = slideTranslateVertexProjectId || vertexProjectId;
   const payload = {
     VIDEO_PATH: videoPath,
     ROI_X0: Number(el.roiX0.value),
@@ -737,8 +712,6 @@ export async function saveConfig(options = {}) {
     SPEAKER_FILTER_MAX_EDGE_DENSITY: Number(el.speakerFilterMaxEdgeDensity.value),
     SPEAKER_FILTER_MAX_LAPLACIAN_VAR: Number(el.speakerFilterMaxLaplacianVar.value),
     SPEAKER_FILTER_MAX_DURATION_SEC: Number(el.speakerFilterMaxDurationSec.value),
-    GCLOUD_VERTEX_PROJECTID: resolvedVertexProjectId,
-    GOOGLE_GEMINI_PROJECT_ID: resolvedVertexProjectId,
     FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
     GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
     GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
@@ -835,8 +808,6 @@ export function syncSettingsFieldState() {
     clearHealthStatus("transcription");
   }
 
-  const geminiProjectEnabled = editEnabled || (translateEnabled && geminiSlideTranslate);
-  el.gcloudVertexProjectId.disabled = !geminiProjectEnabled;
   el.finalSlidePostprocessMode.disabled = !editEnabled;
   el.geminiEditModel.disabled = !editEnabled;
   el.geminiEditPrompt.disabled = !editEnabled;
@@ -861,7 +832,6 @@ export function syncSettingsFieldState() {
   el.finalSlideTargetLanguage.disabled = !languageSelectionEnabled;
   el.geminiTranslateModel.disabled = !translateEnabled || !geminiSlideTranslate;
   el.geminiTranslatePrompt.disabled = !translateEnabled || !geminiSlideTranslate;
-  el.slideTranslateVertexProjectId.disabled = !translateEnabled || !geminiSlideTranslate;
   el.slideTranslateVisionProjectId.disabled = !translateEnabled || !deterministicSlideTranslate;
   el.slideTranslateMaxFontSize.disabled = !translateEnabled || !deterministicSlideTranslate;
   setSlideTranslateStyleEditorDisabled(!translateEnabled || !deterministicSlideTranslate);

@@ -119,12 +119,10 @@ function collectTranscriptionHealthPayload() {
 }
 
 function collectSlideEditHealthPayload() {
-  const vertexProjectId = el.gcloudVertexProjectId.value.trim() || el.slideTranslateVertexProjectId.value.trim();
   return {
     FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
     GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
     GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
-    GCLOUD_VERTEX_PROJECTID: vertexProjectId,
     GCLOUD_VISION_PROJECTID: el.slideTranslateVisionProjectId.value.trim(),
     GCLOUD_TRANSLATE_PROJECTID: el.gcloudTranslateProjectId.value.trim(),
     GCLOUD_TTS_PROJECTID: el.gcloudTtsProjectId.value.trim(),
@@ -135,14 +133,12 @@ function collectSlideEditHealthPayload() {
 
 function collectSlideTranslateHealthPayload() {
   const mode = String(el.finalSlideTranslationMode.value || "").trim().toLowerCase();
-  const vertexProjectId = el.slideTranslateVertexProjectId.value.trim() || el.gcloudVertexProjectId.value.trim();
   const visionProjectId = el.slideTranslateVisionProjectId.value.trim();
   return {
     FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
-    GCLOUD_VERTEX_PROJECTID: mode === "gemini" ? vertexProjectId : "",
     GCLOUD_VISION_PROJECTID: mode === "deterministic_glossary" ? visionProjectId : "",
     GCLOUD_TRANSLATE_PROJECTID: mode === "deterministic_glossary"
       ? (el.gcloudTranslateProjectId.value.trim() || visionProjectId)

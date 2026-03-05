@@ -48,6 +48,10 @@
             <section class="quick-settings-panel" aria-label="Quick Settings">
               <div class="quick-settings-head">Quick Settings</div>
               <div class="quick-settings-grid">
+                <label class="quick-setting-field" for="home_target_language">
+                  <span>Target Language</span>
+                  <select id="home_target_language"></select>
+                </label>
                 <label class="quick-setting-field" for="home_transcription_provider">
                   <span>Transcription Model</span>
                   <select id="home_transcription_provider">
@@ -55,22 +59,10 @@
                     <option value="google_chirp_3">google_chirp_3</option>
                   </select>
                 </label>
-                <label class="quick-setting-field" for="home_target_language">
-                  <span>Target Language</span>
-                  <select id="home_target_language"></select>
-                </label>
                 <label class="quick-setting-field" for="home_gemini_text_translate_model">
                   <span>Transcript Translate Model</span>
                   <select id="home_gemini_text_translate_model">
                     <option value="general/translation-llm">general/translation-llm</option>
-                  </select>
-                </label>
-                <label class="quick-setting-field" for="home_final_slide_upscale_mode">
-                  <span>Slide Upscale Mode</span>
-                  <select id="home_final_slide_upscale_mode">
-                    <option value="none">none</option>
-                    <option value="swin2sr">swin2sr</option>
-                    <option value="replicate_nightmare_realesrgan">replicate_nightmare_realesrgan</option>
                   </select>
                 </label>
                 <label class="quick-setting-field" for="home_gemini_edit_model">
@@ -87,6 +79,14 @@
                     <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
                     <option value="gemini-3-pro-image-preview">gemini-3-pro-image-preview</option>
                     <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+                  </select>
+                </label>
+                <label class="quick-setting-field" for="home_final_slide_upscale_mode">
+                  <span>Slide Upscale Model</span>
+                  <select id="home_final_slide_upscale_mode">
+                    <option value="none">none</option>
+                    <option value="swin2sr">swin2sr</option>
+                    <option value="replicate_nightmare_realesrgan">replicate_nightmare_realesrgan</option>
                   </select>
                 </label>
               </div>
@@ -671,10 +671,6 @@
               <div id="step-section-body-edit" class="step-section-body">
                 <div class="settings-list">
                   <div class="settings-row">
-                    <label class="settings-key" for="gcloud_vertex_projectid">GCLOUD_VERTEX_PROJECTID</label>
-                    <div class="settings-value"><input id="gcloud_vertex_projectid" type="text" placeholder="Google Cloud project id for nano banana" /></div>
-                  </div>
-                  <div class="settings-row">
                     <label class="settings-key" for="final_slide_postprocess_mode">FINAL_SLIDE_POSTPROCESS_MODE</label>
                     <div class="settings-value">
                       <select id="final_slide_postprocess_mode">
@@ -748,10 +744,6 @@
                         <option value="deterministic_glossary">Google OCR + Glossary</option>
                       </select>
                     </div>
-                  </div>
-                  <div class="settings-row">
-                    <label class="settings-key" for="slide_translate_vertex_projectid">GCLOUD_VERTEX_PROJECTID</label>
-                    <div class="settings-value"><input id="slide_translate_vertex_projectid" type="text" placeholder="Google Cloud project id for nano banana" /></div>
                   </div>
                   <div class="settings-row">
                     <label class="settings-key" for="slide_translate_vision_projectid">GCLOUD_VISION_PROJECTID</label>

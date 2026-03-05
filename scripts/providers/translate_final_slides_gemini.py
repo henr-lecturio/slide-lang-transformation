@@ -49,12 +49,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project-id",
         default="",
-        help="Google Cloud project id for Vertex AI Gemini image translation.",
+        help="Optional Google Cloud project id (used only for Vertex fallback when no GEMINI_API_KEY is set).",
     )
     parser.add_argument(
         "--location",
         default="",
-        help="Google Cloud location for Vertex AI Gemini image translation (e.g. global or us-central1).",
+        help="Optional Gemini location for Vertex fallback (e.g. global or us-central1).",
     )
     return parser.parse_args()
 
@@ -188,8 +188,8 @@ def main() -> int:
         raise FileNotFoundError(input_dir)
 
     client, types, project_id_used, location_used = ensure_client(args.project_id, args.location)
-    print(f"[Translate] Vertex project: {project_id_used}", flush=True)
-    print(f"[Translate] Vertex location: {location_used}", flush=True)
+    print(f"[Translate] Gemini backend: {project_id_used}", flush=True)
+    print(f"[Translate] Gemini endpoint/location: {location_used}", flush=True)
     clear_pngs(output_dir)
 
     slide_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")

@@ -53,12 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project-id",
         default="",
-        help="Google Cloud project id for Vertex AI Gemini image editing.",
+        help="Optional Google Cloud project id (used only for Vertex fallback when no GEMINI_API_KEY is set).",
     )
     parser.add_argument(
         "--location",
         default="",
-        help="Google Cloud location for Vertex AI Gemini image editing (e.g. global or us-central1).",
+        help="Optional Gemini location for Vertex fallback (e.g. global or us-central1).",
     )
     parser.add_argument("--mask-debug-dir", default="", help="Optional output directory for binary masks.")
     parser.add_argument(
@@ -243,8 +243,8 @@ def main() -> int:
         raise FileNotFoundError(input_dir)
 
     client, types, project_id_used, location_used = ensure_client(args.project_id, args.location)
-    print(f"[GeminiEdit] Vertex project: {project_id_used}", flush=True)
-    print(f"[GeminiEdit] Vertex location: {location_used}", flush=True)
+    print(f"[GeminiEdit] Gemini backend: {project_id_used}", flush=True)
+    print(f"[GeminiEdit] Gemini endpoint/location: {location_used}", flush=True)
     source_modes = load_source_manifest(source_manifest_csv)
     clear_pngs(output_dir)
     if mask_debug_dir is not None:

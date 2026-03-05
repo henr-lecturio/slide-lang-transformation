@@ -33,6 +33,7 @@ from scripts.lib.cloud_translate import (
 )
 from scripts.lib.cloud_gemini_image import (
     ensure_cloud_gemini_image_client,
+    resolve_gemini_api_key as resolve_cloud_gemini_api_key,
     resolve_gemini_location as resolve_cloud_gemini_location,
     resolve_gemini_project_id as resolve_cloud_gemini_project_id,
 )
@@ -434,6 +435,16 @@ def resolve_gemini_project_id_from_mapping(values: dict | None = None) -> str:
     mapping = values if isinstance(values, dict) else {}
     project_hint = resolve_vertex_project_id_from_mapping(mapping)
     return resolve_cloud_gemini_project_id(project_hint)
+
+
+def resolve_gemini_api_key_from_mapping(values: dict | None = None) -> str:
+    mapping = values if isinstance(values, dict) else {}
+    api_key_hint = _map_get(
+        mapping,
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+    )
+    return resolve_cloud_gemini_api_key(api_key_hint)
 
 
 def resolve_gemini_location_from_mapping(values: dict | None = None) -> str:
@@ -1534,6 +1545,7 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
 
     source_path = ensure_within(run_dir, run_dir / source_rel)
     env = parse_env(CONFIG_PATH)
+    gemini_api_key = resolve_gemini_api_key_from_mapping(env)
     gemini_project_id = resolve_gemini_project_id_from_mapping(env)
     gemini_location = resolve_gemini_location_from_mapping(env)
     overrides = overrides if isinstance(overrides, dict) else {}
@@ -1553,8 +1565,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
 
     if action == "edit":
         mode = "gemini"
-        if not gemini_project_id:
-            return False, "Image Lab Slide Edit requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)"
+        if not gemini_api_key:
+            return False, "Image Lab Slide Edit requires GEMINI_API_KEY in the server environment"
         edit_model = override_str("slide_edit_model", env.get("GEMINI_EDIT_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
         edit_prompt = override_str("slide_edit_prompt", GEMINI_PROMPT_PATH.read_text(encoding="utf-8"))
         if edit_model not in ALLOWED_IMAGE_MODELS:
@@ -1599,8 +1611,8 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                     return False, f"Image Lab deterministic translate style config not found: {style_config_path}"
         else:
             mode = "gemini"
-            if not gemini_project_id:
-                return False, "Image Lab Slide Translate requires GCLOUD_VERTEX_PROJECTID (or fallback Google project id)"
+            if not gemini_api_key:
+                return False, "Image Lab Slide Translate requires GEMINI_API_KEY in the server environment"
             translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
             translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
             if translate_model not in ALLOWED_IMAGE_MODELS:
@@ -2211,14 +2223,14 @@ def start_run() -> tuple[bool, str]:
     run_step_tts = (env.get("RUN_STEP_TTS", "1") or "1").strip() not in {"0", "false", "False", "no", "off"}
     final_slide_mode = (env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local") or "local").strip().lower()
     translation_mode = (env.get("FINAL_SLIDE_TRANSLATION_MODE", "none") or "none").strip().lower()
+    gemini_api_key = resolve_gemini_api_key_from_mapping(env)
     translate_project_id = resolve_translate_project_id_from_mapping(env)
     vision_project_id = resolve_vision_project_id_from_mapping(env) or translate_project_id
-    vertex_project_id = resolve_vertex_project_id_from_mapping(env)
     if (
         (run_step_edit and final_slide_mode == "gemini")
         or (run_step_translate and translation_mode == "gemini")
-    ) and not vertex_project_id:
-        return False, "GCLOUD_VERTEX_PROJECTID must be set when nano banana Slide Edit/Translate is enabled"
+    ) and not gemini_api_key:
+        return False, "GEMINI_API_KEY must be set when nano banana Slide Edit/Translate is enabled"
     if run_step_translate and translation_mode == "deterministic_glossary":
         if not vision_project_id:
             return False, "GCLOUD_VISION_PROJECTID must be set when FINAL_SLIDE_TRANSLATION_MODE=deterministic_glossary"
@@ -2382,9 +2394,12 @@ def make_silent_wav_bytes(duration_sec: float = 1.2, sample_rate: int = 16000) -
 
 def ensure_gemini_client(values: dict | None = None):
     mapping = values if isinstance(values, dict) else {}
+    api_key = resolve_gemini_api_key_from_mapping(mapping)
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY must not be empty.")
     project_id = resolve_gemini_project_id_from_mapping(mapping)
     location = resolve_gemini_location_from_mapping(mapping)
-    return ensure_cloud_gemini_image_client(project_id=project_id, location=location)
+    return ensure_cloud_gemini_image_client(project_id=project_id, location=location, api_key=api_key)
 
 
 def inject_target_language(prompt: str, target_language: str) -> str:
@@ -3409,8 +3424,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("FINAL_SLIDE_POSTPROCESS_MODE must be none, local, or gemini")
                 merged_cfg = dict(existing_env)
                 merged_cfg.update({key: str(value) for key, value in cfg.items()})
-                if cfg["FINAL_SLIDE_POSTPROCESS_MODE"] == "gemini" and not resolve_vertex_project_id_from_mapping(merged_cfg):
-                    raise ValueError("GCLOUD_VERTEX_PROJECTID must not be empty when FINAL_SLIDE_POSTPROCESS_MODE=gemini")
+                if cfg["FINAL_SLIDE_POSTPROCESS_MODE"] == "gemini" and not resolve_gemini_api_key_from_mapping(merged_cfg):
+                    raise ValueError("GEMINI_API_KEY must be set in .env.local when FINAL_SLIDE_POSTPROCESS_MODE=gemini")
                 cfg["GEMINI_EDIT_MODEL"] = validate_image_model(cfg["GEMINI_EDIT_MODEL"], "GEMINI_EDIT_MODEL")
                 if not gemini_edit_prompt.strip():
                     raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
@@ -3429,8 +3444,8 @@ class Handler(BaseHTTPRequestHandler):
                 cfg["GEMINI_TRANSLATE_MODEL"] = validate_image_model(cfg["GEMINI_TRANSLATE_MODEL"], "GEMINI_TRANSLATE_MODEL")
                 if not gemini_translate_prompt.strip():
                     raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
-                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini" and not resolve_vertex_project_id_from_mapping(merged_cfg):
-                    raise ValueError("GCLOUD_VERTEX_PROJECTID must not be empty when FINAL_SLIDE_TRANSLATION_MODE=gemini")
+                if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini" and not resolve_gemini_api_key_from_mapping(merged_cfg):
+                    raise ValueError("GEMINI_API_KEY must be set in .env.local when FINAL_SLIDE_TRANSLATION_MODE=gemini")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "deterministic_glossary" and not (
                     cfg["GCLOUD_VISION_PROJECTID"]
                     or cfg["GCLOUD_TRANSLATE_PROJECTID"]

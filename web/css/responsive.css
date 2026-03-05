@@ -70,6 +70,12 @@
     gap: 8px;
   }
 
+  .quick-setting-field {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 6px;
+  }
+
   .lab-toolbar,
   .lab-toolbar-main,
   .lab-toolbar-side {
