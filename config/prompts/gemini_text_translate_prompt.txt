@@ -1,4 +1,6 @@
-Translate the provided mapped lecture narration 1:1 into {{TARGET_LANGUAGE}}.
+The items are consecutive segments from a speech transcript.
+Sentences may span across segment boundaries.
+Translate them as coherent, flowing text into {{TARGET_LANGUAGE}}, keeping each segment's translation in its own output entry.
 
 Rules:
 - Preserve meaning exactly.

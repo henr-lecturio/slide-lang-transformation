@@ -52,6 +52,7 @@ CONFIG_PATH = ROOT_DIR / "config" / "pipeline.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
 GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_tts_prompt.txt"
+GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
 GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "language" / "gemini_tts_languages.json"
 TRANSLATION_TERMBASE_PATH = ROOT_DIR / "config" / "language" / "translation_termbase.csv"
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
@@ -3284,6 +3285,7 @@ class Handler(BaseHTTPRequestHandler):
                     "TRANSCRIPT_TRANSLATE_MODEL": env.get("TRANSCRIPT_TRANSLATE_MODEL", "gemini-2.5-pro"),
                     "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": env.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", ""),
                     "TRANSLATION_TERMBASE_CSV": read_text_file(TRANSLATION_TERMBASE_PATH).rstrip("\n"),
+                    "GEMINI_TEXT_TRANSLATE_PROMPT": read_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH).rstrip("\n"),
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
                     "GCLOUD_TTS_PROJECTID": resolve_tts_project_id_from_mapping(env),
@@ -3579,6 +3581,7 @@ class Handler(BaseHTTPRequestHandler):
                 slide_translate_styles_json = str(data["SLIDE_TRANSLATE_STYLES_JSON"])
                 cfg.pop("SLIDE_TRANSLATE_STYLES_JSON", None)
                 translation_termbase_csv = str(data["TRANSLATION_TERMBASE_CSV"])
+                gemini_text_translate_prompt = str(data.get("GEMINI_TEXT_TRANSLATE_PROMPT", ""))
                 gemini_tts_prompt = str(data["GEMINI_TTS_PROMPT"])
                 if cfg["ROI_X0"] >= cfg["ROI_X1"] or cfg["ROI_Y0"] >= cfg["ROI_Y1"]:
                     raise ValueError("ROI must satisfy x0 < x1 and y0 < y1")
@@ -3695,6 +3698,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty when Transcript Translate uses Cloud Translation")
                 if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and transcript_uses_gemini and not resolve_gemini_api_key_from_mapping(merged_cfg):
                     raise ValueError("GEMINI_API_KEY must be set in .env.local when Transcript Translate uses gemini_* models")
+                if cfg["RUN_STEP_TEXT_TRANSLATE"] == 1 and transcript_uses_gemini and not gemini_text_translate_prompt.strip():
+                    raise ValueError("GEMINI_TEXT_TRANSLATE_PROMPT must not be empty when Transcript Translate uses gemini_* models")
                 if not cfg["GOOGLE_TRANSLATE_LOCATION"]:
                     raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty")
                 if not cfg["GOOGLE_TRANSLATE_MODEL"]:
@@ -3789,6 +3794,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 write_text_file(TRANSLATION_TERMBASE_PATH, translation_termbase_csv)
                 write_text_file(GEMINI_TTS_PROMPT_PATH, gemini_tts_prompt)
+                if gemini_text_translate_prompt.strip():
+                    write_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH, gemini_text_translate_prompt)
                 return self._send_json(
                     200,
                     {
@@ -3798,6 +3805,7 @@ class Handler(BaseHTTPRequestHandler):
                         "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
                         "SLIDE_TRANSLATE_STYLES_JSON": normalized_slide_translate_styles_json.rstrip("\n"),
                         "TRANSLATION_TERMBASE_CSV": translation_termbase_csv.rstrip("\n"),
+                        "GEMINI_TEXT_TRANSLATE_PROMPT": gemini_text_translate_prompt.rstrip("\n"),
                         "REPLICATE_API_TOKEN_SET": bool((os.environ.get("REPLICATE_API_TOKEN") or "").strip()),
                     },
                 )

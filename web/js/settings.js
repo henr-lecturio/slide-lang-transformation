@@ -611,6 +611,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.gcloudTranslateProjectId.value = cfg.GCLOUD_TRANSLATE_PROJECTID || cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GCLOUD_TTS_PROJECTID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.googleTranslateLocation.value = cfg.GOOGLE_TRANSLATE_LOCATION || "us-central1";
   el.geminiTextTranslateModel.value = cfg.TRANSCRIPT_TRANSLATE_MODEL || "gemini-2.5-pro";
+  el.geminiTextTranslatePrompt.value = cfg.GEMINI_TEXT_TRANSLATE_PROMPT || "";
   el.googleTranslateSourceLanguageCode.value = cfg.GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE || "";
   renderTermbaseEditor(cfg.TRANSLATION_TERMBASE_CSV || "");
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
@@ -644,6 +645,9 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.videoExportBgColor.value = cfg.VIDEO_EXPORT_BG_COLOR || "white";
   if (el.homeGeminiTextTranslateModel) {
     el.homeGeminiTextTranslateModel.value = cfg.TRANSCRIPT_TRANSLATE_MODEL || "gemini-2.5-pro";
+  }
+  if (el.homeGeminiTtsModel) {
+    el.homeGeminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   }
   if (el.homeFinalSlideUpscaleMode) {
     el.homeFinalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
@@ -734,6 +738,7 @@ export async function saveConfig(options = {}) {
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
     GOOGLE_TRANSLATE_MODEL: String(lastLoadedConfig.GOOGLE_TRANSLATE_MODEL || "general/translation-llm").trim(),
     TRANSCRIPT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
+    GEMINI_TEXT_TRANSLATE_PROMPT: el.geminiTextTranslatePrompt.value,
     GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
     TRANSLATION_TERMBASE_CSV: (() => {
       syncTermbaseCsvFromTable();
@@ -861,6 +866,7 @@ export function syncSettingsFieldState() {
   el.gcloudTranslateProjectId.disabled = !cloudTranslateConfigEnabled;
   el.googleTranslateLocation.disabled = !cloudTranslateConfigEnabled;
   el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
+  el.geminiTextTranslatePrompt.disabled = !textTranslateEnabled;
   el.googleTranslateSourceLanguageCode.disabled = !sourceLanguageConfigEnabled;
   if (el.textTranslateHealthCheck) {
     el.textTranslateHealthCheck.disabled = !textTranslateEnabled;

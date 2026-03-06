@@ -193,6 +193,9 @@ function bindEvents() {
     if (el.homeGeminiTextTranslateModel && el.geminiTextTranslateModel) {
       el.geminiTextTranslateModel.value = el.homeGeminiTextTranslateModel.value;
     }
+    if (el.homeGeminiTtsModel && el.geminiTtsModel) {
+      el.geminiTtsModel.value = el.homeGeminiTtsModel.value;
+    }
     if (el.homeFinalSlideUpscaleMode && el.finalSlideUpscaleMode) {
       el.finalSlideUpscaleMode.value = el.homeFinalSlideUpscaleMode.value;
     }
@@ -210,6 +213,7 @@ function bindEvents() {
     el.homeTranscriptionProvider,
     el.homeTargetLanguage,
     el.homeGeminiTextTranslateModel,
+    el.homeGeminiTtsModel,
     el.homeFinalSlideUpscaleMode,
     el.homeGeminiEditModel,
     el.homeGeminiTranslateModel,
@@ -499,6 +503,7 @@ function bindEvents() {
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
     el.geminiTextTranslateModel,
+    el.geminiTextTranslatePrompt,
     el.gcloudTranslateProjectId,
     el.googleTranslateLocation,
     el.googleTranslateSourceLanguageCode,

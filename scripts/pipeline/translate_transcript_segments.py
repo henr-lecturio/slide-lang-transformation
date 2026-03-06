@@ -31,6 +31,7 @@ from scripts.lib.translation_memory import (
 )
 
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
+DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--origin-run-id", default="", help="Optional run id stored on newly created TM entries.")
     parser.add_argument("--chunk-size", type=int, default=12, help="Maximum number of translatable segments per chunk.")
     parser.add_argument("--chunk-max-chars", type=int, default=2800, help="Maximum total source characters per chunk.")
+    parser.add_argument("--prompt-file", default=str(DEFAULT_PROMPT_PATH), help="Path to a text file containing the translation system prompt.")
     return parser.parse_args()
 
 
@@ -157,6 +159,7 @@ def translate_texts_gemini(
     target_language: str,
     target_language_code: str,
     source_language_code: str = "",
+    system_prompt: str = "",
 ) -> list[str]:
     source_code = str(source_language_code or "").strip()
     payload = {
@@ -168,13 +171,18 @@ def translate_texts_gemini(
             for idx, text in enumerate(contents)
         ],
     }
-    prompt = (
-        "Translate each item in items to the target language.\n"
-        "Preserve placeholders like __TERM_0001__ exactly.\n"
+    custom_prompt = str(system_prompt or "").strip()
+    if custom_prompt:
+        custom_prompt = custom_prompt.replace("{{TARGET_LANGUAGE}}", str(target_language or "").strip())
+    prompt_parts = []
+    if custom_prompt:
+        prompt_parts.append(custom_prompt)
+    prompt_parts.append(
         "Return strict JSON only in this shape:\n"
         '{"translations":[{"index":0,"translated_text":"..."}]}\n'
         "Do not add explanations."
     )
+    prompt = "\n".join(prompt_parts)
     response = client.models.generate_content(
         model=str(model),
         contents=[
@@ -229,6 +237,7 @@ def translate_chunk(
     target_language_code: str,
     source_language_code: str,
     pending_segments: list[dict[str, Any]],
+    system_prompt: str = "",
 ) -> dict[int, str]:
     if provider == "google_cloud_translate":
         translated_list = translate_texts_llm(
@@ -248,6 +257,7 @@ def translate_chunk(
             target_language=target_language,
             target_language_code=target_language_code,
             source_language_code=source_language_code,
+            system_prompt=system_prompt,
         )
     if len(translated_list) != len(pending_segments):
         raise RuntimeError(
@@ -296,6 +306,12 @@ def main() -> int:
     out_csv = Path(args.out_csv).resolve()
     termbase_file = Path(args.termbase_file).resolve()
     tm_db_path = Path(args.tm_db).resolve()
+
+    prompt_file = Path(args.prompt_file).resolve()
+    system_prompt = ""
+    if prompt_file.exists():
+        system_prompt = prompt_file.read_text(encoding="utf-8").strip()
+        print(f"[TranscriptTranslate] Using prompt file: {prompt_file}", flush=True)
 
     if not input_json.exists():
         raise FileNotFoundError(input_json)
@@ -383,6 +399,7 @@ def main() -> int:
             target_language_code=target_language_code,
             source_language_code=str(args.source_language_code or "").strip(),
             pending_segments=pending_segments,
+            system_prompt=system_prompt,
         )
         for pending in pending_segments:
             segment_id = int(pending["segment_id"])

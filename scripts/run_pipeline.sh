@@ -6,6 +6,7 @@ CONFIG_FILE="$ROOT_DIR/config/pipeline.env"
 GEMINI_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_translate_prompt.txt"
 GEMINI_TTS_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_tts_prompt.txt"
+GEMINI_TEXT_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_text_translate_prompt.txt"
 TRANSLATION_TERMBASE_FILE="$ROOT_DIR/config/language/translation_termbase.csv"
 TRANSLATION_MEMORY_DB="$ROOT_DIR/output/translation_memory/translation_memory.sqlite"
 LOCAL_ENV_FILE="$ROOT_DIR/.env.local"
@@ -518,7 +519,8 @@ elif [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
     --termbase-file "$TRANSLATION_TERMBASE_FILE" \
     --tm-db "$TRANSLATION_MEMORY_DB" \
     --origin-run-id "$RUN_ID" \
-    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
+    --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE"
   publish_file "$TRANSCRIPT_TRANSLATED_JSON.__tmp" "$TRANSCRIPT_TRANSLATED_JSON"
   publish_file "$TRANSCRIPT_TRANSLATED_CSV.__tmp" "$TRANSCRIPT_TRANSLATED_CSV"
   step_done text-translate
