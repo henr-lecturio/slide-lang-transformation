@@ -388,6 +388,7 @@
 .lab-accordion-header {
   display: flex;
   align-items: center;
+  gap: 12px;
   padding: 14px 20px;
   cursor: pointer;
   user-select: none;
@@ -398,12 +399,15 @@
   display: none;
 }
 
-.lab-accordion-header::before {
+.lab-accordion-header::marker {
+  display: none;
   content: "";
-  display: inline-block;
+}
+
+.lab-accordion-chevron {
+  display: block;
   width: 10px;
   height: 10px;
-  margin-right: 12px;
   border-right: 2px solid var(--text-muted);
   border-bottom: 2px solid var(--text-muted);
   transform: rotate(-45deg);
@@ -411,7 +415,7 @@
   flex-shrink: 0;
 }
 
-.lab-accordion[open] > .lab-accordion-header::before {
+.lab-accordion[open] .lab-accordion-chevron {
   transform: rotate(45deg);
 }
 
@@ -421,7 +425,9 @@
 
 .lab-accordion-header h2 {
   margin: 0;
+  padding: 0;
   font-size: 1rem;
+  line-height: 1;
 }
 
 .lab-accordion-body {
