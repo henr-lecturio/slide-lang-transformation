@@ -1,0 +1,1 @@
+Replace the text in the image according to this mapping. Only replace the listed text elements. Do not alter any other visual elements, backgrounds, colors, or layout.

@@ -1,0 +1,2 @@
+Translate the following text elements to {{TARGET_LANGUAGE}}.
+Return a JSON array where each object has "id" (same as input), "original" (unchanged), and "translated".

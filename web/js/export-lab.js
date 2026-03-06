@@ -2,6 +2,7 @@ import { el } from "./dom.js";
 import { state } from "./state.js";
 import { apiGet, apiPost } from "./api.js";
 import { formatRunIdLabel } from "./ui-core.js";
+import { syncFavicon } from "./favicon.js";
 
 const EXPORT_LAB_TEST_SETTINGS_STORAGE_KEY = "slide-transform-export-lab-test-settings";
 
@@ -307,6 +308,7 @@ export function renderExportLabSelection() {
 export function setExportLabStatus(current) {
   state.exportLabCurrent = current || null;
   state.exportLabStatus = current?.status || "idle";
+  syncFavicon("export-lab", current?.status || "idle");
   const logs = (current?.log_tail || []).slice(-120);
   if (logs.length === 0 && current?.message) {
     logs.push(`[Export Lab] ${current.message}`);

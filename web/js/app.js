@@ -4,12 +4,12 @@ import { formatRunIdLabel, getInitialActiveTab, setActiveTab, showButtonSuccess,
 import { syncRunFavicon } from "./favicon.js";
 import {
   clearHealthStatus,
-  testSlideEditHealth,
-  testSlideTranslateHealth,
-  testSlideUpscaleHealth,
-  testTextTranslateHealth,
-  testTranscriptionHealth,
-  testTtsHealth,
+  testGeminiHealth,
+  testSpeechToTextHealth,
+  testCloudTranslationHealth,
+  testCloudVisionHealth,
+  testCloudTtsHealth,
+  testReplicateHealth,
   toggleHealthMeta,
 } from "./health-checks.js";
 import {
@@ -253,29 +253,31 @@ function bindEvents() {
     el.slideTranslateStyleEditorToggle.addEventListener("click", toggleSlideTranslateStyleEditor);
   }
 
-  el.ttsHealthCheck.addEventListener("click", () => runTask(testTtsHealth));
-  if (el.transcriptionHealthCheck) {
-    el.transcriptionHealthCheck.addEventListener("click", () => runTask(testTranscriptionHealth));
+  if (el.geminiHealthCheck) {
+    el.geminiHealthCheck.addEventListener("click", () => runTask(testGeminiHealth));
   }
-  if (el.slideEditHealthCheck) {
-    el.slideEditHealthCheck.addEventListener("click", () => runTask(testSlideEditHealth));
+  if (el.speechToTextHealthCheck) {
+    el.speechToTextHealthCheck.addEventListener("click", () => runTask(testSpeechToTextHealth));
   }
-  if (el.slideTranslateHealthCheck) {
-    el.slideTranslateHealthCheck.addEventListener("click", () => runTask(testSlideTranslateHealth));
+  if (el.cloudTranslationHealthCheck) {
+    el.cloudTranslationHealthCheck.addEventListener("click", () => runTask(testCloudTranslationHealth));
   }
-  if (el.slideUpscaleHealthCheck) {
-    el.slideUpscaleHealthCheck.addEventListener("click", () => runTask(testSlideUpscaleHealth));
+  if (el.cloudVisionHealthCheck) {
+    el.cloudVisionHealthCheck.addEventListener("click", () => runTask(testCloudVisionHealth));
   }
-  if (el.textTranslateHealthCheck) {
-    el.textTranslateHealthCheck.addEventListener("click", () => runTask(testTextTranslateHealth));
+  if (el.cloudTtsHealthCheck) {
+    el.cloudTtsHealthCheck.addEventListener("click", () => runTask(testCloudTtsHealth));
+  }
+  if (el.replicateHealthCheck) {
+    el.replicateHealthCheck.addEventListener("click", () => runTask(testReplicateHealth));
   }
   [
-    ["transcription", el.transcriptionHealthMetaToggle],
-    ["slideEdit", el.slideEditHealthMetaToggle],
-    ["slideTranslate", el.slideTranslateHealthMetaToggle],
-    ["slideUpscale", el.slideUpscaleHealthMetaToggle],
-    ["textTranslate", el.textTranslateHealthMetaToggle],
-    ["tts", el.ttsHealthMetaToggle],
+    ["gemini", el.geminiHealthMetaToggle],
+    ["speechToText", el.speechToTextHealthMetaToggle],
+    ["cloudTranslation", el.cloudTranslationHealthMetaToggle],
+    ["cloudVision", el.cloudVisionHealthMetaToggle],
+    ["cloudTts", el.cloudTtsHealthMetaToggle],
+    ["replicate", el.replicateHealthMetaToggle],
   ].forEach(([key, button]) => {
     if (button) {
       button.addEventListener("click", () => toggleHealthMeta(key));
@@ -376,7 +378,6 @@ function bindEvents() {
       syncSelectedTtsLanguage();
 
       el.geminiTranslateModel.value = String(settings.slide_translate_model || el.geminiTranslateModel.value || "").trim();
-      el.geminiTranslatePrompt.value = String(settings.slide_translate_prompt ?? el.geminiTranslatePrompt.value ?? "");
       const styleJson = String(settings.slide_translate_styles_json ?? "").trim();
       if (styleJson) {
         renderSlideTranslateStyleEditor(styleJson);
@@ -480,90 +481,67 @@ function bindEvents() {
     input.addEventListener("change", syncSettingsFieldState);
   }
 
+  // GCLOUD_PROJECT_ID change clears all 6 health statuses
+  if (el.gcloudProjectId) {
+    const clearAll = () => {
+      clearHealthStatus("gemini");
+      clearHealthStatus("speechToText");
+      clearHealthStatus("cloudTranslation");
+      clearHealthStatus("cloudVision");
+      clearHealthStatus("cloudTts");
+      clearHealthStatus("replicate");
+    };
+    el.gcloudProjectId.addEventListener("input", clearAll);
+    el.gcloudProjectId.addEventListener("change", clearAll);
+  }
+
+  for (const input of [el.geminiEditModel]) {
+    input.addEventListener("input", () => clearHealthStatus("gemini"));
+    input.addEventListener("change", () => clearHealthStatus("gemini"));
+  }
+
   for (const input of [
     el.transcriptionProvider,
-    el.googleSpeechProjectId,
     el.googleSpeechLocation,
     el.googleSpeechModel,
     el.googleSpeechLanguageCodes,
   ]) {
-    input.addEventListener("input", () => clearHealthStatus("transcription"));
-    input.addEventListener("change", () => clearHealthStatus("transcription"));
-  }
-
-  for (const input of [el.runStepEdit, el.finalSlidePostprocessMode, el.geminiEditModel, el.geminiEditPrompt]) {
-    input.addEventListener("input", () => clearHealthStatus("slideEdit"));
-    input.addEventListener("change", () => clearHealthStatus("slideEdit"));
+    input.addEventListener("input", () => clearHealthStatus("speechToText"));
+    input.addEventListener("change", () => clearHealthStatus("speechToText"));
   }
 
   for (const input of [
-    el.runStepTranslate,
-    el.finalSlideTranslationMode,
-    el.finalSlideTargetLanguageSearch,
-    el.finalSlideTargetLanguage,
-    el.slideTranslateVisionProjectId,
-    el.geminiTranslateModel,
-    el.geminiTranslatePrompt,
-  ]) {
-    input.addEventListener("input", () => clearHealthStatus("slideTranslate"));
-    input.addEventListener("change", () => clearHealthStatus("slideTranslate"));
-  }
-
-  for (const input of [
-    el.runStepUpscale,
-    el.finalSlideUpscaleMode,
-    el.finalSlideUpscaleModel,
-    el.finalSlideUpscaleDevice,
-    el.finalSlideUpscaleTileSize,
-    el.finalSlideUpscaleTileOverlap,
-    el.replicateNightmareRealesrganModelRef,
-    el.replicateNightmareRealesrganVersionId,
-    el.replicateNightmareRealesrganPricePerSecond,
-  ]) {
-    input.addEventListener("input", () => clearHealthStatus("slideUpscale"));
-    input.addEventListener("change", () => clearHealthStatus("slideUpscale"));
-  }
-
-  for (const input of [
-    el.runStepTextTranslate,
-    el.finalSlideTargetLanguageSearch,
-    el.finalSlideTargetLanguage,
-    el.geminiTextTranslateModel,
-    el.geminiTextTranslatePrompt,
-    el.gcloudTranslateProjectId,
     el.googleTranslateLocation,
     el.googleTranslateSourceLanguageCode,
+    el.finalSlideTargetLanguageSearch,
+    el.finalSlideTargetLanguage,
   ]) {
-    input.addEventListener("input", () => clearHealthStatus("textTranslate"));
-    input.addEventListener("change", () => clearHealthStatus("textTranslate"));
+    input.addEventListener("input", () => clearHealthStatus("cloudTranslation"));
+    input.addEventListener("change", () => clearHealthStatus("cloudTranslation"));
   }
   if (el.termbaseTableBody) {
-    el.termbaseTableBody.addEventListener("input", () => clearHealthStatus("textTranslate"));
-    el.termbaseTableBody.addEventListener("change", () => clearHealthStatus("textTranslate"));
+    el.termbaseTableBody.addEventListener("input", () => clearHealthStatus("cloudTranslation"));
+    el.termbaseTableBody.addEventListener("change", () => clearHealthStatus("cloudTranslation"));
   }
 
   for (const input of [
-    el.finalSlideTranslationMode,
-  ]) {
-    if (!input) continue;
-    input.addEventListener("input", () => clearHealthStatus("slideTranslate"));
-    input.addEventListener("change", () => clearHealthStatus("slideTranslate"));
-  }
-  if (el.slideTranslateStyleTableBody) {
-    el.slideTranslateStyleTableBody.addEventListener("input", () => clearHealthStatus("slideTranslate"));
-    el.slideTranslateStyleTableBody.addEventListener("change", () => clearHealthStatus("slideTranslate"));
-  }
-
-  for (const input of [
-    el.gcloudTtsProjectId,
     el.finalSlideTargetLanguageSearch,
     el.finalSlideTargetLanguage,
     el.geminiTtsModel,
     el.geminiTtsVoice,
     el.geminiTtsPrompt,
   ]) {
-    input.addEventListener("input", () => clearHealthStatus("tts"));
-    input.addEventListener("change", () => clearHealthStatus("tts"));
+    input.addEventListener("input", () => clearHealthStatus("cloudTts"));
+    input.addEventListener("change", () => clearHealthStatus("cloudTts"));
+  }
+
+  for (const input of [
+    el.replicateNightmareRealesrganModelRef,
+    el.replicateNightmareRealesrganVersionId,
+    el.replicateNightmareRealesrganPricePerSecond,
+  ]) {
+    input.addEventListener("input", () => clearHealthStatus("replicate"));
+    input.addEventListener("change", () => clearHealthStatus("replicate"));
   }
 
   for (const input of [

@@ -2,6 +2,7 @@ import { el } from "./dom.js";
 import { state } from "./state.js";
 import { apiGet, apiPost } from "./api.js";
 import { formatRunIdLabel } from "./ui-core.js";
+import { syncFavicon } from "./favicon.js";
 
 function setNodeText(node, text) {
   if (node) node.textContent = text;
@@ -146,6 +147,7 @@ export function renderConsistencyLabSelection() {
 export function setConsistencyLabStatus(current) {
   state.consistencyLabCurrent = current || null;
   state.consistencyLabStatus = current?.status || "idle";
+  syncFavicon("consistency-lab", current?.status || "idle");
   const logs = (current?.log_tail || []).slice(-120);
   if (logs.length === 0 && current?.message) {
     logs.push(`[Consistency Lab] ${current.message}`);

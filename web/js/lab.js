@@ -3,6 +3,7 @@ import { state } from "./state.js";
 import { apiGet, apiPost } from "./api.js";
 import { formatRunIdLabel, formatUsd } from "./ui-core.js";
 import { openImageModal } from "./modals.js";
+import { syncFavicon } from "./favicon.js";
 
 const LAB_TEST_SETTINGS_STORAGE_KEY = "slide-transform-lab-test-settings";
 const ALLOWED_IMAGE_MODELS = new Set([
@@ -414,7 +415,10 @@ function defaultLabTestSettingsFromCurrentUi() {
     slide_edit_prompt: el.geminiEditPrompt.value,
     target_language: selectedMainTargetLanguageLabel(),
     slide_translate_model: el.geminiTranslateModel.value.trim(),
-    slide_translate_prompt: el.geminiTranslatePrompt.value,
+    slide_extract_model: el.geminiExtractModel.value.trim(),
+    slide_extract_prompt: el.geminiSlideExtractPrompt.value,
+    slide_translate_prompt: el.geminiSlideTranslatePrompt.value,
+    slide_render_prompt: el.geminiSlideRenderPrompt.value,
     slide_translate_styles_json: String(el.slideTranslateStylesJson?.value || "").trim(),
     slide_upscale_mode: el.finalSlideUpscaleMode.value.trim() || "swin2sr",
     slide_upscale_model: el.finalSlideUpscaleModel.value.trim(),
@@ -652,6 +656,7 @@ export function setLabStatus(current) {
   const status = current?.status || "idle";
   state.labCurrent = current || {};
   state.labStatus = status;
+  syncFavicon("lab", status);
   renderLabStatusLine(status);
   const resultMeta = [];
   if (current?.message) resultMeta.push(current.message);

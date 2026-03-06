@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$ROOT_DIR/config/pipeline.env"
 GEMINI_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_translate_prompt.txt"
+GEMINI_SLIDE_EXTRACT_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_slide_extract_prompt.txt"
+GEMINI_SLIDE_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_slide_translate_prompt.txt"
+GEMINI_SLIDE_RENDER_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_slide_render_prompt.txt"
 GEMINI_TTS_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_tts_prompt.txt"
 GEMINI_TEXT_TRANSLATE_PROMPT_FILE="$ROOT_DIR/config/prompts/gemini_text_translate_prompt.txt"
 TRANSLATION_TERMBASE_FILE="$ROOT_DIR/config/language/translation_termbase.csv"
@@ -733,14 +736,13 @@ elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" \
         --model "$GEMINI_TRANSLATE_MODEL" \
-        --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
         --project-id "$GCLOUD_VERTEX_PROJECTID" \
         --location "$GOOGLE_GEMINI_LOCATION" \
-        --termbase-file "$TRANSLATION_TERMBASE_FILE" \
         --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
-        --slide-map-json "$TEXT_TRANSLATED_JSON" \
-        --vision-project-id "$GCLOUD_VISION_PROJECTID" \
-        --max-review-retries "${SLIDE_TRANSLATE_MAX_REVIEW_RETRIES:-3}"
+        --extract-model "$GEMINI_EXTRACT_MODEL" \
+        --extract-prompt "$(cat "$GEMINI_SLIDE_EXTRACT_PROMPT_FILE")" \
+        --translate-prompt "$(cat "$GEMINI_SLIDE_TRANSLATE_PROMPT_FILE")" \
+        --render-prompt "$(cat "$GEMINI_SLIDE_RENDER_PROMPT_FILE")"
       publish_dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR"
       step_done translate
       echo "[Translate] Translation finished."
@@ -857,30 +859,6 @@ elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
 else
   echo "[Step] translate: skipped"
   step_skip translate "disabled"
-fi
-
-# --- translate-review (post-translate consistency check) ---
-if should_skip_step translate-review; then
-  step_skip translate-review "resumed"
-elif [ "$RUN_STEP_TRANSLATE" = "1" ] && [ "$FINAL_SLIDE_TRANSLATION_MODE" = "gemini" ] \
-     && [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && [ -n "${GCLOUD_VISION_PROJECTID:-}" ]; then
-  step_start translate-review
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/review_slide_translate_consistency.py" \
-    --original-dir "$FINAL_SLIDE_DIR" \
-    --translated-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
-    --vision-project-id "$GCLOUD_VISION_PROJECTID" \
-    --vision-feature "${GOOGLE_VISION_FEATURE:-DOCUMENT_TEXT_DETECTION}" \
-    --model "$GEMINI_TRANSLATE_MODEL" \
-    --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
-    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
-    --termbase-file "$TRANSLATION_TERMBASE_FILE" \
-    --project-id "$GCLOUD_VERTEX_PROJECTID" \
-    --location "$GOOGLE_GEMINI_LOCATION" \
-    --max-retries "${SLIDE_TRANSLATE_MAX_REVIEW_RETRIES:-2}" \
-    --report-json "$FINAL_SLIDE_TRANSLATED_DIR/consistency_report.json"
-  step_done translate-review
-else
-  step_skip translate-review "no vision or translate disabled"
 fi
 
 if should_skip_step upscale; then

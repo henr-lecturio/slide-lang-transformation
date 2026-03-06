@@ -1,0 +1,1 @@
+Extract all visible text from the image. Return a JSON object with a single key "text_elements" containing an array of objects, each with "id" (integer, starting at 1) and "text" (the exact text as shown on the image). Only include actual text visible in the image. Do not include descriptions of visual elements, backgrounds, or icons.

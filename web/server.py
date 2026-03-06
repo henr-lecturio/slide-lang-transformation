@@ -51,6 +51,9 @@ FONT_DIR = ROOT_DIR / "config" / "fonts"
 CONFIG_PATH = ROOT_DIR / "config" / "pipeline.env"
 GEMINI_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_edit_prompt.txt"
 GEMINI_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
+GEMINI_SLIDE_EXTRACT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_slide_extract_prompt.txt"
+GEMINI_SLIDE_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_slide_translate_prompt.txt"
+GEMINI_SLIDE_RENDER_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_slide_render_prompt.txt"
 GEMINI_TTS_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_tts_prompt.txt"
 GEMINI_TEXT_TRANSLATE_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_text_translate_prompt.txt"
 GEMINI_TTS_LANGUAGES_PATH = ROOT_DIR / "config" / "language" / "gemini_tts_languages.json"
@@ -58,7 +61,7 @@ TRANSLATION_TERMBASE_PATH = ROOT_DIR / "config" / "language" / "translation_term
 LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
 OUTPUT_DIR = ROOT_DIR / "output"
 RUNS_DIR = OUTPUT_DIR / "runs"
-LAB_DIR = OUTPUT_DIR / "ui_lab"
+LAB_DIR = OUTPUT_DIR / "image_lab"
 EXPORT_LAB_DIR = OUTPUT_DIR / "export_lab"
 OVERLAY_PATH = OUTPUT_DIR / "roi_tuning" / "roi_overlay.png"
 VIDEOS_DIR = ROOT_DIR / "videos"
@@ -1674,13 +1677,14 @@ def start_consistency_lab_job(run_id: str) -> tuple[bool, str]:
         "scripts/pipeline/review_slide_translate_consistency.py",
         "--original-dir", str(artifacts["original_dir"]),
         "--translated-dir", str(artifacts["translated_dir"]),
-        "--vision-project-id", env.get("SLIDE_TRANSLATE_VISION_PROJECTID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
         "--model", env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview"),
-        "--prompt-file", str(GEMINI_TRANSLATE_PROMPT_PATH),
+        "--extract-model", env.get("GEMINI_EXTRACT_MODEL", "gemini-3.1-pro-preview"),
+        "--extract-prompt", read_text_file(GEMINI_SLIDE_EXTRACT_PROMPT_PATH),
+        "--translate-prompt", read_text_file(GEMINI_SLIDE_TRANSLATE_PROMPT_PATH),
+        "--render-prompt", read_text_file(GEMINI_SLIDE_RENDER_PROMPT_PATH),
         "--target-language", env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German"),
-        "--termbase-file", str(TRANSLATION_TERMBASE_PATH),
-        "--project-id", env.get("SLIDE_TRANSLATE_VISION_PROJECTID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
-        "--location", env.get("GOOGLE_TRANSLATE_LOCATION", env.get("GOOGLE_SPEECH_LOCATION", "")),
+        "--project-id", resolve_vertex_project_id_from_mapping(env),
+        "--location", env.get("GOOGLE_GEMINI_LOCATION", ""),
         "--report-json", str(report_json),
     ]
 
@@ -1906,12 +1910,9 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
             if not gemini_api_key:
                 return False, "Image Lab Slide Translate requires GEMINI_API_KEY in the server environment"
             translate_model = override_str("slide_translate_model", env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL) or DEFAULT_IMAGE_MODEL)
-            translate_prompt = override_str("slide_translate_prompt", GEMINI_TRANSLATE_PROMPT_PATH.read_text(encoding="utf-8"))
             if translate_model not in ALLOWED_IMAGE_MODELS:
                 allowed = ", ".join(sorted(ALLOWED_IMAGE_MODELS))
                 return False, f"Image Lab Slide Translate model must be one of: {allowed}"
-            if not translate_prompt:
-                return False, "Image Lab Slide Translate prompt must not be empty"
     else:
         mode = override_str("slide_upscale_mode", env.get("FINAL_SLIDE_UPSCALE_MODE", "none") or "none").lower()
         if mode not in {"swin2sr", "replicate_nightmare_realesrgan"}:
@@ -2045,8 +2046,6 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                 cmd.extend(["--source-language-code", source_language_code])
             message = "Running deterministic glossary translate on selected final slide."
         else:
-            translate_prompt_path = job_dir / "slide_translate_prompt.txt"
-            translate_prompt_path.write_text(translate_prompt, encoding="utf-8")
             cmd = [
                 PYTHON_BIN,
                 "scripts/providers/translate_final_slides_gemini.py",
@@ -2056,14 +2055,20 @@ def start_lab_job(action: str, run_id: str, event_id: int, overrides: dict | Non
                 str(output_dir),
                 "--model",
                 translate_model,
-                "--prompt-file",
-                str(translate_prompt_path),
                 "--project-id",
                 gemini_project_id,
                 "--location",
                 gemini_location,
                 "--target-language",
                 translate_target_language,
+                "--extract-model",
+                env.get("GEMINI_EXTRACT_MODEL", "gemini-3.1-pro-preview"),
+                "--extract-prompt",
+                read_text_file(GEMINI_SLIDE_EXTRACT_PROMPT_PATH),
+                "--translate-prompt",
+                read_text_file(GEMINI_SLIDE_TRANSLATE_PROMPT_PATH),
+                "--render-prompt",
+                read_text_file(GEMINI_SLIDE_RENDER_PROMPT_PATH),
             ]
             message = "Running Gemini translate on selected final slide."
     else:
@@ -2997,400 +3002,6 @@ def run_transcription_health_check(payload: dict) -> dict:
         }
 
 
-def run_slide_edit_health_check(payload: dict) -> dict:
-    merged = parse_env(CONFIG_PATH)
-    if isinstance(payload, dict):
-        merged.update(payload)
-    mode = str(merged.get("FINAL_SLIDE_POSTPROCESS_MODE", "") or "").strip().lower()
-    model = str(merged.get("GEMINI_EDIT_MODEL", "") or "").strip()
-    prompt = str(merged.get("GEMINI_EDIT_PROMPT", "") or "").strip()
-    if mode != "gemini":
-        return {
-            "ok": False,
-            "error_type": "NotApplicable",
-            "error_message": "Slide Edit API test is only available for FINAL_SLIDE_POSTPROCESS_MODE=gemini.",
-        }
-    model = validate_image_model(model, "GEMINI_EDIT_MODEL")
-    if not prompt:
-        raise ValueError("GEMINI_EDIT_PROMPT must not be empty")
-
-    start = time.perf_counter()
-    try:
-        client, types, project_id_used, _default_project, location_used = ensure_gemini_client(merged)
-        original, overlay, mask = make_health_edit_assets()
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=encode_png(original), mime_type="image/png"),
-                types.Part.from_bytes(data=encode_png(overlay), mime_type="image/png"),
-                types.Part.from_bytes(data=encode_png(mask), mime_type="image/png"),
-            ],
-            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
-        )
-        image_bytes = extract_gemini_image_bytes(response)
-        if not image_bytes:
-            raise RuntimeError("Gemini response did not include an image.")
-        image = decode_gemini_image_bytes(image_bytes)
-        latency_ms = int(round((time.perf_counter() - start) * 1000))
-        return {
-            "ok": True,
-            "model": model,
-            "project_id_used": project_id_used,
-            "location": location_used,
-            "latency_ms": latency_ms,
-            "image_width": int(image.shape[1]),
-            "image_height": int(image.shape[0]),
-            "image_bytes": len(image_bytes),
-            "message": "Slide Edit API reachable.",
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "ok": False,
-            "error_type": exc.__class__.__name__,
-            "error_message": str(exc),
-        }
-
-
-def run_slide_translate_health_check(payload: dict) -> dict:
-    merged = parse_env(CONFIG_PATH)
-    if isinstance(payload, dict):
-        merged.update(payload)
-    mode = str(merged.get("FINAL_SLIDE_TRANSLATION_MODE", "") or "").strip().lower()
-    model = str(merged.get("GEMINI_TRANSLATE_MODEL", "") or "").strip()
-    prompt = str(merged.get("GEMINI_TRANSLATE_PROMPT", "") or "").strip()
-    target_language = str(merged.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
-    if not target_language:
-        raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
-    if mode == "gemini":
-        model = validate_image_model(model, "GEMINI_TRANSLATE_MODEL")
-        if not prompt:
-            raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
-
-        start = time.perf_counter()
-        try:
-            client, types, project_id_used, _default_project, location_used = ensure_gemini_client(merged)
-            glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
-            response = client.models.generate_content(
-                model=model,
-                contents=[
-                    append_glossary_to_prompt(inject_target_language(prompt, target_language), glossary_entries),
-                    types.Part.from_bytes(data=encode_png(make_health_slide_image()), mime_type="image/png"),
-                ],
-                config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
-            )
-            image_bytes = extract_gemini_image_bytes(response)
-            if not image_bytes:
-                raise RuntimeError("Gemini response did not include an image.")
-            image = decode_gemini_image_bytes(image_bytes)
-            latency_ms = int(round((time.perf_counter() - start) * 1000))
-            return {
-                "ok": True,
-                "mode": mode,
-                "model": model,
-                "target_language": target_language,
-                "project_id_used": project_id_used,
-                "location": location_used,
-                "latency_ms": latency_ms,
-                "image_width": int(image.shape[1]),
-                "image_height": int(image.shape[0]),
-                "image_bytes": len(image_bytes),
-                "glossary_entries": len(glossary_entries),
-                "message": "Slide Translate API reachable.",
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "ok": False,
-                "error_type": exc.__class__.__name__,
-                "error_message": str(exc),
-            }
-
-    if mode == "deterministic_glossary":
-        vision_project_id = resolve_vision_project_id_from_mapping(merged)
-        translate_project_id = resolve_translate_project_id_from_mapping(merged) or vision_project_id
-        translate_location = str(merged.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip() or "us-central1"
-        translate_model = resolve_cloud_translate_model_from_mapping(merged)
-        source_language_code = str(merged.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
-        if not vision_project_id:
-            raise ValueError("GCLOUD_VISION_PROJECTID must not be empty")
-        if not translate_project_id:
-            raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty")
-
-        start = time.perf_counter()
-        try:
-            vision_client, vision, vision_project_id_used, _default_project = ensure_cloud_vision_client(vision_project_id)
-            health_image = make_health_slide_image()
-            response = vision_client.document_text_detection(image=vision.Image(content=encode_png(health_image)))
-            if getattr(response, "error", None) and getattr(response.error, "message", ""):
-                raise RuntimeError(str(response.error.message))
-            annotation = getattr(response, "full_text_annotation", None)
-            detected_text = str(getattr(annotation, "text", "") or "").strip()
-            if not detected_text:
-                raise RuntimeError("Vision OCR did not return text for the health image.")
-            target_language_code, _tts_code = resolve_target_language_codes(target_language)
-            translate_client, _translate_v3, translate_project_id_used, _default_project, translate_location_used = ensure_cloud_translate_client(
-                translate_project_id,
-                translate_location,
-            )
-            translated = translate_texts_llm(
-                translate_client,
-                project_id=translate_project_id_used,
-                location=translate_location_used,
-                model=translate_model,
-                contents=[detected_text],
-                target_language_code=target_language_code,
-                source_language_code=source_language_code,
-            )
-            latency_ms = int(round((time.perf_counter() - start) * 1000))
-            return {
-                "ok": True,
-                "mode": mode,
-                "target_language": target_language,
-                "target_language_code": target_language_code,
-                "ocr_provider": "google_vision_document_text_detection",
-                "vision_project_id_used": vision_project_id_used,
-                "translate_project_id_used": translate_project_id_used,
-                "location": translate_location_used,
-                "model": translate_model,
-                "latency_ms": latency_ms,
-                "ocr_text_length": len(detected_text),
-                "ocr_preview": detected_text[:120],
-                "translated_text": translated[0] if translated else "",
-                "message": "Slide Translate OCR + Translation APIs reachable.",
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "ok": False,
-                "error_type": exc.__class__.__name__,
-                "error_message": str(exc),
-            }
-
-    return {
-        "ok": False,
-        "error_type": "NotApplicable",
-        "error_message": "Slide Translate API test is only available for gemini or deterministic_glossary mode.",
-    }
-
-
-def run_text_translate_health_check(payload: dict) -> dict:
-    model = str(
-        payload.get("TRANSCRIPT_TRANSLATE_MODEL", payload.get("GOOGLE_TRANSLATE_MODEL", ""))
-        or ""
-    ).strip()
-    source_language_code = str(payload.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
-    target_language = str(payload.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
-    if not model:
-        raise ValueError("TRANSCRIPT_TRANSLATE_MODEL must not be empty")
-    if not target_language:
-        raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
-    provider = "gemini_api_key" if is_gemini_text_translate_model(model) else "google_cloud_translate"
-
-    start = time.perf_counter()
-    try:
-        target_language_code, _tts_language_code = resolve_target_language_codes(target_language)
-        glossary_entries = load_termbase_entries(TRANSLATION_TERMBASE_PATH, target_language)
-        source_text = "Code of Conduct and Compliance training starts on Monday."
-        protected_text, placeholder_map, term_hits = apply_termbase_placeholders(source_text, glossary_entries)
-        resolved_project = ""
-        resolved_location = ""
-        translated_text = ""
-        if provider == "google_cloud_translate":
-            project_id = _first_non_empty(
-                payload.get("GCLOUD_TRANSLATE_PROJECTID", ""),
-                payload.get("GOOGLE_TRANSLATE_PROJECT_ID", ""),
-            )
-            location = str(payload.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip()
-            if not project_id:
-                raise ValueError("GCLOUD_TRANSLATE_PROJECTID must not be empty when using Cloud Translation")
-            if not location:
-                raise ValueError("GOOGLE_TRANSLATE_LOCATION must not be empty when using Cloud Translation")
-            client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
-                project_id,
-                location,
-            )
-            translated = translate_texts_llm(
-                client,
-                project_id=resolved_project,
-                location=resolved_location,
-                model=model,
-                contents=[protected_text],
-                target_language_code=target_language_code,
-                source_language_code=source_language_code,
-            )
-            if len(translated) != 1:
-                raise RuntimeError("Cloud Translation health check returned an unexpected translation count.")
-            translated_text = str(translated[0] or "").strip()
-        else:
-            merged = parse_env(CONFIG_PATH)
-            if isinstance(payload, dict):
-                merged.update(payload)
-            client, _types, resolved_project, _default_project, resolved_location = ensure_gemini_client(merged)
-            response = client.models.generate_content(
-                model=model,
-                contents=[
-                    "Translate the source text to the target language. Preserve placeholders like __TERM_0001__ exactly. "
-                    "Return strict JSON only: {\"translated_text\":\"...\"}",
-                    (
-                        f"Target language: {target_language}\n"
-                        f"Target language code: {target_language_code}\n"
-                        f"Source language code: {source_language_code or '-'}\n"
-                        f"Source text: {json.dumps(protected_text, ensure_ascii=False)}"
-                    ),
-                ],
-                config={"response_mime_type": "application/json"},
-            )
-            raw = strip_code_fences(extract_gemini_response_text(response))
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError(f"Failed to parse Gemini translation JSON: {raw[:220]}") from exc
-            if isinstance(parsed, dict):
-                translated_text = str(parsed.get("translated_text", "") or "").strip()
-                if not translated_text:
-                    translations = parsed.get("translations")
-                    if isinstance(translations, list) and translations:
-                        first = translations[0]
-                        if isinstance(first, dict):
-                            translated_text = str(first.get("translated_text", "") or "").strip()
-            else:
-                translated_text = ""
-            if not translated_text:
-                raise RuntimeError("Gemini translation JSON did not include translated_text.")
-        translated_text = restore_termbase_placeholders(translated_text, placeholder_map)
-        latency_ms = int(round((time.perf_counter() - start) * 1000))
-        return {
-            "ok": True,
-            "provider": provider,
-            "project_id_used": resolved_project,
-            "location": resolved_location,
-            "model": model,
-            "target_language": target_language,
-            "target_language_code": target_language_code,
-            "source_language_code": source_language_code or "-",
-            "latency_ms": latency_ms,
-            "translated_text": translated_text,
-            "glossary_entries": len(glossary_entries),
-            "termbase_hits": len(term_hits),
-            "message": "Transcript Translate API reachable.",
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "ok": False,
-            "error_type": exc.__class__.__name__,
-            "error_message": str(exc),
-        }
-
-
-def run_slide_upscale_health_check(payload: dict) -> dict:
-    mode = str(payload.get("FINAL_SLIDE_UPSCALE_MODE", "") or "").strip().lower()
-    if mode == "none":
-        return {
-            "ok": False,
-            "error_type": "NotApplicable",
-            "error_message": "Slide Upscale API test is only available when an upscale mode is selected.",
-        }
-
-    cv2, _np = ensure_cv2_numpy()
-    sample_bgr = make_health_slide_image()
-
-    if mode == "swin2sr":
-        model_id = str(payload.get("FINAL_SLIDE_UPSCALE_MODEL", "") or "").strip()
-        device_name = str(payload.get("FINAL_SLIDE_UPSCALE_DEVICE", "") or "auto").strip() or "auto"
-        tile_size = int(payload.get("FINAL_SLIDE_UPSCALE_TILE_SIZE", 0) or 0)
-        tile_overlap = int(payload.get("FINAL_SLIDE_UPSCALE_TILE_OVERLAP", 0) or 0)
-        if not model_id:
-            raise ValueError("FINAL_SLIDE_UPSCALE_MODEL must not be empty")
-        start = time.perf_counter()
-        try:
-            from scripts.upscale_final_slides_swin2sr import load_model, resolve_device, upscale_tiled
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Local Swin2SR dependencies are not installed.") from exc
-        try:
-            device = resolve_device(device_name)
-            processor, model = load_model(model_id, device)
-            scale = int(getattr(model.config, "upscale", 4) or 4)
-            sample_rgb = cv2.cvtColor(sample_bgr, cv2.COLOR_BGR2RGB)
-            upscaled_rgb = upscale_tiled(sample_rgb, processor, model, device, scale, tile_size, tile_overlap)
-            latency_ms = int(round((time.perf_counter() - start) * 1000))
-            return {
-                "ok": True,
-                "mode": mode,
-                "model": model_id,
-                "device": device.type,
-                "scale": scale,
-                "latency_ms": latency_ms,
-                "image_width": int(upscaled_rgb.shape[1]),
-                "image_height": int(upscaled_rgb.shape[0]),
-                "message": "Slide Upscale API reachable.",
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "ok": False,
-                "error_type": exc.__class__.__name__,
-                "error_message": str(exc),
-            }
-
-    if mode == "replicate_nightmare_realesrgan":
-        model_ref = str(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF", "") or "").strip()
-        version_id = str(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID", "") or "").strip()
-        price_per_second = float(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", 0.0) or 0.0)
-        if not model_ref:
-            raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF must not be empty")
-        if not version_id:
-            raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID must not be empty")
-        try:
-            from scripts.upscale_final_slides_replicate import download_output_bytes, ensure_client, run_provider
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Replicate upscale dependencies are not installed.") from exc
-
-        import tempfile
-
-        start = time.perf_counter()
-        try:
-            with tempfile.TemporaryDirectory(prefix="upscale_health_") as tmp_dir:
-                input_path = Path(tmp_dir) / "health.png"
-                ok = cv2.imwrite(str(input_path), sample_bgr)
-                if not ok:
-                    raise RuntimeError("Failed to write test image.")
-                client = ensure_client()
-                args = SimpleNamespace(
-                    provider="nightmare_realesrgan",
-                    nightmare_realesrgan_model_ref=model_ref,
-                    nightmare_realesrgan_version_id=version_id,
-                    nightmare_realesrgan_scale=4,
-                    nightmare_realesrgan_face_enhance="false",
-                    nightmare_realesrgan_price_per_second=price_per_second,
-                )
-                output, provider_meta = run_provider(client, args, input_path)
-                data = download_output_bytes(output)
-                upscaled_bgr = decode_gemini_image_bytes(data)
-                latency_ms = int(round((time.perf_counter() - start) * 1000))
-                return {
-                    "ok": True,
-                    "mode": mode,
-                    "model": model_ref,
-                    "version_id": version_id,
-                    "latency_ms": latency_ms,
-                    "predict_time_sec": float(provider_meta.get("predict_time_sec", 0.0) or 0.0),
-                    "estimated_cost_usd": float(provider_meta.get("estimated_cost_usd", 0.0) or 0.0),
-                    "image_width": int(upscaled_bgr.shape[1]),
-                    "image_height": int(upscaled_bgr.shape[0]),
-                    "prediction_id": str(provider_meta.get("prediction_id", "") or ""),
-                    "message": "Slide Upscale API reachable.",
-                }
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "ok": False,
-                "error_type": exc.__class__.__name__,
-                "error_message": str(exc),
-            }
-
-    return {
-        "ok": False,
-        "error_type": "NotApplicable",
-        "error_message": "Unsupported slide upscale mode.",
-    }
-
 
 def run_tts_health_check(payload: dict) -> dict:
     project_id = _first_non_empty(
@@ -3455,6 +3066,208 @@ def run_tts_health_check(payload: dict) -> dict:
             "error_type": exc.__class__.__name__,
             "error_message": str(exc),
             "message": "TTS API check failed.",
+        }
+
+
+def run_gemini_health_check(payload: dict) -> dict:
+    merged = parse_env(CONFIG_PATH)
+    if isinstance(payload, dict):
+        merged.update(payload)
+    project_id_hint = str(merged.get("GCLOUD_PROJECT_ID", "") or "").strip()
+    if project_id_hint:
+        merged.setdefault("GCLOUD_VERTEX_PROJECTID", project_id_hint)
+    model = str(merged.get("GEMINI_EDIT_MODEL", "") or "").strip()
+    model = validate_image_model(model, "GEMINI_EDIT_MODEL")
+
+    start = time.perf_counter()
+    try:
+        client, types, project_id_used, _default_project, location_used = ensure_gemini_client(merged)
+        original, overlay, mask = make_health_edit_assets()
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                "Return this image unchanged.",
+                types.Part.from_bytes(data=encode_png(original), mime_type="image/png"),
+            ],
+            config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+        )
+        image_bytes = extract_gemini_image_bytes(response)
+        if not image_bytes:
+            raise RuntimeError("Gemini response did not include an image.")
+        image = decode_gemini_image_bytes(image_bytes)
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "model": model,
+            "project_id_used": project_id_used,
+            "location": location_used,
+            "latency_ms": latency_ms,
+            "image_width": int(image.shape[1]),
+            "image_height": int(image.shape[0]),
+            "image_bytes": len(image_bytes),
+            "message": "Gemini API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
+def run_cloud_translation_health_check(payload: dict) -> dict:
+    merged = parse_env(CONFIG_PATH)
+    if isinstance(payload, dict):
+        merged.update(payload)
+    project_id_hint = str(merged.get("GCLOUD_PROJECT_ID", "") or "").strip()
+    if project_id_hint:
+        merged.setdefault("GCLOUD_TRANSLATE_PROJECTID", project_id_hint)
+        merged.setdefault("GOOGLE_TRANSLATE_PROJECT_ID", project_id_hint)
+    project_id = resolve_translate_project_id_from_mapping(merged)
+    location = str(merged.get("GOOGLE_TRANSLATE_LOCATION", "") or "").strip() or "us-central1"
+    source_language_code = str(merged.get("GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE", "") or "").strip()
+    target_language = str(merged.get("FINAL_SLIDE_TARGET_LANGUAGE", "") or "").strip()
+    if not project_id:
+        raise ValueError("GCLOUD_PROJECT_ID must not be empty")
+    if not target_language:
+        raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must not be empty")
+
+    start = time.perf_counter()
+    try:
+        target_language_code, _tts_language_code = resolve_target_language_codes(target_language)
+        model = resolve_cloud_translate_model_from_mapping(merged)
+        client, _translate_v3, resolved_project, _default_project, resolved_location = ensure_cloud_translate_client(
+            project_id,
+            location,
+        )
+        source_text = "Code of Conduct and Compliance training starts on Monday."
+        translated = translate_texts_llm(
+            client,
+            project_id=resolved_project,
+            location=resolved_location,
+            model=model,
+            contents=[source_text],
+            target_language_code=target_language_code,
+            source_language_code=source_language_code,
+        )
+        if len(translated) != 1:
+            raise RuntimeError("Cloud Translation health check returned an unexpected translation count.")
+        translated_text = str(translated[0] or "").strip()
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "project_id_used": resolved_project,
+            "location": resolved_location,
+            "model": model,
+            "target_language": target_language,
+            "target_language_code": target_language_code,
+            "latency_ms": latency_ms,
+            "translated_text": translated_text,
+            "message": "Cloud Translation API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
+def run_cloud_vision_health_check(payload: dict) -> dict:
+    merged = parse_env(CONFIG_PATH)
+    if isinstance(payload, dict):
+        merged.update(payload)
+    project_id_hint = str(merged.get("GCLOUD_PROJECT_ID", "") or "").strip()
+    if project_id_hint:
+        merged.setdefault("GCLOUD_VISION_PROJECTID", project_id_hint)
+        merged.setdefault("GOOGLE_VISION_PROJECT_ID", project_id_hint)
+    vision_project_id = resolve_vision_project_id_from_mapping(merged)
+    if not vision_project_id:
+        raise ValueError("GCLOUD_PROJECT_ID must not be empty")
+
+    start = time.perf_counter()
+    try:
+        vision_client, vision, vision_project_id_used, _default_project = ensure_cloud_vision_client(vision_project_id)
+        health_image = make_health_slide_image()
+        response = vision_client.document_text_detection(image=vision.Image(content=encode_png(health_image)))
+        if getattr(response, "error", None) and getattr(response.error, "message", ""):
+            raise RuntimeError(str(response.error.message))
+        annotation = getattr(response, "full_text_annotation", None)
+        detected_text = str(getattr(annotation, "text", "") or "").strip()
+        if not detected_text:
+            raise RuntimeError("Vision OCR did not return text for the health image.")
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "project_id_used": vision_project_id_used,
+            "latency_ms": latency_ms,
+            "ocr_text_length": len(detected_text),
+            "ocr_preview": detected_text[:120],
+            "message": "Cloud Vision API reachable.",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
+def run_replicate_health_check(payload: dict) -> dict:
+    model_ref = str(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF", "") or "").strip()
+    version_id = str(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID", "") or "").strip()
+    price_per_second = float(payload.get("REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND", 0.0) or 0.0)
+    if not model_ref:
+        raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF must not be empty")
+    if not version_id:
+        raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID must not be empty")
+    try:
+        from scripts.upscale_final_slides_replicate import download_output_bytes, ensure_client, run_provider
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("Replicate upscale dependencies are not installed.") from exc
+
+    import tempfile
+
+    cv2, _np = ensure_cv2_numpy()
+    sample_bgr = make_health_slide_image()
+    start = time.perf_counter()
+    try:
+        with tempfile.TemporaryDirectory(prefix="upscale_health_") as tmp_dir:
+            input_path = Path(tmp_dir) / "health.png"
+            ok = cv2.imwrite(str(input_path), sample_bgr)
+            if not ok:
+                raise RuntimeError("Failed to write test image.")
+            client = ensure_client()
+            args = SimpleNamespace(
+                provider="nightmare_realesrgan",
+                nightmare_realesrgan_model_ref=model_ref,
+                nightmare_realesrgan_version_id=version_id,
+                nightmare_realesrgan_scale=4,
+                nightmare_realesrgan_face_enhance="false",
+                nightmare_realesrgan_price_per_second=price_per_second,
+            )
+            output, provider_meta = run_provider(client, args, input_path)
+            data = download_output_bytes(output)
+            upscaled_bgr = decode_gemini_image_bytes(data)
+            latency_ms = int(round((time.perf_counter() - start) * 1000))
+            return {
+                "ok": True,
+                "model": model_ref,
+                "version_id": version_id,
+                "scale": 4,
+                "latency_ms": latency_ms,
+                "predict_time_sec": float(provider_meta.get("predict_time_sec", 0.0) or 0.0),
+                "estimated_cost_usd": float(provider_meta.get("estimated_cost_usd", 0.0) or 0.0),
+                "image_width": int(upscaled_bgr.shape[1]),
+                "image_height": int(upscaled_bgr.shape[0]),
+                "prediction_id": str(provider_meta.get("prediction_id", "") or ""),
+                "message": "Replicate API reachable.",
+            }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
         }
 
 
@@ -3536,13 +3349,14 @@ class Handler(BaseHTTPRequestHandler):
                     "FINAL_SLIDE_TRANSLATION_MODE": env.get("FINAL_SLIDE_TRANSLATION_MODE", "none"),
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
                     "GEMINI_TRANSLATE_MODEL": normalize_image_model(env.get("GEMINI_TRANSLATE_MODEL", DEFAULT_IMAGE_MODEL)),
-                    "GEMINI_TRANSLATE_PROMPT": read_text_file(GEMINI_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "GEMINI_SLIDE_EXTRACT_PROMPT": read_text_file(GEMINI_SLIDE_EXTRACT_PROMPT_PATH).rstrip("\n"),
+                    "GEMINI_SLIDE_TRANSLATE_PROMPT": read_text_file(GEMINI_SLIDE_TRANSLATE_PROMPT_PATH).rstrip("\n"),
+                    "GEMINI_SLIDE_RENDER_PROMPT": read_text_file(GEMINI_SLIDE_RENDER_PROMPT_PATH).rstrip("\n"),
                     "GCLOUD_VISION_PROJECTID": resolve_vision_project_id_from_mapping(env),
                     "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": env.get(
                         "SLIDE_TRANSLATE_STYLE_CONFIG_PATH",
                         "config/slide_translate_styles.json",
                     ),
-                    "SLIDE_TRANSLATE_MAX_REVIEW_RETRIES": int(env.get("SLIDE_TRANSLATE_MAX_REVIEW_RETRIES", "3")),
                     "SLIDE_TRANSLATE_MAX_FONT_SIZE": int(env.get("SLIDE_TRANSLATE_MAX_FONT_SIZE", "120")),
                     "SLIDE_TRANSLATE_STYLES_JSON": read_text_file(slide_translate_style_config_path).rstrip("\n"),
                     "GCLOUD_TRANSLATE_PROJECTID": resolve_translate_project_id_from_mapping(env),
@@ -3801,7 +3615,6 @@ class Handler(BaseHTTPRequestHandler):
                         data.get("GCLOUD_VISION_PROJECTID", data.get("GOOGLE_VISION_PROJECT_ID", ""))
                     ).strip(),
                     "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": slide_style_config_path,
-                    "SLIDE_TRANSLATE_MAX_REVIEW_RETRIES": int(data.get("SLIDE_TRANSLATE_MAX_REVIEW_RETRIES", 3)),
                     "SLIDE_TRANSLATE_MAX_FONT_SIZE": int(data["SLIDE_TRANSLATE_MAX_FONT_SIZE"]),
                     "SLIDE_TRANSLATE_STYLES_JSON": str(data["SLIDE_TRANSLATE_STYLES_JSON"]),
                     "GCLOUD_TRANSLATE_PROJECTID": str(
@@ -3852,7 +3665,9 @@ class Handler(BaseHTTPRequestHandler):
                     "VIDEO_EXPORT_BG_COLOR": str(data["VIDEO_EXPORT_BG_COLOR"]).strip(),
                 }
                 gemini_edit_prompt = str(data["GEMINI_EDIT_PROMPT"])
-                gemini_translate_prompt = str(data["GEMINI_TRANSLATE_PROMPT"])
+                gemini_slide_extract_prompt = str(data.get("GEMINI_SLIDE_EXTRACT_PROMPT", ""))
+                gemini_slide_translate_prompt = str(data.get("GEMINI_SLIDE_TRANSLATE_PROMPT", ""))
+                gemini_slide_render_prompt = str(data.get("GEMINI_SLIDE_RENDER_PROMPT", ""))
                 slide_translate_styles_json = str(data["SLIDE_TRANSLATE_STYLES_JSON"])
                 cfg.pop("SLIDE_TRANSLATE_STYLES_JSON", None)
                 translation_termbase_csv = str(data["TRANSLATION_TERMBASE_CSV"])
@@ -3943,8 +3758,12 @@ class Handler(BaseHTTPRequestHandler):
                 if cfg["FINAL_SLIDE_TARGET_LANGUAGE"] and not target_language_option:
                     raise ValueError("FINAL_SLIDE_TARGET_LANGUAGE must be selected from the supported Gemini TTS language list")
                 cfg["GEMINI_TRANSLATE_MODEL"] = validate_image_model(cfg["GEMINI_TRANSLATE_MODEL"], "GEMINI_TRANSLATE_MODEL")
-                if not gemini_translate_prompt.strip():
-                    raise ValueError("GEMINI_TRANSLATE_PROMPT must not be empty")
+                if not gemini_slide_extract_prompt.strip():
+                    raise ValueError("GEMINI_SLIDE_EXTRACT_PROMPT must not be empty")
+                if not gemini_slide_translate_prompt.strip():
+                    raise ValueError("GEMINI_SLIDE_TRANSLATE_PROMPT must not be empty")
+                if not gemini_slide_render_prompt.strip():
+                    raise ValueError("GEMINI_SLIDE_RENDER_PROMPT must not be empty")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "gemini" and not resolve_gemini_api_key_from_mapping(merged_cfg):
                     raise ValueError("GEMINI_API_KEY must be set in .env.local when FINAL_SLIDE_TRANSLATION_MODE=gemini")
                 if cfg["FINAL_SLIDE_TRANSLATION_MODE"] == "deterministic_glossary" and not (
@@ -3962,8 +3781,6 @@ class Handler(BaseHTTPRequestHandler):
                     normalize_slide_translate_styles_json(slide_translate_styles_json)
                 if cfg["SLIDE_TRANSLATE_MAX_FONT_SIZE"] < 8:
                     raise ValueError("SLIDE_TRANSLATE_MAX_FONT_SIZE must be >= 8")
-                if cfg["SLIDE_TRANSLATE_MAX_REVIEW_RETRIES"] < 0:
-                    raise ValueError("SLIDE_TRANSLATE_MAX_REVIEW_RETRIES must be >= 0")
                 if not cfg["TRANSCRIPT_TRANSLATE_MODEL"]:
                     raise ValueError("TRANSCRIPT_TRANSLATE_MODEL must not be empty")
                 transcript_uses_gemini = is_gemini_text_translate_model(cfg["TRANSCRIPT_TRANSLATE_MODEL"])
@@ -4064,7 +3881,9 @@ class Handler(BaseHTTPRequestHandler):
                 normalized_slide_translate_styles_json = normalize_slide_translate_styles_json(slide_translate_styles_json)
                 write_config_values(CONFIG_PATH, cfg)
                 write_text_file(GEMINI_PROMPT_PATH, gemini_edit_prompt)
-                write_text_file(GEMINI_TRANSLATE_PROMPT_PATH, gemini_translate_prompt)
+                write_text_file(GEMINI_SLIDE_EXTRACT_PROMPT_PATH, gemini_slide_extract_prompt)
+                write_text_file(GEMINI_SLIDE_TRANSLATE_PROMPT_PATH, gemini_slide_translate_prompt)
+                write_text_file(GEMINI_SLIDE_RENDER_PROMPT_PATH, gemini_slide_render_prompt)
                 write_text_file(
                     resolve_slide_translate_style_config_path(cfg["SLIDE_TRANSLATE_STYLE_CONFIG_PATH"]),
                     normalized_slide_translate_styles_json,
@@ -4079,7 +3898,9 @@ class Handler(BaseHTTPRequestHandler):
                         "ok": True,
                         **cfg,
                         "GEMINI_EDIT_PROMPT": gemini_edit_prompt.rstrip("\n"),
-                        "GEMINI_TRANSLATE_PROMPT": gemini_translate_prompt.rstrip("\n"),
+                        "GEMINI_SLIDE_EXTRACT_PROMPT": gemini_slide_extract_prompt.rstrip("\n"),
+                        "GEMINI_SLIDE_TRANSLATE_PROMPT": gemini_slide_translate_prompt.rstrip("\n"),
+                        "GEMINI_SLIDE_RENDER_PROMPT": gemini_slide_render_prompt.rstrip("\n"),
                         "SLIDE_TRANSLATE_STYLES_JSON": normalized_slide_translate_styles_json.rstrip("\n"),
                         "TRANSLATION_TERMBASE_CSV": translation_termbase_csv.rstrip("\n"),
                         "GEMINI_TEXT_TRANSLATE_PROMPT": gemini_text_translate_prompt.rstrip("\n"),
@@ -4101,29 +3922,35 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 return self._send_json(200, payload)
 
+            if path == "/api/gemini/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_gemini_health_check(data))
+
             if path == "/api/transcription/health":
                 data = self._read_json_body()
+                project_id_hint = str((data or {}).get("GCLOUD_PROJECT_ID", "") or "").strip()
+                if project_id_hint and "GOOGLE_SPEECH_PROJECT_ID" not in data:
+                    data["GOOGLE_SPEECH_PROJECT_ID"] = project_id_hint
                 return self._send_json(200, run_transcription_health_check(data))
 
-            if path == "/api/slide-edit/health":
+            if path == "/api/cloud-translation/health":
                 data = self._read_json_body()
-                return self._send_json(200, run_slide_edit_health_check(data))
+                return self._send_json(200, run_cloud_translation_health_check(data))
 
-            if path == "/api/slide-translate/health":
+            if path == "/api/cloud-vision/health":
                 data = self._read_json_body()
-                return self._send_json(200, run_slide_translate_health_check(data))
-
-            if path == "/api/text-translate/health":
-                data = self._read_json_body()
-                return self._send_json(200, run_text_translate_health_check(data))
-
-            if path == "/api/slide-upscale/health":
-                data = self._read_json_body()
-                return self._send_json(200, run_slide_upscale_health_check(data))
+                return self._send_json(200, run_cloud_vision_health_check(data))
 
             if path == "/api/tts/health":
                 data = self._read_json_body()
+                project_id_hint = str((data or {}).get("GCLOUD_PROJECT_ID", "") or "").strip()
+                if project_id_hint and "GCLOUD_TTS_PROJECTID" not in data:
+                    data["GCLOUD_TTS_PROJECTID"] = project_id_hint
                 return self._send_json(200, run_tts_health_check(data))
+
+            if path == "/api/replicate/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_replicate_health_check(data))
 
             if path == "/api/runs":
                 ok, msg = start_run()

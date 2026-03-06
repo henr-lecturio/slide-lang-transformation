@@ -83,13 +83,20 @@ function stopSpinner() {
   link.href = originalHref || "/favicon.png";
 }
 
-export function syncRunFavicon(status) {
+const sources = new Map();
+
+export function syncFavicon(source, status) {
   const normalized = String(status || "").trim().toLowerCase();
-  const shouldSpin = BUSY_STATUSES.has(normalized);
-  if (shouldSpin) {
+  sources.set(source, BUSY_STATUSES.has(normalized));
+  const anyBusy = [...sources.values()].some(Boolean);
+  if (anyBusy) {
     startSpinner();
-    return;
+  } else {
+    stopSpinner();
   }
-  stopSpinner();
+}
+
+export function syncRunFavicon(status) {
+  syncFavicon("run", status);
 }
 

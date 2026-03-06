@@ -1,317 +1,299 @@
 #!/usr/bin/env python3
-"""Post-translation consistency review for slide sequences.
+"""Consistency review for translated slide sequences using the 3-Step Gemini pipeline.
 
-Detects slide sequences (incrementally built bullet points on the same slide),
-checks translation consistency across the sequence using OCR, and corrects
-inconsistent slides via re-translation with an explicit per-element glossary
-or pixel-transplant as fallback.
+Detects slide sequences (progressive bullet-point builds), checks translation
+consistency across a sequence, and fixes inconsistencies via
+Extract → Translate (with forced glossary) → Render.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.lib.slide_ocr import ensure_cloud_vision_client, ocr_slide_fragments
-from scripts.lib.slide_glossary import parse_event_id_from_name
-from scripts.lib.translation_memory import DEFAULT_TERMBASE_PATH, append_glossary_to_prompt, load_termbase_entries
-from scripts.lib.cloud_gemini_image import ensure_cloud_gemini_image_client
 from scripts.providers.translate_final_slides_gemini import (
-    bbox_overlap_ratio,
-    decode_image_bytes,
+    LOCAL_ENV_PATH,
     encode_png,
-    extract_image_bytes,
-    generate_translated_image,
-    load_prompt,
+    ensure_client,
+    ensure_text_client,
+    extract_slide_json,
+    load_local_env,
+    render_translated_image,
+    translate_slide_json,
 )
-
-LOCAL_ENV_PATH = ROOT_DIR / ".env.local"
-DEFAULT_PROMPT_PATH = ROOT_DIR / "config" / "prompts" / "gemini_translate_prompt.txt"
+from scripts.lib.slide_glossary import parse_event_id_from_name
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Review and fix translation consistency across slide sequences."
-    )
-    parser.add_argument("--original-dir", required=True, help="Directory with original slide PNGs.")
-    parser.add_argument("--translated-dir", required=True, help="Directory with translated slide PNGs (modified in-place).")
-    parser.add_argument("--vision-project-id", required=True, help="Google Cloud project ID for Vision OCR.")
-    parser.add_argument("--vision-feature", default="DOCUMENT_TEXT_DETECTION", help="Vision OCR feature type.")
-    parser.add_argument("--model", default="gemini-3-pro-image-preview", help="Gemini image model for re-translation.")
-    parser.add_argument("--prompt-file", default=str(DEFAULT_PROMPT_PATH), help="Base translation prompt file.")
-    parser.add_argument("--target-language", required=True, help="Target language label (e.g. German).")
-    parser.add_argument("--termbase-file", default=str(DEFAULT_TERMBASE_PATH), help="CSV termbase for glossary.")
-    parser.add_argument("--project-id", default="", help="Gemini project ID (Vertex fallback).")
-    parser.add_argument("--location", default="", help="Gemini location (Vertex fallback).")
-    parser.add_argument("--max-retries", type=int, default=2, help="Max re-translation attempts per slide.")
-    parser.add_argument("--sequence-threshold", type=float, default=0.08, help="Max pixel-diff for sequence detection fallback.")
-    parser.add_argument("--report-json", default="", help="Output report path (default: translated-dir/consistency_report.json).")
-    return parser.parse_args()
-
-
-def load_local_env(path: Path) -> None:
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    p = argparse.ArgumentParser(description="Review translated slide consistency.")
+    p.add_argument("--original-dir", required=True)
+    p.add_argument("--translated-dir", required=True)
+    p.add_argument("--model", default="gemini-3-pro-image-preview")
+    p.add_argument("--extract-model", default="gemini-3.1-pro-preview")
+    p.add_argument("--extract-prompt", default="")
+    p.add_argument("--translate-prompt", default="")
+    p.add_argument("--render-prompt", default="")
+    p.add_argument("--target-language", required=True)
+    p.add_argument("--project-id", default="")
+    p.add_argument("--location", default="")
+    p.add_argument("--max-retries", type=int, default=2)
+    p.add_argument("--report-json", default="")
+    return p.parse_args()
 
 
 # ---------------------------------------------------------------------------
-# Step A: Sequence Detection
+# Helpers
 # ---------------------------------------------------------------------------
 
-def ocr_all_slides(
-    slide_paths: list[Path],
-    vision_client,
-    vision_module,
-    feature: str,
-) -> dict[str, dict]:
-    """OCR all slides, returning {filename: ocr_result} with text_units."""
-    cache: dict[str, dict] = {}
-    for path in slide_paths:
-        event_id = parse_event_id_from_name(path.stem)
-        if event_id is None:
-            continue
-        try:
-            result = ocr_slide_fragments(
-                vision_client, vision_module,
-                image_path=path, event_id=event_id, slide_index=0,
-                feature=feature,
-            )
-            cache[path.name] = result
-        except Exception as exc:  # noqa: BLE001
-            print(f"[Review] OCR failed for {path.name}: {exc}", flush=True)
-    return cache
+def _load_image(path: Path):
+    img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if img is None or img.size == 0:
+        return None
+    return img
 
 
-def text_units_from_ocr(ocr_result: dict) -> list[dict]:
-    """Extract text units with bbox and normalized text from OCR result."""
-    units = ocr_result.get("text_units", []) or ocr_result.get("fragments", [])
-    return [u for u in units if u.get("bbox") and (u.get("source_text_norm") or u.get("text_norm") or u.get("source_text") or u.get("text_raw"))]
+def _sorted_slides(directory: Path) -> list[Path]:
+    return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix.lower() == ".png")
 
 
-def unit_text(u: dict) -> str:
-    """Get normalized text from a text unit."""
-    return str(u.get("source_text_norm") or u.get("text_norm") or u.get("source_text") or u.get("text_raw") or "").strip()
+def _normalize(text: str) -> str:
+    return " ".join(text.split()).strip().lower()
 
 
-def is_superset(units_a: list[dict], units_b: list[dict], min_overlap: float = 0.3) -> bool:
-    """Check if B contains all text units from A (by bbox overlap) and at least one more."""
-    if not units_a or not units_b:
+def _texts_set(elements: list[dict]) -> set[str]:
+    return {_normalize(e.get("text", "")) for e in elements if e.get("text", "").strip()}
+
+
+def _event_id_str(path: Path) -> str:
+    eid = parse_event_id_from_name(path.stem)
+    return f"{eid:03d}" if eid is not None else path.stem
+
+
+# ---------------------------------------------------------------------------
+# Sequence detection
+# ---------------------------------------------------------------------------
+
+def _is_superset(texts_a: set[str], texts_b: set[str]) -> bool:
+    """Return True if B is a strict superset of A (all of A in B, B has more)."""
+    if not texts_a:
         return False
-    matched_a = 0
-    used_b: set[int] = set()
-    for ua in units_a:
-        bbox_a = ua["bbox"]
-        for bi, ub in enumerate(units_b):
-            if bi in used_b:
-                continue
-            if bbox_overlap_ratio(bbox_a, ub["bbox"]) >= min_overlap:
-                matched_a += 1
-                used_b.add(bi)
-                break
-    return matched_a == len(units_a) and len(units_b) > len(units_a)
+    return texts_a.issubset(texts_b) and len(texts_b) > len(texts_a)
 
 
-def detect_sequences(
-    slide_names: list[str],
-    ocr_cache: dict[str, dict],
-) -> list[list[str]]:
-    """Detect slide sequences where each slide is a superset of the previous."""
-    sequences: list[list[str]] = []
-    current_seq: list[str] = []
+def detect_sequences(slide_extracts: list[tuple[Path, list[dict]]]) -> list[list[int]]:
+    """Return groups of indices into *slide_extracts* that form sequences."""
+    sequences: list[list[int]] = []
+    current: list[int] = []
 
-    for i, name in enumerate(slide_names):
-        if name not in ocr_cache:
-            if len(current_seq) >= 2:
-                sequences.append(current_seq)
-            current_seq = []
+    for i in range(len(slide_extracts)):
+        if not current:
+            current.append(i)
             continue
 
-        units_curr = text_units_from_ocr(ocr_cache[name])
-        if not current_seq:
-            current_seq = [name]
-            continue
+        prev_texts = _texts_set(slide_extracts[current[-1]][1])
+        curr_texts = _texts_set(slide_extracts[i][1])
 
-        prev_name = current_seq[-1]
-        units_prev = text_units_from_ocr(ocr_cache[prev_name])
-
-        if is_superset(units_prev, units_curr):
-            current_seq.append(name)
+        if _is_superset(prev_texts, curr_texts):
+            current.append(i)
         else:
-            if len(current_seq) >= 2:
-                sequences.append(current_seq)
-            current_seq = [name]
+            if len(current) >= 2:
+                sequences.append(current)
+            current = [i]
 
-    if len(current_seq) >= 2:
-        sequences.append(current_seq)
+    if len(current) >= 2:
+        sequences.append(current)
 
     return sequences
 
 
 # ---------------------------------------------------------------------------
-# Step B: Consistency Check
+# Consistency check
 # ---------------------------------------------------------------------------
 
-def build_canonical_glossary(
-    orig_ocr: dict,
-    trans_ocr: dict,
-    min_overlap: float = 0.3,
+def _build_reference_mapping(
+    text_client, extract_model: str, extract_prompt: str,
+    original_path: Path, translated_path: Path,
 ) -> dict[str, str]:
-    """Build {original_text: translated_text} glossary from reference slide pair."""
-    orig_units = text_units_from_ocr(orig_ocr)
-    trans_units = text_units_from_ocr(trans_ocr)
-    glossary: dict[str, str] = {}
-    used_trans: set[int] = set()
+    """Build {normalized_original_text: translated_text} from reference slide."""
+    orig_img = _load_image(original_path)
+    trans_img = _load_image(translated_path)
+    if orig_img is None or trans_img is None:
+        return {}
 
-    for ou in orig_units:
-        orig_text = unit_text(ou)
-        if not orig_text:
-            continue
-        best_iou = 0.0
-        best_idx = -1
-        for ti, tu in enumerate(trans_units):
-            if ti in used_trans:
-                continue
-            iou = bbox_overlap_ratio(ou["bbox"], tu["bbox"])
-            if iou > best_iou:
-                best_iou = iou
-                best_idx = ti
-        if best_iou >= min_overlap and best_idx >= 0:
-            trans_text = unit_text(trans_units[best_idx])
-            if trans_text and trans_text != orig_text:
-                glossary[orig_text] = trans_text
-                used_trans.add(best_idx)
+    orig_extract = extract_slide_json(text_client, extract_model, encode_png(orig_img), extract_prompt)
+    trans_extract = extract_slide_json(text_client, extract_model, encode_png(trans_img), extract_prompt)
 
-    return glossary
+    orig_by_id = {e["id"]: e.get("text", "") for e in orig_extract.get("text_elements", [])}
+    trans_by_id = {e["id"]: e.get("text", "") for e in trans_extract.get("text_elements", [])}
+
+    mapping: dict[str, str] = {}
+    for eid, orig_text in orig_by_id.items():
+        trans_text = trans_by_id.get(eid, "")
+        if orig_text.strip() and trans_text.strip():
+            mapping[_normalize(orig_text)] = trans_text.strip()
+    return mapping
 
 
 def check_consistency(
-    slide_name: str,
-    orig_ocr: dict,
-    trans_ocr: dict,
-    canonical_glossary: dict[str, str],
-    min_overlap: float = 0.3,
+    text_client, extract_model: str, extract_prompt: str,
+    translated_path: Path,
+    reference_mapping: dict[str, str],
 ) -> list[dict]:
-    """Check if translated slide matches canonical glossary. Returns list of inconsistencies."""
-    orig_units = text_units_from_ocr(orig_ocr)
-    trans_units = text_units_from_ocr(trans_ocr)
-    inconsistencies: list[dict] = []
+    """Check a translated slide against the reference mapping. Return issues."""
+    trans_img = _load_image(translated_path)
+    if trans_img is None:
+        return []
 
-    # Match original units to translated units by bbox
-    for ou in orig_units:
-        orig_text = unit_text(ou)
-        if orig_text not in canonical_glossary:
+    trans_extract = extract_slide_json(text_client, extract_model, encode_png(trans_img), extract_prompt)
+    trans_elements = trans_extract.get("text_elements", [])
+
+    issues = []
+    for elem in trans_elements:
+        text = elem.get("text", "").strip()
+        if not text:
             continue
-        expected = canonical_glossary[orig_text]
-
-        # Find matching translated unit
-        best_iou = 0.0
-        best_idx = -1
-        for ti, tu in enumerate(trans_units):
-            iou = bbox_overlap_ratio(ou["bbox"], tu["bbox"])
-            if iou > best_iou:
-                best_iou = iou
-                best_idx = ti
-
-        if best_iou >= min_overlap and best_idx >= 0:
-            actual = unit_text(trans_units[best_idx])
-            if actual and actual != expected:
-                inconsistencies.append({
-                    "original": orig_text,
-                    "expected": expected,
-                    "actual": actual,
-                    "bbox": ou["bbox"],
+        # Try to find matching original via reference mapping
+        for orig_norm, expected_trans in reference_mapping.items():
+            if _normalize(text) != _normalize(expected_trans) and _normalize(text) != orig_norm:
+                continue
+            # This element corresponds to orig_norm
+            if _normalize(text) != _normalize(expected_trans):
+                issues.append({
+                    "original": orig_norm,
+                    "expected": expected_trans,
+                    "got": text,
+                    "element_id": elem.get("id"),
                 })
-
-    return inconsistencies
+    return issues
 
 
 # ---------------------------------------------------------------------------
-# Step C: Correction
+# Fix via 3-Step pipeline
 # ---------------------------------------------------------------------------
 
-def format_mandatory_glossary_prompt(inconsistencies: list[dict]) -> str:
-    """Build a MANDATORY TRANSLATIONS prompt section from inconsistencies."""
-    lines = [
-        "\n\nMANDATORY TRANSLATIONS (override everything else — you MUST use these exact translations):"
-    ]
-    seen: set[str] = set()
-    for inc in inconsistencies:
-        key = inc["original"]
-        if key in seen:
-            continue
-        seen.add(key)
-        lines.append(f'- "{inc["original"]}" MUST be translated as "{inc["expected"]}"')
-    return "\n".join(lines)
+def regenerate_slide(
+    text_client, image_client, types,
+    extract_model: str, render_model: str,
+    extract_prompt: str, translate_prompt: str, render_prompt: str,
+    original_path: Path, output_path: Path,
+    target_language: str, glossary: dict[str, str],
+) -> tuple[str, list[dict]]:
+    """Re-translate a slide via 3-step pipeline. Returns (status, mapping).
+
+    status is 'ok' or 'failed'.
+    """
+    orig_img = _load_image(original_path)
+    if orig_img is None:
+        return "failed", []
+
+    image_bytes = encode_png(orig_img)
+
+    try:
+        extracted = extract_slide_json(text_client, extract_model, image_bytes, extract_prompt)
+        text_elements = extracted.get("text_elements", [])
+        if not text_elements:
+            # No text — copy original
+            shutil.copy2(original_path, output_path)
+            return "ok", []
+
+        mapping = translate_slide_json(
+            text_client, extract_model, text_elements, target_language,
+            glossary, translate_prompt,
+        )
+
+        rendered = render_translated_image(image_client, types, render_model, orig_img, mapping, render_prompt)
+        cv2.imwrite(str(output_path), rendered)
+        return "ok", mapping
+
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [Regenerate] Error: {exc}", flush=True)
+        return "failed", []
 
 
-def pixel_transplant(
-    inconsistent_img: np.ndarray,
-    reference_img: np.ndarray,
-    inconsistencies: list[dict],
-    trans_ocr_inconsistent: dict,
-    trans_ocr_reference: dict,
-    min_overlap: float = 0.3,
-    padding: int = 5,
-) -> np.ndarray:
-    """Copy text regions from reference translated slide to inconsistent slide."""
-    result = inconsistent_img.copy()
-    ref_units = text_units_from_ocr(trans_ocr_reference)
-    inc_units = text_units_from_ocr(trans_ocr_inconsistent)
-    h, w = result.shape[:2]
+def fix_slide_with_retry(
+    text_client, image_client, types,
+    extract_model: str, render_model: str,
+    extract_prompt: str, translate_prompt: str, render_prompt: str,
+    original_path: Path, output_path: Path,
+    target_language: str, glossary: dict[str, str],
+    reference_mapping: dict[str, str],
+    max_retries: int,
+) -> str:
+    """Re-translate with verification against reference. Returns 'fixed' or 'failed'."""
+    orig_img = _load_image(original_path)
+    if orig_img is None:
+        return "failed"
 
-    for inc in inconsistencies:
-        orig_bbox = inc["bbox"]
-        # Find the corresponding region on the inconsistent translated slide
-        inc_bbox = None
-        for iu in inc_units:
-            if bbox_overlap_ratio(orig_bbox, iu["bbox"]) >= min_overlap:
-                inc_bbox = iu["bbox"]
-                break
-        # Find the corresponding region on the reference translated slide
-        ref_bbox = None
-        for ru in ref_units:
-            if bbox_overlap_ratio(orig_bbox, ru["bbox"]) >= min_overlap:
-                ref_bbox = ru["bbox"]
-                break
+    image_bytes = encode_png(orig_img)
 
-        if inc_bbox is None or ref_bbox is None:
-            continue
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"  [Fix] Attempt {attempt}/{max_retries}: Extract → Translate → Render ...", flush=True)
+            extracted = extract_slide_json(text_client, extract_model, image_bytes, extract_prompt)
+            text_elements = extracted.get("text_elements", [])
+            if not text_elements:
+                return "failed"
 
-        # Copy from reference to result
-        ry1 = max(0, ref_bbox["y"] - padding)
-        ry2 = min(h, ref_bbox["y"] + ref_bbox["h"] + padding)
-        rx1 = max(0, ref_bbox["x"] - padding)
-        rx2 = min(w, ref_bbox["x"] + ref_bbox["w"] + padding)
+            mapping = translate_slide_json(
+                text_client, extract_model, text_elements, target_language,
+                glossary, translate_prompt,
+            )
+            rendered = render_translated_image(image_client, types, render_model, orig_img, mapping, render_prompt)
 
-        dy1 = max(0, inc_bbox["y"] - padding)
-        dy2 = min(h, inc_bbox["y"] + inc_bbox["h"] + padding)
-        dx1 = max(0, inc_bbox["x"] - padding)
-        dx2 = min(w, inc_bbox["x"] + inc_bbox["w"] + padding)
+            # Verify consistency
+            print(f"  [Fix] Attempt {attempt}/{max_retries}: Verifying ...", flush=True)
+            verify_extract = extract_slide_json(text_client, extract_model, encode_png(rendered), extract_prompt)
+            verify_elements = verify_extract.get("text_elements", [])
 
-        src_region = reference_img[ry1:ry2, rx1:rx2]
-        # Resize if bboxes differ slightly
-        target_h = dy2 - dy1
-        target_w = dx2 - dx1
-        if src_region.shape[0] != target_h or src_region.shape[1] != target_w:
-            src_region = cv2.resize(src_region, (target_w, target_h), interpolation=cv2.INTER_AREA)
-        result[dy1:dy2, dx1:dx2] = src_region
+            consistent = True
+            for elem in verify_elements:
+                text = elem.get("text", "").strip()
+                if not text:
+                    continue
+                for orig_norm, expected_trans in reference_mapping.items():
+                    if _normalize(text) == orig_norm:
+                        consistent = False
+                        break
+                    if _normalize(text) != _normalize(expected_trans) and _normalize(text) != orig_norm:
+                        continue
+                    if _normalize(text) != _normalize(expected_trans):
+                        consistent = False
+                        break
 
-    return result
+            if consistent:
+                cv2.imwrite(str(output_path), rendered)
+                return "fixed"
+
+            print(f"  [Fix] Attempt {attempt}/{max_retries}: Still inconsistent, retrying ...", flush=True)
+
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [Fix] Attempt {attempt}/{max_retries}: Error — {exc}", flush=True)
+
+    # Last attempt: write best effort
+    try:
+        extracted = extract_slide_json(text_client, extract_model, image_bytes, extract_prompt)
+        text_elements = extracted.get("text_elements", [])
+        if text_elements:
+            mapping = translate_slide_json(
+                text_client, extract_model, text_elements, target_language,
+                glossary, translate_prompt,
+            )
+            rendered = render_translated_image(image_client, types, render_model, orig_img, mapping, render_prompt)
+            cv2.imwrite(str(output_path), rendered)
+            return "fixed"
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [Fix] Final attempt failed: {exc}", flush=True)
+
+    return "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -324,228 +306,253 @@ def main() -> int:
 
     original_dir = Path(args.original_dir).resolve()
     translated_dir = Path(args.translated_dir).resolve()
-    report_path = Path(args.report_json).resolve() if args.report_json else translated_dir / "consistency_report.json"
-
     if not original_dir.exists():
-        print(f"[Review] Original dir not found: {original_dir}", flush=True)
+        print(f"[Consistency] Original dir not found: {original_dir}", flush=True)
         return 1
     if not translated_dir.exists():
-        print(f"[Review] Translated dir not found: {translated_dir}", flush=True)
+        print(f"[Consistency] Translated dir not found: {translated_dir}", flush=True)
         return 1
 
-    # Setup Vision OCR
-    print(f"[Review] Setting up Vision OCR (project: {args.vision_project_id}) ...", flush=True)
-    vision_client, vision_module, _vp, _dp = ensure_cloud_vision_client(args.vision_project_id)
+    text_client = ensure_text_client()
+    image_client, types, project_id_used, location_used = ensure_client(args.project_id, args.location)
 
-    # Setup Gemini client for re-translation
-    client, types, project_id_used, _default_project, location_used = ensure_cloud_gemini_image_client(
-        project_id=args.project_id, location=args.location,
-    )
-    print(f"[Review] Gemini backend: {project_id_used} / {location_used}", flush=True)
+    print(f"[Consistency] Gemini backend: {project_id_used}", flush=True)
+    print(f"[Consistency] Extract/Translate model: {args.extract_model}", flush=True)
+    print(f"[Consistency] Render model: {args.model}", flush=True)
 
-    # Load base prompt
-    target_language = str(args.target_language).strip()
-    termbase_entries = load_termbase_entries(Path(args.termbase_file).resolve(), target_language)
-    base_prompt = append_glossary_to_prompt(
-        load_prompt(Path(args.prompt_file).resolve(), target_language), termbase_entries,
-    )
+    orig_slides = _sorted_slides(original_dir)
 
-    # Collect slide paths
-    orig_slides = sorted(p for p in original_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")
-    trans_slides = sorted(p for p in translated_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")
+    # ---------------------------------------------------------------------------
+    # Phase 1: Extract text from all original slides
+    # ---------------------------------------------------------------------------
+    print(f"[Consistency] Extracting text from {len(orig_slides)} original slides ...", flush=True)
+    slide_extracts: list[tuple[Path, list[dict]]] = []
+    for slide_path in orig_slides:
+        img = _load_image(slide_path)
+        if img is None:
+            slide_extracts.append((slide_path, []))
+            continue
+        try:
+            print(f"@@STEP DETAIL extract {slide_path.name}")
+            extracted = extract_slide_json(text_client, str(args.extract_model), encode_png(img), args.extract_prompt)
+            slide_extracts.append((slide_path, extracted.get("text_elements", [])))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Consistency] Extract failed for {slide_path.name}: {exc}", flush=True)
+            slide_extracts.append((slide_path, []))
+
+    # ---------------------------------------------------------------------------
+    # Phase 2: Detect sequences and build glossaries
+    # ---------------------------------------------------------------------------
+    print("[Consistency] Detecting sequences ...", flush=True)
+    sequences = detect_sequences(slide_extracts)
+    print(f"[Consistency] Found {len(sequences)} sequence(s)", flush=True)
+
+    # Build per-slide glossary from sequence reference mappings.
+    # slide index → glossary dict for that slide (sequence members get the
+    # reference glossary; non-sequence slides get an empty glossary).
+    slide_glossaries: dict[int, dict[str, str]] = {}
+    # slide index → reference_mapping (for consistency verification later)
+    slide_ref_mappings: dict[int, dict[str, str]] = {}
+    # Track which indices belong to sequences (and which is the reference)
+    seq_member_indices: set[int] = set()
+    seq_reference_indices: set[int] = set()
+
+    # We need existing translated images to build the reference mapping for the
+    # reference slide itself. The reference slide (last in sequence) keeps its
+    # current translation as the gold standard.
+    trans_slides = _sorted_slides(translated_dir)
     trans_by_name = {p.name: p for p in trans_slides}
 
-    # Filter to slides that exist in both dirs
-    slide_names = [p.name for p in orig_slides if p.name in trans_by_name]
-    if not slide_names:
-        print("[Review] No matching slides found between original and translated dirs.", flush=True)
-        _write_empty_report(report_path)
-        return 0
-
-    # Step A: OCR all original slides and detect sequences
-    print(f"[Review] OCR scanning {len(slide_names)} original slides ...", flush=True)
-    orig_ocr_cache = ocr_all_slides(
-        [original_dir / n for n in slide_names],
-        vision_client, vision_module, args.vision_feature,
-    )
-    print(f"[Review] OCR completed for {len(orig_ocr_cache)}/{len(slide_names)} slides.", flush=True)
-
-    sequences = detect_sequences(slide_names, orig_ocr_cache)
-    print(f"[Review] Detected {len(sequences)} slide sequences:", flush=True)
-    for seq in sequences:
-        print(f"  [{len(seq)} slides] {seq[0]} ... {seq[-1]}", flush=True)
-
-    if not sequences:
-        print("[Review] No sequences found — nothing to review.", flush=True)
-        _write_empty_report(report_path)
-        return 0
-
-    # Step B + C: For each sequence, check consistency and fix
-    total_fixes = 0
-    total_unfixable = 0
-    report_sequences: list[dict] = []
-
-    for seq in sequences:
-        reference_name = seq[-1]  # Last = most complete slide
-        print(f"@@STEP DETAIL translate-review {reference_name} (ref for {len(seq)} slides)")
-
-        # OCR translated slides in this sequence
-        trans_ocr_cache: dict[str, dict] = {}
-        for name in seq:
-            trans_path = trans_by_name.get(name)
-            if trans_path is None:
-                continue
-            event_id = parse_event_id_from_name(Path(name).stem)
-            if event_id is None:
-                continue
-            try:
-                trans_ocr_cache[name] = ocr_slide_fragments(
-                    vision_client, vision_module,
-                    image_path=trans_path, event_id=event_id, slide_index=0,
-                    feature=args.vision_feature,
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(f"[Review] OCR failed for translated {name}: {exc}", flush=True)
-
-        if reference_name not in orig_ocr_cache or reference_name not in trans_ocr_cache:
-            print(f"[Review] Skipping sequence — reference OCR missing for {reference_name}.", flush=True)
+    for seq_indices in sequences:
+        seq_paths = [slide_extracts[i][0] for i in seq_indices]
+        ref_path = seq_paths[-1]
+        ref_translated = trans_by_name.get(ref_path.name)
+        if ref_translated is None:
+            print(f"[Consistency] No translated slide for reference {ref_path.name}, skipping sequence glossary.", flush=True)
             continue
 
-        # Build canonical glossary from reference pair
-        canonical = build_canonical_glossary(orig_ocr_cache[reference_name], trans_ocr_cache[reference_name])
-        if not canonical:
-            print(f"[Review] No glossary entries from reference {reference_name} — skipping sequence.", flush=True)
+        ref_mapping = _build_reference_mapping(
+            text_client, str(args.extract_model), args.extract_prompt,
+            ref_path, ref_translated,
+        )
+        if not ref_mapping:
             continue
-        print(f"[Review] Canonical glossary ({len(canonical)} entries): {list(canonical.items())[:5]}...", flush=True)
 
-        seq_fixes: list[dict] = []
+        glossary: dict[str, str] = {}
+        for orig_norm, trans_text in ref_mapping.items():
+            glossary[orig_norm] = trans_text
 
-        # Check earlier slides (all except reference)
-        for name in seq[:-1]:
-            if name not in orig_ocr_cache or name not in trans_ocr_cache:
-                continue
+        for idx in seq_indices:
+            seq_member_indices.add(idx)
+            slide_glossaries[idx] = glossary
+            slide_ref_mappings[idx] = ref_mapping
 
-            inconsistencies = check_consistency(
-                name, orig_ocr_cache[name], trans_ocr_cache[name], canonical,
-            )
-            if not inconsistencies:
-                print(f"[Review] {name}: consistent", flush=True)
-                continue
+        ref_idx = seq_indices[-1]
+        seq_reference_indices.add(ref_idx)
 
-            print(f"[Review] {name}: {len(inconsistencies)} inconsistencies found:", flush=True)
-            for inc in inconsistencies:
-                print(f"  '{inc['original']}': expected '{inc['expected']}', got '{inc['actual']}'", flush=True)
+    # ---------------------------------------------------------------------------
+    # Phase 3: Regenerate ALL slides via 3-Step pipeline
+    # ---------------------------------------------------------------------------
+    print(f"\n[Consistency] Regenerating all {len(orig_slides)} slides ...", flush=True)
 
-            # Strategy 1: Re-translation with mandatory glossary
-            fixed = False
-            method = "unfixable"
-            trans_path = trans_by_name[name]
-            orig_path = original_dir / name
-            original_img = cv2.imread(str(orig_path), cv2.IMREAD_COLOR)
-
-            if original_img is not None:
-                glossary_prompt = base_prompt + format_mandatory_glossary_prompt(inconsistencies)
-                for attempt in range(args.max_retries):
-                    print(f"[Review] Re-translating {name} (attempt {attempt + 1}/{args.max_retries}) ...", flush=True)
-                    try:
-                        retranslated = generate_translated_image(
-                            client, types, str(args.model), glossary_prompt, original_img,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[Review] Re-translation failed: {exc}", flush=True)
-                        continue
-
-                    # Verify: OCR the retranslated image and check again
-                    # Save temporarily to allow OCR
-                    tmp_path = trans_path.with_suffix(".review_tmp.png")
-                    cv2.imwrite(str(tmp_path), retranslated)
-                    event_id = parse_event_id_from_name(Path(name).stem)
-                    try:
-                        new_trans_ocr = ocr_slide_fragments(
-                            vision_client, vision_module,
-                            image_path=tmp_path, event_id=event_id or 0, slide_index=0,
-                            feature=args.vision_feature,
-                        )
-                        remaining = check_consistency(name, orig_ocr_cache[name], new_trans_ocr, canonical)
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[Review] Verification OCR failed: {exc}", flush=True)
-                        tmp_path.unlink(missing_ok=True)
-                        continue
-
-                    tmp_path.unlink(missing_ok=True)
-
-                    if not remaining:
-                        # Success — overwrite the translated slide
-                        cv2.imwrite(str(trans_path), retranslated)
-                        print(f"[Review] {name}: fixed via re-translation (attempt {attempt + 1}).", flush=True)
-                        fixed = True
-                        method = "re-translation"
-                        break
-                    else:
-                        print(f"[Review] Re-translation attempt {attempt + 1}: still {len(remaining)} inconsistencies.", flush=True)
-
-            # Strategy 2: Pixel transplant fallback
-            if not fixed:
-                print(f"[Review] Attempting pixel transplant for {name} ...", flush=True)
-                trans_img = cv2.imread(str(trans_path), cv2.IMREAD_COLOR)
-                ref_trans_path = trans_by_name.get(reference_name)
-                ref_trans_img = cv2.imread(str(ref_trans_path), cv2.IMREAD_COLOR) if ref_trans_path else None
-
-                if trans_img is not None and ref_trans_img is not None:
-                    transplanted = pixel_transplant(
-                        trans_img, ref_trans_img, inconsistencies,
-                        trans_ocr_cache[name], trans_ocr_cache[reference_name],
-                    )
-                    cv2.imwrite(str(trans_path), transplanted)
-                    print(f"[Review] {name}: fixed via pixel transplant.", flush=True)
-                    fixed = True
-                    method = "pixel-transplant"
-                else:
-                    print(f"[Review] {name}: pixel transplant failed (images unreadable).", flush=True)
-
-            if fixed:
-                total_fixes += 1
-            else:
-                total_unfixable += 1
-
-            seq_fixes.append({
-                "slide": name,
-                "terms": [
-                    {"original": i["original"], "expected": i["expected"], "was": i["actual"]}
-                    for i in inconsistencies
-                ],
-                "method": method,
-            })
-
-        report_sequences.append({
-            "slides": seq,
-            "reference": reference_name,
-            "canonical_glossary": canonical,
-            "fixes": seq_fixes,
-        })
-
-    # Step D: Write report
     report = {
-        "sequences": report_sequences,
-        "total_sequences": len(sequences),
-        "total_fixes": total_fixes,
-        "total_unfixable": total_unfixable,
+        "summary": {
+            "sequences_found": len(sequences),
+            "total_slides": len(orig_slides),
+            "slides_regenerated": 0,
+            "slides_failed": 0,
+            "inconsistencies_found": 0,
+            "fixes_applied": 0,
+            "fixes_failed": 0,
+        },
+        "sequences": [],
+        "slides": [],
+        "glossary": [],
     }
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-    print(f"[Review] Report saved: {report_path}", flush=True)
 
-    print(f"[Review] Sequences: {len(sequences)}", flush=True)
-    print(f"[Review] Fixes applied: {total_fixes}", flush=True)
-    print(f"[Review] Unfixable: {total_unfixable}", flush=True)
+    # Accumulate a running glossary for non-sequence slides (same as translate
+    # pipeline: earlier translations feed later ones).
+    running_glossary: dict[str, str] = {}
+
+    for i, (slide_path, _elements) in enumerate(slide_extracts):
+        eid = _event_id_str(slide_path)
+        output_path = translated_dir / slide_path.name
+
+        # Choose glossary: sequence members get the enforced reference glossary,
+        # other slides get the running glossary accumulated so far.
+        glossary = slide_glossaries.get(i, running_glossary)
+
+        print(f"[Consistency] [{eid}] Regenerating {slide_path.name} (glossary: {len(glossary)} entries) ...", flush=True)
+        print(f"@@STEP DETAIL regenerate {slide_path.name}")
+
+        status, mapping = regenerate_slide(
+            text_client, image_client, types,
+            str(args.extract_model), str(args.model),
+            args.extract_prompt, args.translate_prompt, args.render_prompt,
+            slide_path, output_path,
+            str(args.target_language), glossary,
+        )
+
+        slide_entry = {
+            "event_id": eid,
+            "file": slide_path.name,
+            "status": status,
+        }
+        report["slides"].append(slide_entry)
+
+        if status == "ok":
+            report["summary"]["slides_regenerated"] += 1
+            # Feed running glossary for subsequent non-sequence slides
+            for entry in mapping:
+                orig = entry.get("original", "").strip()
+                trans = entry.get("translated", "").strip()
+                if orig and trans and orig != trans:
+                    running_glossary[orig] = trans
+        else:
+            report["summary"]["slides_failed"] += 1
+
+        print(f"[Consistency] [{eid}] {status}", flush=True)
+
+    # ---------------------------------------------------------------------------
+    # Phase 4: Consistency verification for sequence members
+    # ---------------------------------------------------------------------------
+    for seq_indices in sequences:
+        seq_paths = [slide_extracts[i][0] for i in seq_indices]
+        event_ids = [_event_id_str(p) for p in seq_paths]
+        ref_mapping = slide_ref_mappings.get(seq_indices[-1])
+        if not ref_mapping:
+            continue
+
+        print(f"\n[Consistency] Verifying sequence: {', '.join(event_ids)}", flush=True)
+        seq_report: dict = {"event_ids": event_ids, "issues": []}
+
+        # Check all slides except reference
+        for idx in seq_indices[:-1]:
+            slide_path = slide_extracts[idx][0]
+            trans_path = translated_dir / slide_path.name
+            eid = _event_id_str(slide_path)
+
+            if not trans_path.exists():
+                continue
+
+            print(f"@@STEP DETAIL verify {slide_path.name}")
+            issues = check_consistency(
+                text_client, str(args.extract_model), args.extract_prompt,
+                trans_path, ref_mapping,
+            )
+
+            if not issues:
+                print(f"[Consistency] [{eid}] Consistent", flush=True)
+                continue
+
+            report["summary"]["inconsistencies_found"] += len(issues)
+
+            for issue in issues:
+                desc = f"'{issue['original']}' expected '{issue['expected']}' but got '{issue['got']}'"
+                print(f"[Consistency] [{eid}] INCONSISTENT — {desc}", flush=True)
+
+                # Retry with verification loop
+                print(f"[Consistency] [{eid}] Fixing with retry ...", flush=True)
+                print(f"@@STEP DETAIL fix {slide_path.name}")
+                glossary = slide_glossaries.get(idx, {})
+                fix_result = fix_slide_with_retry(
+                    text_client, image_client, types,
+                    str(args.extract_model), str(args.model),
+                    args.extract_prompt, args.translate_prompt, args.render_prompt,
+                    slide_path, trans_path,
+                    str(args.target_language), glossary, ref_mapping,
+                    args.max_retries,
+                )
+
+                if fix_result == "fixed":
+                    report["summary"]["fixes_applied"] += 1
+                else:
+                    report["summary"]["fixes_failed"] += 1
+
+                seq_report["issues"].append({
+                    "event_id": eid,
+                    "description": desc,
+                    "type": "inconsistent_translation",
+                    "fix_result": fix_result,
+                })
+
+                # Only fix once per slide (re-translates the whole slide)
+                break
+
+        report["sequences"].append(seq_report)
+
+    # ---------------------------------------------------------------------------
+    # Build glossary section for report
+    # ---------------------------------------------------------------------------
+    seen: set[tuple[str, str]] = set()
+    for ref_mapping in slide_ref_mappings.values():
+        for orig_norm, trans_text in ref_mapping.items():
+            key = (orig_norm, trans_text)
+            if key not in seen:
+                seen.add(key)
+                report["glossary"].append({"source": orig_norm, "target": trans_text})
+
+    # ---------------------------------------------------------------------------
+    # Summary
+    # ---------------------------------------------------------------------------
+    s = report["summary"]
+    print(f"\n[Consistency] === Summary ===", flush=True)
+    print(f"[Consistency] Total slides: {s['total_slides']}", flush=True)
+    print(f"[Consistency] Regenerated: {s['slides_regenerated']}", flush=True)
+    print(f"[Consistency] Failed: {s['slides_failed']}", flush=True)
+    print(f"[Consistency] Sequences found: {s['sequences_found']}", flush=True)
+    print(f"[Consistency] Inconsistencies found: {s['inconsistencies_found']}", flush=True)
+    print(f"[Consistency] Fixes applied: {s['fixes_applied']}", flush=True)
+    print(f"[Consistency] Fixes failed: {s['fixes_failed']}", flush=True)
+
+    # Write report
+    if args.report_json:
+        report_path = Path(args.report_json)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"[Consistency] Report written to {report_path}", flush=True)
+
     return 0
-
-
-def _write_empty_report(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({"sequences": [], "total_sequences": 0, "total_fixes": 0, "total_unfixable": 0}, f, indent=2)
 
 
 if __name__ == "__main__":

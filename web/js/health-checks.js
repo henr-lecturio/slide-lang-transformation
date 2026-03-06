@@ -4,47 +4,47 @@ import { formatUsd, showButtonSuccess } from "./ui-core.js";
 import { getSelectedTtsLanguageOption } from "./tts-language.js";
 
 const healthUi = {
-  transcription: {
-    button: () => el.transcriptionHealthCheck,
-    status: () => el.transcriptionHealthStatus,
-    toggle: () => el.transcriptionHealthMetaToggle,
-    wrap: () => el.transcriptionHealthMetaWrap,
-    meta: () => el.transcriptionHealthMeta,
+  gemini: {
+    button: () => el.geminiHealthCheck,
+    status: () => el.geminiHealthStatus,
+    toggle: () => el.geminiHealthMetaToggle,
+    wrap: () => el.geminiHealthMetaWrap,
+    meta: () => el.geminiHealthMeta,
   },
-  slideEdit: {
-    button: () => el.slideEditHealthCheck,
-    status: () => el.slideEditHealthStatus,
-    toggle: () => el.slideEditHealthMetaToggle,
-    wrap: () => el.slideEditHealthMetaWrap,
-    meta: () => el.slideEditHealthMeta,
+  speechToText: {
+    button: () => el.speechToTextHealthCheck,
+    status: () => el.speechToTextHealthStatus,
+    toggle: () => el.speechToTextHealthMetaToggle,
+    wrap: () => el.speechToTextHealthMetaWrap,
+    meta: () => el.speechToTextHealthMeta,
   },
-  slideTranslate: {
-    button: () => el.slideTranslateHealthCheck,
-    status: () => el.slideTranslateHealthStatus,
-    toggle: () => el.slideTranslateHealthMetaToggle,
-    wrap: () => el.slideTranslateHealthMetaWrap,
-    meta: () => el.slideTranslateHealthMeta,
+  cloudTranslation: {
+    button: () => el.cloudTranslationHealthCheck,
+    status: () => el.cloudTranslationHealthStatus,
+    toggle: () => el.cloudTranslationHealthMetaToggle,
+    wrap: () => el.cloudTranslationHealthMetaWrap,
+    meta: () => el.cloudTranslationHealthMeta,
   },
-  textTranslate: {
-    button: () => el.textTranslateHealthCheck,
-    status: () => el.textTranslateHealthStatus,
-    toggle: () => el.textTranslateHealthMetaToggle,
-    wrap: () => el.textTranslateHealthMetaWrap,
-    meta: () => el.textTranslateHealthMeta,
+  cloudVision: {
+    button: () => el.cloudVisionHealthCheck,
+    status: () => el.cloudVisionHealthStatus,
+    toggle: () => el.cloudVisionHealthMetaToggle,
+    wrap: () => el.cloudVisionHealthMetaWrap,
+    meta: () => el.cloudVisionHealthMeta,
   },
-  slideUpscale: {
-    button: () => el.slideUpscaleHealthCheck,
-    status: () => el.slideUpscaleHealthStatus,
-    toggle: () => el.slideUpscaleHealthMetaToggle,
-    wrap: () => el.slideUpscaleHealthMetaWrap,
-    meta: () => el.slideUpscaleHealthMeta,
+  cloudTts: {
+    button: () => el.cloudTtsHealthCheck,
+    status: () => el.cloudTtsHealthStatus,
+    toggle: () => el.cloudTtsHealthMetaToggle,
+    wrap: () => el.cloudTtsHealthMetaWrap,
+    meta: () => el.cloudTtsHealthMeta,
   },
-  tts: {
-    button: () => el.ttsHealthCheck,
-    status: () => el.ttsHealthStatus,
-    toggle: () => el.ttsHealthMetaToggle,
-    wrap: () => el.ttsHealthMetaWrap,
-    meta: () => el.ttsHealthMeta,
+  replicate: {
+    button: () => el.replicateHealthCheck,
+    status: () => el.replicateHealthStatus,
+    toggle: () => el.replicateHealthMetaToggle,
+    wrap: () => el.replicateHealthMetaWrap,
+    meta: () => el.replicateHealthMeta,
   },
 };
 
@@ -97,10 +97,46 @@ export function clearHealthStatus(key, text = "Not tested.") {
   setHealthStatus(key, "idle", text, "");
 }
 
-function collectTtsHealthPayload() {
+function projectId() {
+  return el.gcloudProjectId.value.trim();
+}
+
+function collectGeminiHealthPayload() {
+  return {
+    GCLOUD_PROJECT_ID: projectId(),
+    GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
+  };
+}
+
+function collectSpeechToTextHealthPayload() {
+  return {
+    GCLOUD_PROJECT_ID: projectId(),
+    TRANSCRIPTION_PROVIDER: el.transcriptionProvider.value,
+    GOOGLE_SPEECH_LOCATION: el.googleSpeechLocation.value.trim(),
+    GOOGLE_SPEECH_MODEL: el.googleSpeechModel.value.trim(),
+    GOOGLE_SPEECH_LANGUAGE_CODES: el.googleSpeechLanguageCodes.value.trim(),
+  };
+}
+
+function collectCloudTranslationHealthPayload() {
+  return {
+    GCLOUD_PROJECT_ID: projectId(),
+    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
+    GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
+    FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
+  };
+}
+
+function collectCloudVisionHealthPayload() {
+  return {
+    GCLOUD_PROJECT_ID: projectId(),
+  };
+}
+
+function collectCloudTtsHealthPayload() {
   const selected = getSelectedTtsLanguageOption();
   return {
-    GCLOUD_TTS_PROJECTID: el.gcloudTtsProjectId.value.trim(),
+    GCLOUD_PROJECT_ID: projectId(),
     GOOGLE_TTS_LANGUAGE_CODE: selected ? selected.tts_language_code : "",
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
@@ -108,94 +144,17 @@ function collectTtsHealthPayload() {
   };
 }
 
-function collectTranscriptionHealthPayload() {
+function collectReplicateHealthPayload() {
   return {
-    TRANSCRIPTION_PROVIDER: el.transcriptionProvider.value,
-    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
-    GOOGLE_SPEECH_LOCATION: el.googleSpeechLocation.value.trim(),
-    GOOGLE_SPEECH_MODEL: el.googleSpeechModel.value.trim(),
-    GOOGLE_SPEECH_LANGUAGE_CODES: el.googleSpeechLanguageCodes.value.trim(),
-  };
-}
-
-function collectSlideEditHealthPayload() {
-  return {
-    FINAL_SLIDE_POSTPROCESS_MODE: el.finalSlidePostprocessMode.value,
-    GEMINI_EDIT_MODEL: el.geminiEditModel.value.trim(),
-    GEMINI_EDIT_PROMPT: el.geminiEditPrompt.value,
-    GCLOUD_VISION_PROJECTID: el.slideTranslateVisionProjectId.value.trim(),
-    GCLOUD_TRANSLATE_PROJECTID: el.gcloudTranslateProjectId.value.trim(),
-    GCLOUD_TTS_PROJECTID: el.gcloudTtsProjectId.value.trim(),
-    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
-    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
-  };
-}
-
-function collectSlideTranslateHealthPayload() {
-  const mode = String(el.finalSlideTranslationMode.value || "").trim().toLowerCase();
-  const visionProjectId = el.slideTranslateVisionProjectId.value.trim();
-  return {
-    FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
-    FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
-    GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
-    GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
-    GCLOUD_VISION_PROJECTID: mode === "deterministic_glossary" ? visionProjectId : "",
-    GCLOUD_TRANSLATE_PROJECTID: mode === "deterministic_glossary"
-      ? (el.gcloudTranslateProjectId.value.trim() || visionProjectId)
-      : "",
-    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
-    GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
-  };
-}
-
-function collectTextTranslateHealthPayload() {
-  return {
-    GCLOUD_TRANSLATE_PROJECTID: el.gcloudTranslateProjectId.value.trim(),
-    GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
-    TRANSCRIPT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
-    GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE: el.googleTranslateSourceLanguageCode.value.trim(),
-    FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
-  };
-}
-
-function collectSlideUpscaleHealthPayload() {
-  return {
-    FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
-    FINAL_SLIDE_UPSCALE_MODEL: el.finalSlideUpscaleModel.value.trim(),
-    FINAL_SLIDE_UPSCALE_DEVICE: el.finalSlideUpscaleDevice.value,
-    FINAL_SLIDE_UPSCALE_TILE_SIZE: Number(el.finalSlideUpscaleTileSize.value),
-    FINAL_SLIDE_UPSCALE_TILE_OVERLAP: Number(el.finalSlideUpscaleTileOverlap.value),
     REPLICATE_NIGHTMARE_REALESRGAN_MODEL_REF: el.replicateNightmareRealesrganModelRef.value.trim(),
     REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID: el.replicateNightmareRealesrganVersionId.value.trim(),
     REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND: Number(el.replicateNightmareRealesrganPricePerSecond.value),
   };
 }
 
-export async function testTranscriptionHealth() {
-  setHealthStatus("transcription", "pending", "Testing...", "");
-  const result = await apiPost("/api/transcription/health", collectTranscriptionHealthPayload());
-  if (result.ok) {
-    const meta = [
-      `project=${result.project_id || "-"}`,
-      `location=${result.location || "-"}`,
-      `model=${result.model || "-"}`,
-      `languages=${Array.isArray(result.language_codes) ? result.language_codes.join(",") : "-"}`,
-      `${result.latency_ms || 0} ms`,
-      `results=${result.results_count || 0}`,
-    ].join(" | ");
-    setHealthStatus("transcription", "ok", "Reachable", meta);
-    showButtonSuccess(el.transcriptionHealthCheck, "OK");
-    return;
-  }
-  const meta = [result.error_type || "Error", result.error_message || result.message || "Transcription API check failed."]
-    .filter(Boolean)
-    .join(" | ");
-  setHealthStatus("transcription", "error", "Failed", meta);
-}
-
-export async function testSlideEditHealth() {
-  setHealthStatus("slideEdit", "pending", "Testing...", "");
-  const result = await apiPost("/api/slide-edit/health", collectSlideEditHealthPayload());
+export async function testGeminiHealth() {
+  setHealthStatus("gemini", "pending", "Testing...", "");
+  const result = await apiPost("/api/gemini/health", collectGeminiHealthPayload());
   if (result.ok) {
     const meta = [
       `model=${result.model || "-"}`,
@@ -205,106 +164,84 @@ export async function testSlideEditHealth() {
       `${result.image_width || 0}x${result.image_height || 0}`,
       `${result.image_bytes || 0} bytes`,
     ].join(" | ");
-    setHealthStatus("slideEdit", "ok", "Reachable", meta);
-    showButtonSuccess(el.slideEditHealthCheck, "OK");
+    setHealthStatus("gemini", "ok", "Reachable", meta);
+    showButtonSuccess(el.geminiHealthCheck, "OK");
     return;
   }
-  const meta = [result.error_type || "Error", result.error_message || result.message || "Slide Edit API check failed."]
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Gemini API check failed."]
     .filter(Boolean)
     .join(" | ");
-  setHealthStatus("slideEdit", "error", "Failed", meta);
+  setHealthStatus("gemini", "error", "Failed", meta);
 }
 
-export async function testSlideTranslateHealth() {
-  setHealthStatus("slideTranslate", "pending", "Testing...", "");
-  const result = await apiPost("/api/slide-translate/health", collectSlideTranslateHealthPayload());
+export async function testSpeechToTextHealth() {
+  setHealthStatus("speechToText", "pending", "Testing...", "");
+  const result = await apiPost("/api/transcription/health", collectSpeechToTextHealthPayload());
   if (result.ok) {
-    const meta = result.mode === "deterministic_glossary"
-      ? [
-        `target=${result.target_language || "-"}`,
-        `ocr=${result.ocr_provider || "google_vision_document_text_detection"}`,
-        `vision_project=${result.vision_project_id_used || "-"}`,
-        `translate_project=${result.translate_project_id_used || "-"}`,
-        `model=${result.model || "-"}`,
-        `${result.latency_ms || 0} ms`,
-        result.ocr_preview ? `ocr="${result.ocr_preview}"` : "",
-        result.translated_text ? `sample="${String(result.translated_text).slice(0, 90)}"` : "",
-      ].filter(Boolean).join(" | ")
-      : [
-        `target=${result.target_language || "-"}`,
-        `model=${result.model || "-"}`,
-        `project=${result.project_id_used || "-"}`,
-        `location=${result.location || "-"}`,
-        result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
-        `${result.latency_ms || 0} ms`,
-        `${result.image_width || 0}x${result.image_height || 0}`,
-        `${result.image_bytes || 0} bytes`,
-      ].filter(Boolean).join(" | ");
-    setHealthStatus("slideTranslate", "ok", "Reachable", meta);
-    showButtonSuccess(el.slideTranslateHealthCheck, "OK");
+    const meta = [
+      `project=${result.project_id || "-"}`,
+      `location=${result.location || "-"}`,
+      `model=${result.model || "-"}`,
+      `languages=${Array.isArray(result.language_codes) ? result.language_codes.join(",") : "-"}`,
+      `${result.latency_ms || 0} ms`,
+      `results=${result.results_count || 0}`,
+    ].join(" | ");
+    setHealthStatus("speechToText", "ok", "Reachable", meta);
+    showButtonSuccess(el.speechToTextHealthCheck, "OK");
     return;
   }
-  const meta = [result.error_type || "Error", result.error_message || result.message || "Slide Translate API check failed."]
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Speech-to-Text API check failed."]
     .filter(Boolean)
     .join(" | ");
-  setHealthStatus("slideTranslate", "error", "Failed", meta);
+  setHealthStatus("speechToText", "error", "Failed", meta);
 }
 
-export async function testTextTranslateHealth() {
-  setHealthStatus("textTranslate", "pending", "Testing...", "");
-  const result = await apiPost("/api/text-translate/health", collectTextTranslateHealthPayload());
+export async function testCloudTranslationHealth() {
+  setHealthStatus("cloudTranslation", "pending", "Testing...", "");
+  const result = await apiPost("/api/cloud-translation/health", collectCloudTranslationHealthPayload());
   if (result.ok) {
     const translated = String(result.translated_text || "").trim();
     const preview = translated.length > 90 ? `${translated.slice(0, 87)}...` : translated;
     const meta = [
-      `provider=${result.provider || "-"}`,
-      result.project_id_used ? `project=${result.project_id_used}` : "",
-      result.location ? `location=${result.location}` : "",
+      `project=${result.project_id_used || "-"}`,
+      `location=${result.location || "-"}`,
       `model=${result.model || "-"}`,
-      `target=${result.target_language_code || result.target_language || "-"}`,
-      result.glossary_entries != null ? `glossary=${result.glossary_entries}` : "",
-      result.termbase_hits != null ? `termbase_hits=${result.termbase_hits}` : "",
+      `target=${result.target_language_code || "-"}`,
       `${result.latency_ms || 0} ms`,
-      preview ? `sample=\"${preview}\"` : "",
+      preview ? `sample="${preview}"` : "",
     ].filter(Boolean).join(" | ");
-    setHealthStatus("textTranslate", "ok", "Reachable", meta);
-    showButtonSuccess(el.textTranslateHealthCheck, "OK");
+    setHealthStatus("cloudTranslation", "ok", "Reachable", meta);
+    showButtonSuccess(el.cloudTranslationHealthCheck, "OK");
     return;
   }
-  const meta = [result.error_type || "Error", result.error_message || result.message || "Transcript Translate API check failed."]
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Cloud Translation API check failed."]
     .filter(Boolean)
     .join(" | ");
-  setHealthStatus("textTranslate", "error", "Failed", meta);
+  setHealthStatus("cloudTranslation", "error", "Failed", meta);
 }
 
-export async function testSlideUpscaleHealth() {
-  setHealthStatus("slideUpscale", "pending", "Testing...", "");
-  const result = await apiPost("/api/slide-upscale/health", collectSlideUpscaleHealthPayload());
+export async function testCloudVisionHealth() {
+  setHealthStatus("cloudVision", "pending", "Testing...", "");
+  const result = await apiPost("/api/cloud-vision/health", collectCloudVisionHealthPayload());
   if (result.ok) {
-    const metaParts = [
-      `mode=${result.mode || "-"}`,
-      `model=${result.model || "-"}`,
-      result.version_id ? `version=${result.version_id}` : "",
-      result.device ? `device=${result.device}` : "",
-      result.scale ? `x${result.scale}` : "",
+    const meta = [
+      `project=${result.project_id_used || "-"}`,
       `${result.latency_ms || 0} ms`,
-      `${result.image_width || 0}x${result.image_height || 0}`,
-      result.predict_time_sec != null ? `predict=${Number(result.predict_time_sec).toFixed(3)}s` : "",
-      result.estimated_cost_usd != null && result.estimated_cost_usd > 0 ? `est_cost=${formatUsd(result.estimated_cost_usd)}` : "",
-    ].filter(Boolean);
-    setHealthStatus("slideUpscale", "ok", "Reachable", metaParts.join(" | "));
-    showButtonSuccess(el.slideUpscaleHealthCheck, "OK");
+      result.ocr_preview ? `ocr="${result.ocr_preview}"` : "",
+    ].filter(Boolean).join(" | ");
+    setHealthStatus("cloudVision", "ok", "Reachable", meta);
+    showButtonSuccess(el.cloudVisionHealthCheck, "OK");
     return;
   }
-  const meta = [result.error_type || "Error", result.error_message || result.message || "Slide Upscale API check failed."]
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Cloud Vision API check failed."]
     .filter(Boolean)
     .join(" | ");
-  setHealthStatus("slideUpscale", "error", "Failed", meta);
+  setHealthStatus("cloudVision", "error", "Failed", meta);
 }
 
-export async function testTtsHealth() {
-  setHealthStatus("tts", "pending", "Testing...", "");
-  const result = await apiPost("/api/tts/health", collectTtsHealthPayload());
+export async function testCloudTtsHealth() {
+  setHealthStatus("cloudTts", "pending", "Testing...", "");
+  const result = await apiPost("/api/tts/health", collectCloudTtsHealthPayload());
   if (result.ok) {
     const meta = [
       `project=${result.project_id_used || "-"}`,
@@ -314,13 +251,36 @@ export async function testTtsHealth() {
       `${result.audio_bytes || 0} bytes`,
       `${result.duration_sec || 0}s`,
     ].join(" | ");
-    setHealthStatus("tts", "ok", "Reachable", meta);
-    showButtonSuccess(el.ttsHealthCheck, "OK");
+    setHealthStatus("cloudTts", "ok", "Reachable", meta);
+    showButtonSuccess(el.cloudTtsHealthCheck, "OK");
     return;
   }
   const meta = [
     result.error_type || "Error",
-    result.error_message || result.message || "TTS API check failed.",
+    result.error_message || result.message || "Cloud TTS API check failed.",
   ].filter(Boolean).join(" | ");
-  setHealthStatus("tts", "error", "Failed", meta);
+  setHealthStatus("cloudTts", "error", "Failed", meta);
+}
+
+export async function testReplicateHealth() {
+  setHealthStatus("replicate", "pending", "Testing...", "");
+  const result = await apiPost("/api/replicate/health", collectReplicateHealthPayload());
+  if (result.ok) {
+    const metaParts = [
+      `model=${result.model || "-"}`,
+      result.version_id ? `version=${result.version_id}` : "",
+      `x${result.scale || 4}`,
+      `${result.latency_ms || 0} ms`,
+      `${result.image_width || 0}x${result.image_height || 0}`,
+      result.predict_time_sec != null ? `predict=${Number(result.predict_time_sec).toFixed(3)}s` : "",
+      result.estimated_cost_usd != null && result.estimated_cost_usd > 0 ? `est_cost=${formatUsd(result.estimated_cost_usd)}` : "",
+    ].filter(Boolean);
+    setHealthStatus("replicate", "ok", "Reachable", metaParts.join(" | "));
+    showButtonSuccess(el.replicateHealthCheck, "OK");
+    return;
+  }
+  const meta = [result.error_type || "Error", result.error_message || result.message || "Replicate API check failed."]
+    .filter(Boolean)
+    .join(" | ");
+  setHealthStatus("replicate", "error", "Failed", meta);
 }

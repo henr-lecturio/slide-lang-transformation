@@ -375,6 +375,60 @@
   min-height: 34px;
 }
 
+.lab-accordion {
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  margin-bottom: 16px;
+}
+
+.lab-accordion[open] > .lab-accordion-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.lab-accordion-header {
+  display: flex;
+  align-items: center;
+  padding: 14px 20px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.lab-accordion-header::-webkit-details-marker {
+  display: none;
+}
+
+.lab-accordion-header::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 12px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 140ms ease;
+  flex-shrink: 0;
+}
+
+.lab-accordion[open] > .lab-accordion-header::before {
+  transform: rotate(45deg);
+}
+
+.lab-accordion-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lab-accordion-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.lab-accordion-body {
+  border: 0;
+  background: transparent;
+}
+
 .export-lab-status-chip {
   display: inline-flex;
   align-items: center;

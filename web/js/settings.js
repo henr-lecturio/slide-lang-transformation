@@ -567,7 +567,17 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   el.whisperDevice.value = cfg.WHISPER_DEVICE || "cuda";
   el.whisperComputeType.value = cfg.WHISPER_COMPUTE_TYPE || "float16";
   el.whisperLanguage.value = cfg.WHISPER_LANGUAGE || "";
-  el.googleSpeechProjectId.value = cfg.GOOGLE_SPEECH_PROJECT_ID || "";
+  el.gcloudProjectId.value = cfg.GCLOUD_PROJECT_ID
+    || cfg.GCLOUD_VERTEX_PROJECTID
+    || cfg.GOOGLE_GEMINI_PROJECT_ID
+    || cfg.GCLOUD_VISION_PROJECTID
+    || cfg.GOOGLE_VISION_PROJECT_ID
+    || cfg.GCLOUD_TRANSLATE_PROJECTID
+    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
+    || cfg.GCLOUD_TTS_PROJECTID
+    || cfg.GOOGLE_TTS_PROJECT_ID
+    || cfg.GOOGLE_SPEECH_PROJECT_ID
+    || "";
   el.googleSpeechLocation.value = cfg.GOOGLE_SPEECH_LOCATION || "global";
   el.googleSpeechModel.value = cfg.GOOGLE_SPEECH_MODEL || "chirp_3";
   el.googleSpeechLanguageCodes.value = cfg.GOOGLE_SPEECH_LANGUAGE_CODES || "en-US";
@@ -597,19 +607,12 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderTtsLanguageOptions("", cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   renderHomeQuickLanguageOptions(cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
-  el.geminiTranslateMaxReviewRetries.value = cfg.SLIDE_TRANSLATE_MAX_REVIEW_RETRIES ?? 3;
-  el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
-  el.slideTranslateVisionProjectId.value = cfg.GCLOUD_VISION_PROJECTID
-    || cfg.GOOGLE_VISION_PROJECT_ID
-    || cfg.GCLOUD_TRANSLATE_PROJECTID
-    || cfg.GOOGLE_TRANSLATE_PROJECT_ID
-    || cfg.GCLOUD_TTS_PROJECTID
-    || cfg.GOOGLE_TTS_PROJECT_ID
-    || cfg.GOOGLE_SPEECH_PROJECT_ID
-    || "";
+  el.geminiExtractModel.value = cfg.GEMINI_EXTRACT_MODEL || "gemini-3.1-pro-preview";
+  el.geminiSlideExtractPrompt.value = cfg.GEMINI_SLIDE_EXTRACT_PROMPT || "";
+  el.geminiSlideTranslatePrompt.value = cfg.GEMINI_SLIDE_TRANSLATE_PROMPT || "";
+  el.geminiSlideRenderPrompt.value = cfg.GEMINI_SLIDE_RENDER_PROMPT || "";
   el.slideTranslateMaxFontSize.value = cfg.SLIDE_TRANSLATE_MAX_FONT_SIZE ?? 120;
   renderSlideTranslateStyleEditor(cfg.SLIDE_TRANSLATE_STYLES_JSON || "");
-  el.gcloudTranslateProjectId.value = cfg.GCLOUD_TRANSLATE_PROJECTID || cfg.GOOGLE_TRANSLATE_PROJECT_ID || cfg.GCLOUD_TTS_PROJECTID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.googleTranslateLocation.value = cfg.GOOGLE_TRANSLATE_LOCATION || "us-central1";
   el.geminiTextTranslateModel.value = cfg.TRANSCRIPT_TRANSLATE_MODEL || "gemini-2.5-pro";
   el.geminiTextTranslatePrompt.value = cfg.GEMINI_TEXT_TRANSLATE_PROMPT || "";
@@ -617,7 +620,6 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderTermbaseEditor(cfg.TRANSLATION_TERMBASE_CSV || "");
   el.geminiTtsModel.value = cfg.GEMINI_TTS_MODEL || "gemini-2.5-flash-tts";
   el.geminiTtsVoice.value = cfg.GEMINI_TTS_VOICE || "Kore";
-  el.gcloudTtsProjectId.value = cfg.GCLOUD_TTS_PROJECTID || cfg.GOOGLE_TTS_PROJECT_ID || cfg.GOOGLE_SPEECH_PROJECT_ID || "";
   el.geminiTtsPrompt.value = cfg.GEMINI_TTS_PROMPT || "";
   el.finalSlideUpscaleMode.value = cfg.FINAL_SLIDE_UPSCALE_MODE || "none";
   el.finalSlideUpscaleModel.value = cfg.FINAL_SLIDE_UPSCALE_MODEL || "caidas/swin2SR-classical-sr-x4-64";
@@ -659,12 +661,12 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   if (el.homeGeminiTranslateModel) {
     el.homeGeminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
   }
-  clearHealthStatus("transcription");
-  clearHealthStatus("slideEdit");
-  clearHealthStatus("slideTranslate");
-  clearHealthStatus("slideUpscale");
-  clearHealthStatus("textTranslate");
-  clearHealthStatus("tts");
+  clearHealthStatus("gemini");
+  clearHealthStatus("speechToText");
+  clearHealthStatus("cloudTranslation");
+  clearHealthStatus("cloudVision");
+  clearHealthStatus("cloudTts");
+  clearHealthStatus("replicate");
   const videoLabel = cfg.VIDEO_PATH || "(nicht gesetzt)";
   el.configMeta.textContent = `VIDEO_PATH: ${videoLabel}`;
   syncSettingsFieldState();
@@ -680,9 +682,7 @@ export async function loadConfig(options = {}) {
 
 export async function saveConfig(options = {}) {
   const videoPath = (state.selectedVideoPath || "").trim();
-  const slideTranslateVisionProjectId = el.slideTranslateVisionProjectId.value.trim();
-  const gcloudTranslateProjectId = el.gcloudTranslateProjectId.value.trim();
-  const gcloudTtsProjectId = el.gcloudTtsProjectId.value.trim();
+  const gcloudProjectId = el.gcloudProjectId.value.trim();
   const payload = {
     VIDEO_PATH: videoPath,
     ROI_X0: Number(el.roiX0.value),
@@ -700,7 +700,8 @@ export async function saveConfig(options = {}) {
     WHISPER_DEVICE: el.whisperDevice.value.trim(),
     WHISPER_COMPUTE_TYPE: el.whisperComputeType.value.trim(),
     WHISPER_LANGUAGE: el.whisperLanguage.value.trim(),
-    GOOGLE_SPEECH_PROJECT_ID: el.googleSpeechProjectId.value.trim(),
+    GCLOUD_PROJECT_ID: gcloudProjectId,
+    GOOGLE_SPEECH_PROJECT_ID: gcloudProjectId,
     GOOGLE_SPEECH_LOCATION: el.googleSpeechLocation.value.trim(),
     GOOGLE_SPEECH_MODEL: el.googleSpeechModel.value.trim(),
     GOOGLE_SPEECH_LANGUAGE_CODES: el.googleSpeechLanguageCodes.value.trim(),
@@ -726,17 +727,21 @@ export async function saveConfig(options = {}) {
     FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
-    SLIDE_TRANSLATE_MAX_REVIEW_RETRIES: Number(el.geminiTranslateMaxReviewRetries.value),
-    GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
-    GCLOUD_VISION_PROJECTID: slideTranslateVisionProjectId,
-    GOOGLE_VISION_PROJECT_ID: slideTranslateVisionProjectId,
+    GEMINI_EXTRACT_MODEL: el.geminiExtractModel.value.trim(),
+    GEMINI_SLIDE_EXTRACT_PROMPT: el.geminiSlideExtractPrompt.value,
+    GEMINI_SLIDE_TRANSLATE_PROMPT: el.geminiSlideTranslatePrompt.value,
+    GEMINI_SLIDE_RENDER_PROMPT: el.geminiSlideRenderPrompt.value,
+    GCLOUD_VISION_PROJECTID: gcloudProjectId,
+    GOOGLE_VISION_PROJECT_ID: gcloudProjectId,
+    GCLOUD_VERTEX_PROJECTID: gcloudProjectId,
+    GOOGLE_GEMINI_PROJECT_ID: gcloudProjectId,
     SLIDE_TRANSLATE_MAX_FONT_SIZE: Number(el.slideTranslateMaxFontSize.value),
     SLIDE_TRANSLATE_STYLES_JSON: (() => {
       syncSlideTranslateStylesJsonFromTable();
       return el.slideTranslateStylesJson.value;
     })(),
-    GCLOUD_TRANSLATE_PROJECTID: gcloudTranslateProjectId,
-    GOOGLE_TRANSLATE_PROJECT_ID: gcloudTranslateProjectId,
+    GCLOUD_TRANSLATE_PROJECTID: gcloudProjectId,
+    GOOGLE_TRANSLATE_PROJECT_ID: gcloudProjectId,
     GOOGLE_TRANSLATE_LOCATION: el.googleTranslateLocation.value.trim(),
     GOOGLE_TRANSLATE_MODEL: String(lastLoadedConfig.GOOGLE_TRANSLATE_MODEL || "general/translation-llm").trim(),
     TRANSCRIPT_TRANSLATE_MODEL: el.geminiTextTranslateModel.value.trim(),
@@ -748,8 +753,8 @@ export async function saveConfig(options = {}) {
     })(),
     GEMINI_TTS_MODEL: el.geminiTtsModel.value.trim(),
     GEMINI_TTS_VOICE: el.geminiTtsVoice.value.trim(),
-    GCLOUD_TTS_PROJECTID: gcloudTtsProjectId,
-    GOOGLE_TTS_PROJECT_ID: gcloudTtsProjectId,
+    GCLOUD_TTS_PROJECTID: gcloudProjectId,
+    GOOGLE_TTS_PROJECT_ID: gcloudProjectId,
     GOOGLE_TTS_LANGUAGE_CODE: (getSelectedTtsLanguageOption()?.tts_language_code || "").trim(),
     GEMINI_TTS_PROMPT: el.geminiTtsPrompt.value,
     FINAL_SLIDE_UPSCALE_MODE: el.finalSlideUpscaleMode.value,
@@ -810,36 +815,24 @@ export function syncSettingsFieldState() {
   el.whisperDevice.disabled = googleTranscription;
   el.whisperComputeType.disabled = googleTranscription;
   el.whisperLanguage.disabled = googleTranscription;
-  el.googleSpeechProjectId.disabled = !googleTranscription;
   el.googleSpeechLocation.disabled = !googleTranscription;
   el.googleSpeechModel.disabled = !googleTranscription;
   el.googleSpeechLanguageCodes.disabled = !googleTranscription;
   el.googleSpeechChunkSec.disabled = !googleTranscription;
   el.googleSpeechChunkOverlapSec.disabled = !googleTranscription;
-  if (el.transcriptionHealthCheck) {
-    el.transcriptionHealthCheck.disabled = !googleTranscription;
+  if (el.speechToTextHealthCheck) {
+    el.speechToTextHealthCheck.disabled = !googleTranscription;
   }
   if (!googleTranscription) {
-    setHealthStatus("transcription", "idle", "Only for google_chirp_3.", "");
-  } else if (el.transcriptionHealthStatus?.textContent === "Only for google_chirp_3.") {
-    clearHealthStatus("transcription");
+    setHealthStatus("speechToText", "idle", "Only for google_chirp_3.", "");
+  } else if (el.speechToTextHealthStatus?.textContent === "Only for google_chirp_3.") {
+    clearHealthStatus("speechToText");
   }
 
   el.finalSlidePostprocessMode.disabled = !editEnabled;
   el.geminiEditModel.disabled = !editEnabled;
   el.geminiEditPrompt.disabled = !editEnabled;
   const editApiEnabled = editEnabled && el.finalSlidePostprocessMode.value === "gemini";
-  if (el.slideEditHealthCheck) {
-    el.slideEditHealthCheck.disabled = !editApiEnabled;
-  }
-  if (!editApiEnabled) {
-    setHealthStatus("slideEdit", "idle", editEnabled ? "Only for nano banana mode." : "Step disabled.", "");
-  } else if (
-    el.slideEditHealthStatus?.textContent === "Only for nano banana mode."
-    || el.slideEditHealthStatus?.textContent === "Step disabled."
-  ) {
-    clearHealthStatus("slideEdit");
-  }
 
   el.finalSlideTranslationMode.disabled = !translateEnabled;
   const languageSelectionEnabled = translateEnabled || textTranslateEnabled || ttsEnabled || googleTranscription;
@@ -848,51 +841,23 @@ export function syncSettingsFieldState() {
   }
   el.finalSlideTargetLanguage.disabled = !languageSelectionEnabled;
   el.geminiTranslateModel.disabled = !translateEnabled || !geminiSlideTranslate;
-  el.geminiTranslateMaxReviewRetries.disabled = !translateEnabled || !geminiSlideTranslate;
-  el.geminiTranslatePrompt.disabled = !translateEnabled || !geminiSlideTranslate;
-  el.slideTranslateVisionProjectId.disabled = !translateEnabled || !deterministicSlideTranslate;
+  el.geminiExtractModel.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.geminiSlideExtractPrompt.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.geminiSlideTranslatePrompt.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.geminiSlideRenderPrompt.disabled = !translateEnabled || !geminiSlideTranslate;
   el.slideTranslateMaxFontSize.disabled = !translateEnabled || !deterministicSlideTranslate;
   setSlideTranslateStyleEditorDisabled(!translateEnabled || !deterministicSlideTranslate);
   const slideTranslateApiEnabled = translateEnabled && el.finalSlideTranslationMode.value !== "none";
-  if (el.slideTranslateHealthCheck) {
-    el.slideTranslateHealthCheck.disabled = !slideTranslateApiEnabled;
-  }
-  if (!slideTranslateApiEnabled) {
-    setHealthStatus("slideTranslate", "idle", translateEnabled ? "Mode none." : "Step disabled.", "");
-  } else if (
-    el.slideTranslateHealthStatus?.textContent === "Mode none."
-    || el.slideTranslateHealthStatus?.textContent === "Step disabled."
-  ) {
-    clearHealthStatus("slideTranslate");
-  }
 
-  el.gcloudTranslateProjectId.disabled = !cloudTranslateConfigEnabled;
   el.googleTranslateLocation.disabled = !cloudTranslateConfigEnabled;
   el.geminiTextTranslateModel.disabled = !textTranslateEnabled;
   el.geminiTextTranslatePrompt.disabled = !textTranslateEnabled;
   el.googleTranslateSourceLanguageCode.disabled = !sourceLanguageConfigEnabled;
-  if (el.textTranslateHealthCheck) {
-    el.textTranslateHealthCheck.disabled = !textTranslateEnabled;
-  }
-  if (!textTranslateEnabled) {
-    setHealthStatus("textTranslate", "idle", "Step disabled.", "");
-  } else if (el.textTranslateHealthStatus?.textContent === "Step disabled.") {
-    clearHealthStatus("textTranslate");
-  }
 
   el.geminiTtsModel.disabled = !ttsEnabled;
   el.geminiTtsVoice.disabled = !ttsEnabled;
-  el.gcloudTtsProjectId.disabled = !ttsEnabled;
   el.googleTtsLanguageCode.disabled = !ttsEnabled;
   el.geminiTtsPrompt.disabled = !ttsEnabled;
-  if (el.ttsHealthCheck) {
-    el.ttsHealthCheck.disabled = !ttsEnabled;
-  }
-  if (!ttsEnabled) {
-    setHealthStatus("tts", "idle", "Step disabled.", "");
-  } else if (el.ttsHealthStatus?.textContent === "Step disabled.") {
-    clearHealthStatus("tts");
-  }
 
   updateTtsLanguageHint();
 
@@ -905,17 +870,6 @@ export function syncSettingsFieldState() {
   el.replicateNightmareRealesrganVersionId.disabled = !upscaleEnabled || !replicateNightmareUpscale;
   el.replicateNightmareRealesrganPricePerSecond.disabled = !upscaleEnabled || !replicateNightmareUpscale;
   el.replicateUpscaleConcurrency.disabled = !upscaleEnabled || !replicateUpscale;
-  if (el.slideUpscaleHealthCheck) {
-    el.slideUpscaleHealthCheck.disabled = !slideUpscaleApiEnabled;
-  }
-  if (!slideUpscaleApiEnabled) {
-    setHealthStatus("slideUpscale", "idle", upscaleEnabled ? "Select an upscale mode." : "Step disabled.", "");
-  } else if (
-    el.slideUpscaleHealthStatus?.textContent === "Select an upscale mode."
-    || el.slideUpscaleHealthStatus?.textContent === "Step disabled."
-  ) {
-    clearHealthStatus("slideUpscale");
-  }
 
   el.videoExportMinSlideSec.disabled = !videoExportEnabled;
   el.videoExportTailPadSec.disabled = !videoExportEnabled;

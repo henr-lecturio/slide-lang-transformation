@@ -49,7 +49,7 @@ export function syncSettingsKeyTooltips() {
 }
 
 export function setActiveTab(tabName) {
-  const allowedTabs = new Set(["home", "all-runs", "image-lab", "export-lab", "consistency-lab", "roi", "settings"]);
+  const allowedTabs = new Set(["home", "all-runs", "lab", "roi", "settings"]);
   const nextTab = allowedTabs.has(tabName) ? tabName : "home";
   for (const btn of el.tabButtons) {
     const active = btn.dataset.tab === nextTab;
@@ -57,9 +57,7 @@ export function setActiveTab(tabName) {
   }
   el.panelHome.classList.toggle("active", nextTab === "home");
   el.panelAllRuns.classList.toggle("active", nextTab === "all-runs");
-  el.panelImageLab.classList.toggle("active", nextTab === "image-lab");
-  el.panelExportLab.classList.toggle("active", nextTab === "export-lab");
-  el.panelConsistencyLab.classList.toggle("active", nextTab === "consistency-lab");
+  el.panelLab.classList.toggle("active", nextTab === "lab");
   el.panelRoi.classList.toggle("active", nextTab === "roi");
   el.panelSettings.classList.toggle("active", nextTab === "settings");
   if (el.saveSettings) {
@@ -75,7 +73,10 @@ export function setActiveTab(tabName) {
 export function getInitialActiveTab() {
   try {
     const stored = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY) || "";
-    if (["home", "all-runs", "image-lab", "export-lab", "roi", "settings"].includes(stored)) {
+    if (["image-lab", "export-lab", "consistency-lab"].includes(stored)) {
+      return "lab";
+    }
+    if (["home", "all-runs", "lab", "roi", "settings"].includes(stored)) {
       return stored;
     }
   } catch {
