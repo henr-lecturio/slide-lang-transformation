@@ -23,6 +23,10 @@ data/
 dataset/
 .env.local
 
+# Node / Vite
+node_modules/
+web/dist/
+
 # OS / Editor
 .DS_Store
 Thumbs.db

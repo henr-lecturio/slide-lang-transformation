@@ -3296,6 +3296,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._serve_static(path.lstrip("/"))
             if path.startswith("/css/"):
                 return self._serve_static(path.lstrip("/"))
+            if path.startswith("/dist/"):
+                return self._serve_static(path.lstrip("/"))
+            if path.startswith("/src/"):
+                return self._serve_static(path.lstrip("/"))
             if path.startswith("/fonts/"):
                 return self._serve_font(path.removeprefix("/fonts/"))
 

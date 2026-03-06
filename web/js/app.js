@@ -30,62 +30,14 @@ import {
 } from "./settings.js";
 import {
   closeImageModal,
-  closeConsistencyLabRunPicker,
-  closeConsistencyLabStatusModal,
-  closeExportLabRunPicker,
-  closeExportLabSettingsModal,
-  closeExportLabStatusModal,
-  closeLabImagePicker,
-  closeLabStatusModal,
-  closeLabSettingsModal,
   closeRoiStatusModal,
   closeStatusModal,
   closeVideoPicker,
   handleImageModalWheel,
-  openConsistencyLabRunPicker,
-  openConsistencyLabStatusModal,
-  openExportLabRunPicker,
-  openExportLabSettingsModal,
-  openExportLabStatusModal,
-  openLabImagePicker,
-  openLabStatusModal,
-  openLabSettingsModal,
   openRoiStatusModal,
   openStatusModal,
   openVideoPicker,
 } from "./modals.js";
-import {
-  initializeExportLabTestSettings,
-  loadExportLabStatus,
-  renderExportLabSelection,
-  resetExportLabTestSettingsFromCurrentSettings,
-  runExportLabAction,
-  saveExportLabTestSettings,
-  stopExportLabJob,
-  syncExportLabActionState,
-  syncExportLabTestSections,
-} from "./export-lab.js";
-import {
-  loadConsistencyLabStatus,
-  renderConsistencyLabSelection,
-  runConsistencyLabAction,
-  stopConsistencyLabJob,
-  syncConsistencyLabActionState,
-} from "./consistency-lab.js";
-import {
-  initializeLabTestSettings,
-  loadLabStatus,
-  renderLabSelection,
-  resetLabTestSettingsFromCurrentSettings,
-  runLabAction,
-  saveLabTestSettings,
-  setLabResultViewMode,
-  stopLabJob,
-  syncLabSettingsFieldState,
-  syncLabTestSections,
-  syncLabActionState,
-  toggleLabSlideTranslateStyleEditor,
-} from "./lab.js";
 import {
   configureRunsModule,
   loadLatestRunDetails,
@@ -133,9 +85,6 @@ function syncActionState() {
   if (el.retryRun) {
     el.retryRun.disabled = state.currentRunStatus !== "error" && state.currentRunStatus !== "stopped";
   }
-  syncLabActionState();
-  syncExportLabActionState();
-  syncConsistencyLabActionState();
 }
 
 function renderRunSteps(current) {
@@ -327,148 +276,9 @@ function bindEvents() {
     successButton: el.pickVideoRoi,
   })));
 
-  el.labPickImage.addEventListener("click", () => runTask(() => openLabImagePicker({ runTask, renderLabSelection })));
-  el.labOpenSettings.addEventListener("click", () => runTask(async () => {
-    initializeLabTestSettings();
-    openLabSettingsModal();
-  }));
-  el.labOpenTerminal.addEventListener("click", openLabStatusModal);
-  el.labStopRun.addEventListener("click", () => runTask(stopLabJob));
-  el.labRunEdit.addEventListener("click", () => runTask(async () => {
-    await runLabAction("edit");
-    showButtonSuccess(el.labRunEdit, "Started");
-  }));
-  el.labRunTranslate.addEventListener("click", () => runTask(async () => {
-    await runLabAction("translate");
-    showButtonSuccess(el.labRunTranslate, "Started");
-  }));
-  el.labRunUpscale.addEventListener("click", () => runTask(async () => {
-    await runLabAction("upscale");
-    showButtonSuccess(el.labRunUpscale, "Started");
-  }));
-  if (el.labResultViewFinal) {
-    el.labResultViewFinal.addEventListener("click", () => setLabResultViewMode("result"));
-  }
-  if (el.labResultViewDebug) {
-    el.labResultViewDebug.addEventListener("click", () => setLabResultViewMode("ocr_debug"));
-  }
-  el.labSettingsSave.addEventListener("click", () => runTask(async () => {
-    saveLabTestSettings();
-    showButtonSuccess(el.labSettingsSave, "Saved");
-  }));
-  if (el.labSettingsSaveMain) {
-    el.labSettingsSaveMain.addEventListener("click", () => runTask(async () => {
-      saveLabTestSettings();
-      const settings = state.labTestSettings || {};
-
-      el.geminiEditModel.value = String(settings.slide_edit_model || el.geminiEditModel.value || "").trim();
-      el.geminiEditPrompt.value = String(settings.slide_edit_prompt ?? el.geminiEditPrompt.value ?? "");
-
-      const targetLabel = String(settings.target_language || "").trim();
-      const targetOption = (Array.isArray(state.ttsLanguageOptions) ? state.ttsLanguageOptions : [])
-        .find((item) => item.label === targetLabel);
-      if (el.finalSlideTargetLanguageSearch) {
-        el.finalSlideTargetLanguageSearch.value = "";
-      }
-      if (targetOption) {
-        renderTtsLanguageOptions("", targetOption.tts_language_code, targetOption.label);
-      } else {
-        renderTtsLanguageOptions("", el.finalSlideTargetLanguage.value || "", targetLabel);
-      }
-      syncSelectedTtsLanguage();
-
-      el.geminiTranslateModel.value = String(settings.slide_translate_model || el.geminiTranslateModel.value || "").trim();
-      const styleJson = String(settings.slide_translate_styles_json ?? "").trim();
-      if (styleJson) {
-        renderSlideTranslateStyleEditor(styleJson);
-      }
-
-      el.finalSlideUpscaleMode.value = String(settings.slide_upscale_mode || el.finalSlideUpscaleMode.value || "none").trim();
-      el.finalSlideUpscaleModel.value = String(settings.slide_upscale_model || el.finalSlideUpscaleModel.value || "").trim();
-      el.finalSlideUpscaleDevice.value = String(settings.slide_upscale_device || el.finalSlideUpscaleDevice.value || "auto").trim();
-      el.finalSlideUpscaleTileSize.value = Number(settings.slide_upscale_tile_size ?? el.finalSlideUpscaleTileSize.value ?? 256);
-      el.finalSlideUpscaleTileOverlap.value = Number(settings.slide_upscale_tile_overlap ?? el.finalSlideUpscaleTileOverlap.value ?? 24);
-      el.replicateNightmareRealesrganModelRef.value = String(settings.replicate_model_ref || el.replicateNightmareRealesrganModelRef.value || "").trim();
-      el.replicateNightmareRealesrganVersionId.value = String(settings.replicate_version_id || el.replicateNightmareRealesrganVersionId.value || "").trim();
-
-      syncSettingsFieldState();
-      await saveConfig({ syncActionState });
-      showButtonSuccess(el.labSettingsSaveMain, "Applied");
-    }));
-  }
-  el.labSettingsReset.addEventListener("click", () => runTask(async () => {
-    resetLabTestSettingsFromCurrentSettings();
-    showButtonSuccess(el.labSettingsReset, "Reset");
-  }));
-  el.labFinalSlideUpscaleMode.addEventListener("change", saveLabTestSettings);
-  if (el.labSlideTranslateStyleEditorToggle) {
-    el.labSlideTranslateStyleEditorToggle.addEventListener("click", toggleLabSlideTranslateStyleEditor);
-  }
-
-  el.exportLabPickRun.addEventListener("click", () => runTask(() => openExportLabRunPicker({
-    runTask,
-    renderExportLabSelection,
-  })));
-  el.exportLabOpenSettings.addEventListener("click", () => runTask(async () => {
-    initializeExportLabTestSettings();
-    openExportLabSettingsModal();
-  }));
-  el.exportLabOpenTerminal.addEventListener("click", () => {
-    openExportLabStatusModal();
-    runTaskImmediate(loadExportLabStatus);
-  });
-  el.exportLabStopRun.addEventListener("click", () => runTask(stopExportLabJob));
-  el.exportLabRunExport.addEventListener("click", () => runTask(async () => {
-    await runExportLabAction();
-    showButtonSuccess(el.exportLabRunExport, "Started");
-  }));
-  el.exportLabSettingsSave.addEventListener("click", () => runTask(async () => {
-    saveExportLabTestSettings();
-    showButtonSuccess(el.exportLabSettingsSave, "Saved");
-  }));
-  el.exportLabSettingsReset.addEventListener("click", () => runTask(async () => {
-    resetExportLabTestSettingsFromCurrentSettings();
-    showButtonSuccess(el.exportLabSettingsReset, "Reset");
-  }));
-
-  el.consistencyLabPickRun.addEventListener("click", () => runTask(() => openConsistencyLabRunPicker({
-    runTask,
-    renderConsistencyLabSelection,
-  })));
-  el.consistencyLabRunReview.addEventListener("click", () => runTask(async () => {
-    await runConsistencyLabAction();
-    showButtonSuccess(el.consistencyLabRunReview, "Started");
-  }));
-  el.consistencyLabOpenTerminal.addEventListener("click", () => {
-    openConsistencyLabStatusModal();
-    runTaskImmediate(loadConsistencyLabStatus);
-  });
-  el.consistencyLabStopRun.addEventListener("click", () => runTask(stopConsistencyLabJob));
-
-  document.querySelectorAll(".export-lab-step-section-toggle").forEach((button) => {
-    button.addEventListener("click", () => {
-      const sectionId = button.dataset.exportLabStepToggle;
-      if (!sectionId) return;
-      state.exportLabStepSectionExpanded[sectionId] = !state.exportLabStepSectionExpanded[sectionId];
-      syncExportLabTestSections();
-    });
-  });
-
-  document.querySelectorAll(".lab-step-section-toggle").forEach((button) => {
-    button.addEventListener("click", () => {
-      const sectionId = button.dataset.labStepToggle;
-      if (!sectionId) return;
-      state.labStepSectionExpanded[sectionId] = !state.labStepSectionExpanded[sectionId];
-      syncLabTestSections();
-    });
-  });
-
   el.transcriptionProvider.addEventListener("change", syncSettingsFieldState);
   el.finalSlideUpscaleMode.addEventListener("change", syncSettingsFieldState);
-  el.finalSlideTranslationMode.addEventListener("change", () => {
-    syncSettingsFieldState();
-    syncLabSettingsFieldState();
-  });
+  el.finalSlideTranslationMode.addEventListener("change", syncSettingsFieldState);
 
   for (const input of [
     el.runStepEdit,
@@ -631,24 +441,8 @@ function bindEvents() {
   }
   el.statusModalClose.addEventListener("click", closeStatusModal);
   el.statusModalBackdrop.addEventListener("click", closeStatusModal);
-  el.labStatusModalClose.addEventListener("click", closeLabStatusModal);
-  el.labStatusModalBackdrop.addEventListener("click", closeLabStatusModal);
   el.roiStatusModalClose.addEventListener("click", closeRoiStatusModal);
   el.roiStatusModalBackdrop.addEventListener("click", closeRoiStatusModal);
-  el.labImagePickerClose.addEventListener("click", closeLabImagePicker);
-  el.labImagePickerBackdrop.addEventListener("click", closeLabImagePicker);
-  el.labSettingsClose.addEventListener("click", closeLabSettingsModal);
-  el.labSettingsBackdrop.addEventListener("click", closeLabSettingsModal);
-  el.consistencyLabRunPickerClose.addEventListener("click", closeConsistencyLabRunPicker);
-  el.consistencyLabRunPickerBackdrop.addEventListener("click", closeConsistencyLabRunPicker);
-  el.consistencyLabStatusModalClose.addEventListener("click", closeConsistencyLabStatusModal);
-  el.consistencyLabStatusModalBackdrop.addEventListener("click", closeConsistencyLabStatusModal);
-  el.exportLabRunPickerClose.addEventListener("click", closeExportLabRunPicker);
-  el.exportLabRunPickerBackdrop.addEventListener("click", closeExportLabRunPicker);
-  el.exportLabSettingsClose.addEventListener("click", closeExportLabSettingsModal);
-  el.exportLabSettingsBackdrop.addEventListener("click", closeExportLabSettingsModal);
-  el.exportLabStatusModalClose.addEventListener("click", closeExportLabStatusModal);
-  el.exportLabStatusModalBackdrop.addEventListener("click", closeExportLabStatusModal);
   el.videoPickerClose.addEventListener("click", closeVideoPicker);
   el.videoPickerBackdrop.addEventListener("click", closeVideoPicker);
 
@@ -659,32 +453,8 @@ function bindEvents() {
     if (e.key === "Escape" && el.statusModal.classList.contains("open")) {
       closeStatusModal();
     }
-    if (e.key === "Escape" && el.labStatusModal.classList.contains("open")) {
-      closeLabStatusModal();
-    }
     if (e.key === "Escape" && el.roiStatusModal.classList.contains("open")) {
       closeRoiStatusModal();
-    }
-    if (e.key === "Escape" && el.labImagePickerModal.classList.contains("open")) {
-      closeLabImagePicker();
-    }
-    if (e.key === "Escape" && el.labSettingsModal.classList.contains("open")) {
-      closeLabSettingsModal();
-    }
-    if (e.key === "Escape" && el.consistencyLabRunPickerModal.classList.contains("open")) {
-      closeConsistencyLabRunPicker();
-    }
-    if (e.key === "Escape" && el.consistencyLabStatusModal.classList.contains("open")) {
-      closeConsistencyLabStatusModal();
-    }
-    if (e.key === "Escape" && el.exportLabRunPickerModal.classList.contains("open")) {
-      closeExportLabRunPicker();
-    }
-    if (e.key === "Escape" && el.exportLabSettingsModal.classList.contains("open")) {
-      closeExportLabSettingsModal();
-    }
-    if (e.key === "Escape" && el.exportLabStatusModal.classList.contains("open")) {
-      closeExportLabStatusModal();
     }
     if (e.key === "Escape" && el.videoPickerModal.classList.contains("open")) {
       closeVideoPicker();
@@ -731,30 +501,12 @@ async function init() {
   state.runFinalDisplayMode = el.runFinalDisplayMode.value === "compare" ? "compare" : "single";
   state.runShowOriginalText = Boolean(el.runShowOriginalText?.checked ?? true);
   syncSettingsFieldState();
-  syncLabActionState();
-  syncExportLabActionState();
-  syncConsistencyLabActionState();
   setActiveTab(getInitialActiveTab());
 
   await runTask(() => loadConfig({ syncActionState }));
-  initializeLabTestSettings();
-  initializeExportLabTestSettings();
   await runTask(loadOverlay);
   await runTask(loadRuns);
-  await runTask(loadLabStatus);
-  await runTask(loadExportLabStatus);
-  await runTask(loadConsistencyLabStatus);
-
   window.setInterval(pollCurrent, 2000);
-  window.setInterval(() => {
-    runTaskImmediate(loadLabStatus);
-  }, 2000);
-  window.setInterval(() => {
-    runTaskImmediate(loadExportLabStatus);
-  }, 2000);
-  window.setInterval(() => {
-    runTaskImmediate(loadConsistencyLabStatus);
-  }, 2000);
 }
 
 init();
