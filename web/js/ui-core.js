@@ -49,7 +49,7 @@ export function syncSettingsKeyTooltips() {
 }
 
 export function setActiveTab(tabName) {
-  const allowedTabs = new Set(["home", "all-runs", "image-lab", "export-lab", "roi", "settings"]);
+  const allowedTabs = new Set(["home", "all-runs", "image-lab", "export-lab", "consistency-lab", "roi", "settings"]);
   const nextTab = allowedTabs.has(tabName) ? tabName : "home";
   for (const btn of el.tabButtons) {
     const active = btn.dataset.tab === nextTab;
@@ -59,6 +59,7 @@ export function setActiveTab(tabName) {
   el.panelAllRuns.classList.toggle("active", nextTab === "all-runs");
   el.panelImageLab.classList.toggle("active", nextTab === "image-lab");
   el.panelExportLab.classList.toggle("active", nextTab === "export-lab");
+  el.panelConsistencyLab.classList.toggle("active", nextTab === "consistency-lab");
   el.panelRoi.classList.toggle("active", nextTab === "roi");
   el.panelSettings.classList.toggle("active", nextTab === "settings");
   if (el.saveSettings) {

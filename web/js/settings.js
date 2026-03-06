@@ -597,6 +597,7 @@ export function setConfig(cfg, { syncActionState = () => {} } = {}) {
   renderTtsLanguageOptions("", cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   renderHomeQuickLanguageOptions(cfg.GOOGLE_TTS_LANGUAGE_CODE || "", cfg.FINAL_SLIDE_TARGET_LANGUAGE || "");
   el.geminiTranslateModel.value = cfg.GEMINI_TRANSLATE_MODEL || "gemini-3-pro-image-preview";
+  el.geminiTranslateMaxReviewRetries.value = cfg.SLIDE_TRANSLATE_MAX_REVIEW_RETRIES ?? 3;
   el.geminiTranslatePrompt.value = cfg.GEMINI_TRANSLATE_PROMPT || "";
   el.slideTranslateVisionProjectId.value = cfg.GCLOUD_VISION_PROJECTID
     || cfg.GOOGLE_VISION_PROJECT_ID
@@ -725,6 +726,7 @@ export async function saveConfig(options = {}) {
     FINAL_SLIDE_TRANSLATION_MODE: el.finalSlideTranslationMode.value,
     FINAL_SLIDE_TARGET_LANGUAGE: (getSelectedTtsLanguageOption()?.label || "").trim(),
     GEMINI_TRANSLATE_MODEL: el.geminiTranslateModel.value.trim(),
+    SLIDE_TRANSLATE_MAX_REVIEW_RETRIES: Number(el.geminiTranslateMaxReviewRetries.value),
     GEMINI_TRANSLATE_PROMPT: el.geminiTranslatePrompt.value,
     GCLOUD_VISION_PROJECTID: slideTranslateVisionProjectId,
     GOOGLE_VISION_PROJECT_ID: slideTranslateVisionProjectId,
@@ -846,6 +848,7 @@ export function syncSettingsFieldState() {
   }
   el.finalSlideTargetLanguage.disabled = !languageSelectionEnabled;
   el.geminiTranslateModel.disabled = !translateEnabled || !geminiSlideTranslate;
+  el.geminiTranslateMaxReviewRetries.disabled = !translateEnabled || !geminiSlideTranslate;
   el.geminiTranslatePrompt.disabled = !translateEnabled || !geminiSlideTranslate;
   el.slideTranslateVisionProjectId.disabled = !translateEnabled || !deterministicSlideTranslate;
   el.slideTranslateMaxFontSize.disabled = !translateEnabled || !deterministicSlideTranslate;

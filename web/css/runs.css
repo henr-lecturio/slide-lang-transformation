@@ -148,6 +148,28 @@
   font-size: 1rem;
 }
 
+.slide-translation-note {
+  margin-top: 8px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 160, 0, 0.15);
+  color: #ffa000;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.slide-consistency-note {
+  margin-top: 8px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 180, 255, 0.15);
+  color: #00a0e0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
 .slide-details-panel {
   margin-top: 10px;
 }
@@ -242,4 +264,12 @@
 
 .thumb {
   padding: 10px;
+}
+
+.consistency-lab-report {
+  max-height: 600px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

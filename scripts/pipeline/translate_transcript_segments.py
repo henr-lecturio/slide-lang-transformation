@@ -305,7 +305,7 @@ def main() -> int:
     out_json = Path(args.out_json).resolve()
     out_csv = Path(args.out_csv).resolve()
     termbase_file = Path(args.termbase_file).resolve()
-    tm_db_path = Path(args.tm_db).resolve()
+    tm_db_path = Path(args.tm_db).resolve() if str(args.tm_db or "").strip() else None
 
     prompt_file = Path(args.prompt_file).resolve()
     system_prompt = ""
@@ -341,7 +341,7 @@ def main() -> int:
             project_id="",
             location="",
         )
-    tm_conn = init_translation_memory(tm_db_path)
+    tm_conn = init_translation_memory(tm_db_path) if tm_db_path else None
 
     translated_rows: list[dict[str, Any]] = []
     tm_exact_hits_total = 0
@@ -358,7 +358,7 @@ def main() -> int:
             segment_id = int(segment["segment_id"])
             source_text = str(segment["text"])
             print(f"@@STEP DETAIL text-translate segment_{segment_id:04d}", flush=True)
-            tm_hit = lookup_tm_exact(tm_conn, source_text, target_language)
+            tm_hit = lookup_tm_exact(tm_conn, source_text, target_language) if tm_conn else None
             if tm_hit:
                 results_by_segment_id[segment_id] = {
                     "translated_text": str(tm_hit.get("target_text", "") or ""),
@@ -407,14 +407,15 @@ def main() -> int:
                 translated_map[segment_id],
                 dict(pending["placeholder_map"]),
             )
-            upsert_tm_entry(
-                tm_conn,
-                source_text=str(pending["source_text"]),
-                target_language=target_language,
-                target_text=restored_text,
-                status="machine_unreviewed",
-                origin_run_id=str(args.origin_run_id or ""),
-            )
+            if tm_conn:
+                upsert_tm_entry(
+                    tm_conn,
+                    source_text=str(pending["source_text"]),
+                    target_language=target_language,
+                    target_text=restored_text,
+                    status="machine_unreviewed",
+                    origin_run_id=str(args.origin_run_id or ""),
+                )
             term_hits = int(pending["termbase_hits"])
             results_by_segment_id[segment_id] = {
                 "translated_text": restored_text,
@@ -469,7 +470,8 @@ def main() -> int:
     out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     write_csv(out_csv, translated_rows)
 
-    tm_conn.close()
+    if tm_conn is not None:
+        tm_conn.close()
     print(f"[TranscriptTranslate] Segments processed: {len(segments)}", flush=True)
     print(f"[TranscriptTranslate] TM exact hits: {tm_exact_hits_total}", flush=True)
     print(f"[TranscriptTranslate] New translated segments: {translated_count}", flush=True)

@@ -27,6 +27,7 @@
             <button id="tab-all-runs" class="tab-btn" data-tab="all-runs" type="button">All Runs</button>
             <button id="tab-image-lab" class="tab-btn" data-tab="image-lab" type="button">Image Lab</button>
             <button id="tab-export-lab" class="tab-btn" data-tab="export-lab" type="button">Export Lab</button>
+            <button id="tab-consistency-lab" class="tab-btn" data-tab="consistency-lab" type="button">Consistency Lab</button>
             <button id="tab-roi" class="tab-btn" data-tab="roi" type="button">ROI</button>
             <button id="tab-settings" class="tab-btn" data-tab="settings" type="button">Settings</button>
           </nav>
@@ -282,6 +283,32 @@
                 <video id="export-lab-video" controls preload="metadata"></video>
               </div>
               <div id="export-lab-downloads" class="summary-links row wrap"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section id="panel-consistency-lab" class="panel">
+        <section class="card">
+          <h2>Consistency Lab</h2>
+          <div class="lab-toolbar">
+            <div class="lab-toolbar-main">
+              <button id="consistency-lab-pick-run" type="button">Select Run</button>
+              <button id="consistency-lab-run-review" type="button">Run Consistency Review</button>
+            </div>
+            <div class="lab-toolbar-side">
+              <div id="consistency-lab-meta" class="export-lab-status-line lab-toolbar-status is-idle"></div>
+              <button id="consistency-lab-open-terminal" type="button">Open Terminal</button>
+              <button id="consistency-lab-stop-run" type="button" disabled>Stop Execution</button>
+            </div>
+          </div>
+          <div class="lab-preview-grid">
+            <section class="lab-preview-panel">
+              <div class="lab-preview-label-row">
+                <div class="slide-compare-label">Consistency Report</div>
+                <div id="consistency-lab-selected-run" class="muted lab-selection-meta"></div>
+              </div>
+              <pre id="consistency-lab-report" class="log consistency-lab-report"></pre>
             </section>
           </div>
         </section>
@@ -781,6 +808,10 @@
                       </select>
                     </div>
                   </div>
+                  <div class="settings-row">
+                    <label class="settings-key" for="gemini_translate_max_review_retries">SLIDE_TRANSLATE_MAX_REVIEW_RETRIES</label>
+                    <div class="settings-value"><input id="gemini_translate_max_review_retries" type="number" min="0" step="1" placeholder="0 = no retries on review fail" /></div>
+                  </div>
                   <div class="settings-row settings-row-textarea">
                     <label class="settings-key" for="gemini_translate_prompt">SLIDE_TRANSLATE_PROMPT</label>
                     <div class="settings-value"><textarea id="gemini_translate_prompt" rows="10"></textarea></div>
@@ -1130,6 +1161,17 @@
           <button id="lab-image-picker-close" class="modal-close" type="button" aria-label="Close image picker">×</button>
         </div>
         <div id="lab-image-picker-list" class="video-picker-list"></div>
+      </div>
+    </div>
+
+    <div id="consistency-lab-run-picker-modal" class="video-picker-modal" aria-hidden="true">
+      <div id="consistency-lab-run-picker-backdrop" class="video-picker-backdrop"></div>
+      <div class="video-picker-dialog" role="dialog" aria-modal="true" aria-label="Consistency run picker">
+        <div class="modal-head">
+          <h3>Select Run</h3>
+          <button id="consistency-lab-run-picker-close" class="modal-close" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="consistency-lab-run-picker-list" class="video-picker-list"></div>
       </div>
     </div>
 
@@ -1503,6 +1545,19 @@
         </div>
         <div class="status-modal-body">
           <pre id="export-lab-log" class="log log-status status-modal-log"></pre>
+        </div>
+      </div>
+    </div>
+
+    <div id="consistency-lab-status-modal" class="status-modal" aria-hidden="true">
+      <div id="consistency-lab-status-modal-backdrop" class="status-modal-backdrop"></div>
+      <div class="status-modal-dialog" role="dialog" aria-modal="true" aria-label="Consistency Lab terminal log">
+        <div class="modal-head">
+          <h3>Consistency Lab Terminal</h3>
+          <button id="consistency-lab-status-modal-close" class="modal-close" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="status-modal-body">
+          <pre id="consistency-lab-log" class="log log-status status-modal-log"></pre>
         </div>
       </div>
     </div>

@@ -479,6 +479,18 @@ async function renderFinalSlides(runId, target, slideSourceMode, displayMode, sh
     const controls = createImageModeToggle(runId, item);
     if (controls) media.appendChild(controls);
     media.appendChild(createSlideDetailsPanel(detailsFacts));
+    if (item.translation_note) {
+      const badge = document.createElement("div");
+      badge.className = "slide-translation-note";
+      badge.textContent = item.translation_note;
+      media.appendChild(badge);
+    }
+    if (item.consistency_note) {
+      const badge = document.createElement("div");
+      badge.className = "slide-consistency-note";
+      badge.textContent = item.consistency_note;
+      media.appendChild(badge);
+    }
     row.appendChild(media);
     row.appendChild(createSlideTextBlock(item, showOriginalText));
     target.appendChild(row);

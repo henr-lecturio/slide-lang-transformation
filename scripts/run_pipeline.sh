@@ -517,7 +517,7 @@ elif [ "$RUN_STEP_TEXT_TRANSLATE" = "1" ]; then
     --provider "$TRANSCRIPT_TRANSLATE_PROVIDER" \
     --source-language-code "$GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE" \
     --termbase-file "$TRANSLATION_TERMBASE_FILE" \
-    --tm-db "$TRANSLATION_MEMORY_DB" \
+    --tm-db "" \
     --origin-run-id "$RUN_ID" \
     --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
     --prompt-file "$GEMINI_TEXT_TRANSLATE_PROMPT_FILE"
@@ -737,7 +737,10 @@ elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         --project-id "$GCLOUD_VERTEX_PROJECTID" \
         --location "$GOOGLE_GEMINI_LOCATION" \
         --termbase-file "$TRANSLATION_TERMBASE_FILE" \
-        --target-language "$FINAL_SLIDE_TARGET_LANGUAGE"
+        --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
+        --slide-map-json "$TEXT_TRANSLATED_JSON" \
+        --vision-project-id "$GCLOUD_VISION_PROJECTID" \
+        --max-review-retries "${SLIDE_TRANSLATE_MAX_REVIEW_RETRIES:-3}"
       publish_dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR"
       step_done translate
       echo "[Translate] Translation finished."
@@ -854,6 +857,30 @@ elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
 else
   echo "[Step] translate: skipped"
   step_skip translate "disabled"
+fi
+
+# --- translate-review (post-translate consistency check) ---
+if should_skip_step translate-review; then
+  step_skip translate-review "resumed"
+elif [ "$RUN_STEP_TRANSLATE" = "1" ] && [ "$FINAL_SLIDE_TRANSLATION_MODE" = "gemini" ] \
+     && [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && [ -n "${GCLOUD_VISION_PROJECTID:-}" ]; then
+  step_start translate-review
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/review_slide_translate_consistency.py" \
+    --original-dir "$FINAL_SLIDE_DIR" \
+    --translated-dir "$FINAL_SLIDE_TRANSLATED_DIR" \
+    --vision-project-id "$GCLOUD_VISION_PROJECTID" \
+    --vision-feature "${GOOGLE_VISION_FEATURE:-DOCUMENT_TEXT_DETECTION}" \
+    --model "$GEMINI_TRANSLATE_MODEL" \
+    --prompt-file "$GEMINI_TRANSLATE_PROMPT_FILE" \
+    --target-language "$FINAL_SLIDE_TARGET_LANGUAGE" \
+    --termbase-file "$TRANSLATION_TERMBASE_FILE" \
+    --project-id "$GCLOUD_VERTEX_PROJECTID" \
+    --location "$GOOGLE_GEMINI_LOCATION" \
+    --max-retries "${SLIDE_TRANSLATE_MAX_REVIEW_RETRIES:-2}" \
+    --report-json "$FINAL_SLIDE_TRANSLATED_DIR/consistency_report.json"
+  step_done translate-review
+else
+  step_skip translate-review "no vision or translate disabled"
 fi
 
 if should_skip_step upscale; then

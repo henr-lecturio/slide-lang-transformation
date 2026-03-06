@@ -149,6 +149,24 @@ LAB_STATE = {
     "stopping": False,
 }
 
+CONSISTENCY_LAB_LOCK = threading.Lock()
+CONSISTENCY_LAB_DIR = OUTPUT_DIR / "consistency_lab"
+CONSISTENCY_LAB_STATE = {
+    "status": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "job_id": None,
+    "run_id": None,
+    "input_name": "",
+    "report_url": "",
+    "report_name": "",
+    "message": "",
+    "log_tail": deque(maxlen=400),
+    "process": None,
+    "stop_requested": False,
+    "stopping": False,
+}
+
 EXPORT_LAB_LOCK = threading.Lock()
 EXPORT_LAB_STATE = {
     "status": "idle",
@@ -1148,6 +1166,47 @@ def run_final_slides(run_id: str) -> list[dict]:
         return []
     overrides = load_final_image_mode_overrides(run_dir)
     translated_map = read_json_file(run_dir / "slitranet" / "slide_text_map_final_translated.json")
+    translation_report = read_json_file(
+        run_dir / "slitranet" / "keyframes" / "final" / "slide_translated" / "translation_report.json"
+    )
+    translation_note_by_event: dict[int, str] = {}
+    if isinstance(translation_report, list):
+        import re
+        _ev_re = re.compile(r"(?:^|_)event_(\d+)(?:_|$)")
+        for entry in translation_report:
+            if not isinstance(entry, dict):
+                continue
+            note = str(entry.get("note", "") or "").strip()
+            if not note:
+                continue
+            slide_name = str(entry.get("slide", "") or "")
+            m = _ev_re.search(slide_name.replace(".png", ""))
+            if m:
+                translation_note_by_event[int(m.group(1))] = note
+    consistency_report = read_json_file(
+        run_dir / "slitranet" / "keyframes" / "final" / "slide_translated" / "consistency_report.json"
+    )
+    consistency_note_by_event: dict[int, str] = {}
+    if isinstance(consistency_report, dict):
+        import re as _re
+        _ev_re2 = _re.compile(r"(?:^|_)event_(\d+)(?:_|$)")
+        for seq in consistency_report.get("sequences", []):
+            if not isinstance(seq, dict):
+                continue
+            for fix in seq.get("fixes", []):
+                if not isinstance(fix, dict):
+                    continue
+                slide_name = str(fix.get("slide", "") or "")
+                m2 = _ev_re2.search(slide_name.replace(".png", ""))
+                if not m2:
+                    continue
+                eid = int(m2.group(1))
+                method = str(fix.get("method", "") or "")
+                terms = fix.get("terms", [])
+                term_strs = [f'{t.get("original","")}→{t.get("expected","")}' for t in terms if isinstance(t, dict)]
+                note = f"consistency fix ({method}): {', '.join(term_strs)}" if term_strs else f"consistency fix ({method})"
+                consistency_note_by_event[eid] = note
+
     translated_text_by_event: dict[int, str] = {}
     if isinstance(translated_map, dict):
         translated_events = translated_map.get("events")
@@ -1186,6 +1245,8 @@ def run_final_slides(run_id: str) -> list[dict]:
                     "source_mode_final": row.get("source_mode_final", "") or "",
                     "source_reason": row.get("source_reason", "") or "",
                     "source_confidence": float(row.get("source_confidence", "0") or "0"),
+                    "translation_note": translation_note_by_event.get(event_id, ""),
+                    "consistency_note": consistency_note_by_event.get(event_id, ""),
                     **assets,
                 }
             )
@@ -1524,6 +1585,210 @@ def stop_export_lab_job() -> tuple[bool, str]:
         EXPORT_LAB_STATE["status"] = "stopping"
         EXPORT_LAB_STATE["message"] = "Stopping Export Lab execution..."
         EXPORT_LAB_STATE["log_tail"].append("[Export Lab] stop requested")
+        pgid = os.getpgid(proc.pid)
+
+    def _stop_group() -> None:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except Exception:
+            pass
+        time.sleep(3.0)
+        if proc.poll() is None:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except Exception:
+                pass
+
+    threading.Thread(target=_stop_group, daemon=True).start()
+    return True, "stop_requested"
+
+
+# ---------------------------------------------------------------------------
+# Consistency Lab
+# ---------------------------------------------------------------------------
+
+def consistency_lab_artifacts_for_run(run_id: str) -> dict:
+    if not RUN_ID_PATTERN.match(run_id):
+        raise ValueError("Invalid run id")
+    run_dir = ensure_within(RUNS_DIR, RUNS_DIR / run_id)
+    if not run_dir.exists():
+        raise FileNotFoundError(run_id)
+    original_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide"
+    translated_dir = run_dir / "slitranet" / "keyframes" / "final" / "slide_translated"
+    missing: list[str] = []
+    if not original_dir.exists() or count_files(original_dir) == 0:
+        missing.append("original slides (final/slide)")
+    if not translated_dir.exists() or count_files(translated_dir) == 0:
+        missing.append("translated slides (final/slide_translated)")
+    return {
+        "run_dir": run_dir,
+        "original_dir": original_dir if original_dir.exists() else None,
+        "translated_dir": translated_dir if translated_dir.exists() else None,
+        "consistency_ready": len(missing) == 0,
+        "missing_requirements": missing,
+    }
+
+
+def list_consistency_lab_runs() -> dict:
+    runs_payload = []
+    for run in list_runs():
+        run_id = str(run["id"])
+        artifacts = consistency_lab_artifacts_for_run(run_id)
+        runs_payload.append(
+            {
+                "run_id": run_id,
+                "label": format_run_label(run_id),
+                "run_status": run.get("run_status", ""),
+                "highest_available_label": run.get("highest_available_label", ""),
+                "consistency_ready": bool(artifacts["consistency_ready"]),
+                "missing_requirements": list(artifacts["missing_requirements"]),
+            }
+        )
+    return {"runs": runs_payload}
+
+
+def _consistency_lab_job_id() -> str:
+    return f"{time.strftime('%Y-%m-%d_%H-%M-%S')}_consistency_{int(time.time() * 1000) % 1000:03d}"
+
+
+def start_consistency_lab_job(run_id: str) -> tuple[bool, str]:
+    if not RUN_ID_PATTERN.match(run_id):
+        return False, "Invalid run id"
+    artifacts = consistency_lab_artifacts_for_run(run_id)
+    if not artifacts["consistency_ready"]:
+        missing = ", ".join(artifacts["missing_requirements"])
+        return False, f"Selected run is not ready for consistency review: missing {missing}"
+
+    env = parse_env(CONFIG_PATH)
+    job_id = _consistency_lab_job_id()
+    job_dir = CONSISTENCY_LAB_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    report_json = job_dir / "consistency_report.json"
+
+    cmd = [
+        PYTHON_BIN,
+        "scripts/pipeline/review_slide_translate_consistency.py",
+        "--original-dir", str(artifacts["original_dir"]),
+        "--translated-dir", str(artifacts["translated_dir"]),
+        "--vision-project-id", env.get("SLIDE_TRANSLATE_VISION_PROJECTID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+        "--model", env.get("GEMINI_TRANSLATE_MODEL", "gemini-3-pro-image-preview"),
+        "--prompt-file", str(GEMINI_TRANSLATE_PROMPT_PATH),
+        "--target-language", env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German"),
+        "--termbase-file", str(TRANSLATION_TERMBASE_PATH),
+        "--project-id", env.get("SLIDE_TRANSLATE_VISION_PROJECTID", env.get("GOOGLE_SPEECH_PROJECT_ID", "")),
+        "--location", env.get("GOOGLE_TRANSLATE_LOCATION", env.get("GOOGLE_SPEECH_LOCATION", "")),
+        "--report-json", str(report_json),
+    ]
+
+    with CONSISTENCY_LAB_LOCK:
+        proc = CONSISTENCY_LAB_STATE.get("process")
+        if proc is not None and proc.poll() is None:
+            return False, "Another Consistency Lab job is already in progress"
+
+        CONSISTENCY_LAB_STATE["status"] = "running"
+        CONSISTENCY_LAB_STATE["started_at"] = _now()
+        CONSISTENCY_LAB_STATE["finished_at"] = None
+        CONSISTENCY_LAB_STATE["job_id"] = job_id
+        CONSISTENCY_LAB_STATE["run_id"] = run_id
+        CONSISTENCY_LAB_STATE["input_name"] = run_id
+        CONSISTENCY_LAB_STATE["report_url"] = api_file_url_for(report_json)
+        CONSISTENCY_LAB_STATE["report_name"] = report_json.name
+        CONSISTENCY_LAB_STATE["stop_requested"] = False
+        CONSISTENCY_LAB_STATE["stopping"] = False
+        CONSISTENCY_LAB_STATE["message"] = f"Running consistency review for run {format_run_label(run_id)}."
+        CONSISTENCY_LAB_STATE["log_tail"].clear()
+        CONSISTENCY_LAB_STATE["log_tail"].append(f"[Consistency Lab] run={run_id}")
+        CONSISTENCY_LAB_STATE["log_tail"].append(f"[Consistency Lab] original_dir={Path(artifacts['original_dir']).name}")
+        CONSISTENCY_LAB_STATE["log_tail"].append(f"[Consistency Lab] translated_dir={Path(artifacts['translated_dir']).name}")
+        CONSISTENCY_LAB_STATE["log_tail"].append("[Consistency Lab] review process starting")
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            start_new_session=True,
+        )
+        CONSISTENCY_LAB_STATE["process"] = process
+
+    thread = threading.Thread(target=_consistency_lab_worker, args=(process,), daemon=True)
+    thread.start()
+    return True, "started"
+
+
+def snapshot_consistency_lab_state() -> dict:
+    reconcile_consistency_lab_state()
+    with CONSISTENCY_LAB_LOCK:
+        return {
+            "status": CONSISTENCY_LAB_STATE["status"],
+            "started_at": CONSISTENCY_LAB_STATE["started_at"],
+            "finished_at": CONSISTENCY_LAB_STATE["finished_at"],
+            "job_id": CONSISTENCY_LAB_STATE["job_id"],
+            "run_id": CONSISTENCY_LAB_STATE["run_id"],
+            "input_name": CONSISTENCY_LAB_STATE["input_name"],
+            "report_url": CONSISTENCY_LAB_STATE["report_url"],
+            "report_name": CONSISTENCY_LAB_STATE["report_name"],
+            "message": CONSISTENCY_LAB_STATE["message"],
+            "log_tail": list(CONSISTENCY_LAB_STATE["log_tail"]),
+            "stop_requested": bool(CONSISTENCY_LAB_STATE["stop_requested"]),
+            "stopping": bool(CONSISTENCY_LAB_STATE["stopping"]),
+        }
+
+
+def finalize_consistency_lab_state(code: int) -> None:
+    with CONSISTENCY_LAB_LOCK:
+        stopped = bool(CONSISTENCY_LAB_STATE.get("stop_requested"))
+        CONSISTENCY_LAB_STATE["finished_at"] = _now()
+        CONSISTENCY_LAB_STATE["status"] = "stopped" if stopped else ("done" if code == 0 else "error")
+        CONSISTENCY_LAB_STATE["process"] = None
+        CONSISTENCY_LAB_STATE["stopping"] = False
+        CONSISTENCY_LAB_STATE["stop_requested"] = False
+        if stopped:
+            CONSISTENCY_LAB_STATE["message"] = "Consistency Lab execution stopped."
+        elif code != 0 and not CONSISTENCY_LAB_STATE["message"]:
+            CONSISTENCY_LAB_STATE["message"] = "Consistency Lab job failed."
+
+
+def reconcile_consistency_lab_state() -> None:
+    with CONSISTENCY_LAB_LOCK:
+        proc = CONSISTENCY_LAB_STATE.get("process")
+        if proc is not None and proc.poll() is not None:
+            finalize_consistency_lab_state(proc.returncode)
+
+
+def _consistency_lab_worker(process: subprocess.Popen) -> None:
+    try:
+        assert process.stdout is not None
+        with CONSISTENCY_LAB_LOCK:
+            CONSISTENCY_LAB_STATE["log_tail"].append("[Consistency Lab] process started")
+        for raw_line in process.stdout:
+            line = raw_line.rstrip("\n")
+            with CONSISTENCY_LAB_LOCK:
+                CONSISTENCY_LAB_STATE["log_tail"].append(line)
+    finally:
+        process.wait()
+        finalize_consistency_lab_state(process.returncode)
+
+
+def stop_consistency_lab_job() -> tuple[bool, str]:
+    with CONSISTENCY_LAB_LOCK:
+        proc = CONSISTENCY_LAB_STATE.get("process")
+        if proc is None or proc.poll() is not None:
+            return False, "No Consistency Lab execution is currently running"
+        if CONSISTENCY_LAB_STATE.get("stopping"):
+            return False, "Consistency Lab execution is already stopping"
+        CONSISTENCY_LAB_STATE["stop_requested"] = True
+        CONSISTENCY_LAB_STATE["stopping"] = True
+        CONSISTENCY_LAB_STATE["status"] = "stopping"
+        CONSISTENCY_LAB_STATE["message"] = "Stopping Consistency Lab execution..."
+        CONSISTENCY_LAB_STATE["log_tail"].append("[Consistency Lab] stop requested")
         pgid = os.getpgid(proc.pid)
 
     def _stop_group() -> None:
@@ -3277,6 +3542,7 @@ class Handler(BaseHTTPRequestHandler):
                         "SLIDE_TRANSLATE_STYLE_CONFIG_PATH",
                         "config/slide_translate_styles.json",
                     ),
+                    "SLIDE_TRANSLATE_MAX_REVIEW_RETRIES": int(env.get("SLIDE_TRANSLATE_MAX_REVIEW_RETRIES", "3")),
                     "SLIDE_TRANSLATE_MAX_FONT_SIZE": int(env.get("SLIDE_TRANSLATE_MAX_FONT_SIZE", "120")),
                     "SLIDE_TRANSLATE_STYLES_JSON": read_text_file(slide_translate_style_config_path).rstrip("\n"),
                     "GCLOUD_TRANSLATE_PROJECTID": resolve_translate_project_id_from_mapping(env),
@@ -3376,6 +3642,14 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/lab/status":
                 return self._send_json(200, snapshot_lab_state())
+
+            if path == "/api/consistency-lab/runs":
+                payload = list_consistency_lab_runs()
+                payload["current"] = snapshot_consistency_lab_state()
+                return self._send_json(200, payload)
+
+            if path == "/api/consistency-lab/status":
+                return self._send_json(200, snapshot_consistency_lab_state())
 
             if path == "/api/export-lab/runs":
                 payload = list_export_lab_runs()
@@ -3527,6 +3801,7 @@ class Handler(BaseHTTPRequestHandler):
                         data.get("GCLOUD_VISION_PROJECTID", data.get("GOOGLE_VISION_PROJECT_ID", ""))
                     ).strip(),
                     "SLIDE_TRANSLATE_STYLE_CONFIG_PATH": slide_style_config_path,
+                    "SLIDE_TRANSLATE_MAX_REVIEW_RETRIES": int(data.get("SLIDE_TRANSLATE_MAX_REVIEW_RETRIES", 3)),
                     "SLIDE_TRANSLATE_MAX_FONT_SIZE": int(data["SLIDE_TRANSLATE_MAX_FONT_SIZE"]),
                     "SLIDE_TRANSLATE_STYLES_JSON": str(data["SLIDE_TRANSLATE_STYLES_JSON"]),
                     "GCLOUD_TRANSLATE_PROJECTID": str(
@@ -3687,6 +3962,8 @@ class Handler(BaseHTTPRequestHandler):
                     normalize_slide_translate_styles_json(slide_translate_styles_json)
                 if cfg["SLIDE_TRANSLATE_MAX_FONT_SIZE"] < 8:
                     raise ValueError("SLIDE_TRANSLATE_MAX_FONT_SIZE must be >= 8")
+                if cfg["SLIDE_TRANSLATE_MAX_REVIEW_RETRIES"] < 0:
+                    raise ValueError("SLIDE_TRANSLATE_MAX_REVIEW_RETRIES must be >= 0")
                 if not cfg["TRANSCRIPT_TRANSLATE_MODEL"]:
                     raise ValueError("TRANSCRIPT_TRANSLATE_MODEL must not be empty")
                 transcript_uses_gemini = is_gemini_text_translate_model(cfg["TRANSCRIPT_TRANSLATE_MODEL"])
@@ -3884,6 +4161,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_lab_state()})
                 return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_lab_state()})
+
+            if path == "/api/consistency-lab/review":
+                data = self._read_json_body()
+                ok, msg = start_consistency_lab_job(str(data["run_id"]).strip())
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_consistency_lab_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_consistency_lab_state()})
+
+            if path == "/api/consistency-lab/stop":
+                ok, msg = stop_consistency_lab_job()
+                if not ok:
+                    return self._send_json(409, {"ok": False, "error": msg, "current": snapshot_consistency_lab_state()})
+                return self._send_json(202, {"ok": True, "message": msg, "current": snapshot_consistency_lab_state()})
 
             if path == "/api/export-lab/export":
                 data = self._read_json_body()

@@ -175,6 +175,8 @@ def extract_image_bytes(response) -> bytes | None:
                     img = as_image()
                 except Exception:
                     continue
+                if img is None:
+                    continue
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 return buf.getvalue()

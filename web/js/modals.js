@@ -81,6 +81,16 @@ export function closeExportLabStatusModal() {
   el.exportLabStatusModal.setAttribute("aria-hidden", "true");
 }
 
+export function openConsistencyLabStatusModal() {
+  el.consistencyLabStatusModal.classList.add("open");
+  el.consistencyLabStatusModal.setAttribute("aria-hidden", "false");
+}
+
+export function closeConsistencyLabStatusModal() {
+  el.consistencyLabStatusModal.classList.remove("open");
+  el.consistencyLabStatusModal.setAttribute("aria-hidden", "true");
+}
+
 export function openRoiStatusModal() {
   el.roiStatusModal.classList.add("open");
   el.roiStatusModal.setAttribute("aria-hidden", "false");
@@ -116,6 +126,11 @@ export function closeVideoPicker() {
 export function closeExportLabRunPicker() {
   el.exportLabRunPickerModal.classList.remove("open");
   el.exportLabRunPickerModal.setAttribute("aria-hidden", "true");
+}
+
+export function closeConsistencyLabRunPicker() {
+  el.consistencyLabRunPickerModal.classList.remove("open");
+  el.consistencyLabRunPickerModal.setAttribute("aria-hidden", "true");
 }
 
 export function closeLabImagePicker() {
@@ -281,4 +296,54 @@ export async function openExportLabRunPicker({ runTask, renderExportLabSelection
   renderExportLabRunPickerList({ runTask, renderExportLabSelection });
   el.exportLabRunPickerModal.classList.add("open");
   el.exportLabRunPickerModal.setAttribute("aria-hidden", "false");
+}
+
+function renderConsistencyLabRunPickerList({ runTask, renderConsistencyLabSelection }) {
+  const items = state.consistencyLabRuns || [];
+  el.consistencyLabRunPickerList.innerHTML = "";
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No runs with translated slides available.";
+    el.consistencyLabRunPickerList.appendChild(empty);
+    return;
+  }
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "video-item video-file";
+    if (state.consistencyLabSelectedRun?.run_id === item.run_id) {
+      btn.classList.add("selected");
+    }
+    const parts = [item.label || item.run_id, item.run_status || "-"];
+    if (!item.consistency_ready && Array.isArray(item.missing_requirements) && item.missing_requirements.length > 0) {
+      parts.push(`missing: ${item.missing_requirements.join(", ")}`);
+    }
+    btn.textContent = parts.join(" | ");
+    btn.title = btn.textContent;
+    btn.disabled = !item.consistency_ready;
+    btn.addEventListener("click", () => runTask(async () => {
+      state.consistencyLabSelectedRun = item;
+      renderConsistencyLabSelection();
+      closeConsistencyLabRunPicker();
+      showButtonSuccess(el.consistencyLabPickRun, "Selected");
+    }));
+    el.consistencyLabRunPickerList.appendChild(btn);
+  }
+}
+
+export async function openConsistencyLabRunPicker({ runTask, renderConsistencyLabSelection }) {
+  const data = await apiGet("/api/consistency-lab/runs");
+  state.consistencyLabRuns = data.runs || [];
+  if (data.current) {
+    state.consistencyLabCurrent = data.current;
+  }
+  if (!state.consistencyLabSelectedRun && state.consistencyLabRuns.length > 0) {
+    const firstReady = state.consistencyLabRuns.find((item) => item.consistency_ready) || state.consistencyLabRuns[0];
+    state.consistencyLabSelectedRun = firstReady;
+    renderConsistencyLabSelection();
+  }
+  renderConsistencyLabRunPickerList({ runTask, renderConsistencyLabSelection });
+  el.consistencyLabRunPickerModal.classList.add("open");
+  el.consistencyLabRunPickerModal.setAttribute("aria-hidden", "false");
 }

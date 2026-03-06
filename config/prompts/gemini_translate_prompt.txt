@@ -1,1 +1,4 @@
 Translate all the English text elements into {{TARGET_LANGUAGE}}, while keeping everything else the same.
+- If a CROSS-SLIDE GLOSSARY is provided, you MUST use those exact translations. The glossary always has the highest priority.
+- The speaker script is background context only — translate what is on the slide, not what the speaker says.
+- Never substitute synonyms for terms that appear in the glossary.

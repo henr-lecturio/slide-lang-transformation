@@ -162,21 +162,23 @@ def translate_segment(
     tm_conn,
     origin_run_id: str,
 ) -> tuple[str, str, int]:
-    tm_hit = lookup_tm_exact(tm_conn, source_segment, target_language)
-    if tm_hit:
-        return str(tm_hit.get("target_text", "") or ""), "tm_exact", 0
+    if tm_conn is not None:
+        tm_hit = lookup_tm_exact(tm_conn, source_segment, target_language)
+        if tm_hit:
+            return str(tm_hit.get("target_text", "") or ""), "tm_exact", 0
 
     protected_text, placeholder_map, term_hits = apply_termbase_placeholders(source_segment, termbase_entries)
     translated_segment = translate_text(client, model, prompt, protected_text)
     restored_segment = restore_termbase_placeholders(translated_segment, placeholder_map)
-    upsert_tm_entry(
-        tm_conn,
-        source_text=source_segment,
-        target_language=target_language,
-        target_text=restored_segment,
-        status="machine_unreviewed",
-        origin_run_id=origin_run_id,
-    )
+    if tm_conn is not None:
+        upsert_tm_entry(
+            tm_conn,
+            source_text=source_segment,
+            target_language=target_language,
+            target_text=restored_segment,
+            status="machine_unreviewed",
+            origin_run_id=origin_run_id,
+        )
     if term_hits:
         return restored_segment, "translated_with_termbase", len(term_hits)
     return restored_segment, "translated", 0
@@ -240,7 +242,7 @@ def main() -> int:
     out_csv = Path(args.out_csv).resolve()
     prompt_file = Path(args.prompt_file).resolve()
     termbase_file = Path(args.termbase_file).resolve()
-    tm_db_path = Path(args.tm_db).resolve()
+    tm_db_path = Path(args.tm_db).resolve() if str(args.tm_db or "").strip() else None
 
     if not input_json.exists():
         raise FileNotFoundError(input_json)
@@ -256,7 +258,7 @@ def main() -> int:
     termbase_entries = load_termbase_entries(termbase_file, target_language)
     prompt = append_glossary_to_prompt(load_prompt(prompt_file, target_language), termbase_entries)
     client = ensure_client()
-    tm_conn = init_translation_memory(tm_db_path)
+    tm_conn = init_translation_memory(tm_db_path) if tm_db_path else None
 
     translated_events: list[dict[str, Any]] = []
     translated_count = 0
@@ -354,7 +356,7 @@ def main() -> int:
         "prompt_file": str(prompt_file),
         "target_language": target_language,
         "termbase_file": str(termbase_file),
-        "translation_memory_db": str(tm_db_path),
+        "translation_memory_db": str(tm_db_path or "disabled"),
         "translated_count": translated_count,
         "skipped_empty_count": skipped_count,
         "failed_count": failed_count,
@@ -365,7 +367,8 @@ def main() -> int:
     out_payload["events"] = translated_events
     out_json.write_text(json.dumps(out_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     write_csv(out_csv, translated_events)
-    tm_conn.close()
+    if tm_conn is not None:
+        tm_conn.close()
 
     print(f"[TextTranslate] Events processed: {len(events)}", flush=True)
     print(f"[TextTranslate] Translated: {translated_count}", flush=True)
@@ -376,7 +379,7 @@ def main() -> int:
     print(f"[TextTranslate] Termbase hits: {termbase_hits_total}", flush=True)
     print(f"[TextTranslate] Target language: {target_language}", flush=True)
     print(f"[TextTranslate] Termbase file: {termbase_file}", flush=True)
-    print(f"[TextTranslate] Translation memory DB: {tm_db_path}", flush=True)
+    print(f"[TextTranslate] Translation memory DB: {tm_db_path or 'disabled'}", flush=True)
     print(f"[TextTranslate] Output JSON: {out_json}", flush=True)
     print(f"[TextTranslate] Output CSV: {out_csv}", flush=True)
     return 1 if failed_count > 0 else 0

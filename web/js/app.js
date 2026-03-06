@@ -30,6 +30,8 @@ import {
 } from "./settings.js";
 import {
   closeImageModal,
+  closeConsistencyLabRunPicker,
+  closeConsistencyLabStatusModal,
   closeExportLabRunPicker,
   closeExportLabSettingsModal,
   closeExportLabStatusModal,
@@ -40,6 +42,8 @@ import {
   closeStatusModal,
   closeVideoPicker,
   handleImageModalWheel,
+  openConsistencyLabRunPicker,
+  openConsistencyLabStatusModal,
   openExportLabRunPicker,
   openExportLabSettingsModal,
   openExportLabStatusModal,
@@ -61,6 +65,13 @@ import {
   syncExportLabActionState,
   syncExportLabTestSections,
 } from "./export-lab.js";
+import {
+  loadConsistencyLabStatus,
+  renderConsistencyLabSelection,
+  runConsistencyLabAction,
+  stopConsistencyLabJob,
+  syncConsistencyLabActionState,
+} from "./consistency-lab.js";
 import {
   initializeLabTestSettings,
   loadLabStatus,
@@ -124,6 +135,7 @@ function syncActionState() {
   }
   syncLabActionState();
   syncExportLabActionState();
+  syncConsistencyLabActionState();
 }
 
 function renderRunSteps(current) {
@@ -418,6 +430,20 @@ function bindEvents() {
     showButtonSuccess(el.exportLabSettingsReset, "Reset");
   }));
 
+  el.consistencyLabPickRun.addEventListener("click", () => runTask(() => openConsistencyLabRunPicker({
+    runTask,
+    renderConsistencyLabSelection,
+  })));
+  el.consistencyLabRunReview.addEventListener("click", () => runTask(async () => {
+    await runConsistencyLabAction();
+    showButtonSuccess(el.consistencyLabRunReview, "Started");
+  }));
+  el.consistencyLabOpenTerminal.addEventListener("click", () => {
+    openConsistencyLabStatusModal();
+    runTaskImmediate(loadConsistencyLabStatus);
+  });
+  el.consistencyLabStopRun.addEventListener("click", () => runTask(stopConsistencyLabJob));
+
   document.querySelectorAll(".export-lab-step-section-toggle").forEach((button) => {
     button.addEventListener("click", () => {
       const sectionId = button.dataset.exportLabStepToggle;
@@ -635,6 +661,10 @@ function bindEvents() {
   el.labImagePickerBackdrop.addEventListener("click", closeLabImagePicker);
   el.labSettingsClose.addEventListener("click", closeLabSettingsModal);
   el.labSettingsBackdrop.addEventListener("click", closeLabSettingsModal);
+  el.consistencyLabRunPickerClose.addEventListener("click", closeConsistencyLabRunPicker);
+  el.consistencyLabRunPickerBackdrop.addEventListener("click", closeConsistencyLabRunPicker);
+  el.consistencyLabStatusModalClose.addEventListener("click", closeConsistencyLabStatusModal);
+  el.consistencyLabStatusModalBackdrop.addEventListener("click", closeConsistencyLabStatusModal);
   el.exportLabRunPickerClose.addEventListener("click", closeExportLabRunPicker);
   el.exportLabRunPickerBackdrop.addEventListener("click", closeExportLabRunPicker);
   el.exportLabSettingsClose.addEventListener("click", closeExportLabSettingsModal);
@@ -662,6 +692,12 @@ function bindEvents() {
     }
     if (e.key === "Escape" && el.labSettingsModal.classList.contains("open")) {
       closeLabSettingsModal();
+    }
+    if (e.key === "Escape" && el.consistencyLabRunPickerModal.classList.contains("open")) {
+      closeConsistencyLabRunPicker();
+    }
+    if (e.key === "Escape" && el.consistencyLabStatusModal.classList.contains("open")) {
+      closeConsistencyLabStatusModal();
     }
     if (e.key === "Escape" && el.exportLabRunPickerModal.classList.contains("open")) {
       closeExportLabRunPicker();
@@ -719,6 +755,7 @@ async function init() {
   syncSettingsFieldState();
   syncLabActionState();
   syncExportLabActionState();
+  syncConsistencyLabActionState();
   setActiveTab(getInitialActiveTab());
 
   await runTask(() => loadConfig({ syncActionState }));
@@ -728,6 +765,7 @@ async function init() {
   await runTask(loadRuns);
   await runTask(loadLabStatus);
   await runTask(loadExportLabStatus);
+  await runTask(loadConsistencyLabStatus);
 
   window.setInterval(pollCurrent, 2000);
   window.setInterval(() => {
@@ -735,6 +773,9 @@ async function init() {
   }, 2000);
   window.setInterval(() => {
     runTaskImmediate(loadExportLabStatus);
+  }, 2000);
+  window.setInterval(() => {
+    runTaskImmediate(loadConsistencyLabStatus);
   }, 2000);
 }
 
