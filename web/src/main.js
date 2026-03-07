@@ -15,6 +15,12 @@ function mount() {
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
+  setTimeout(() => {
+    observer.disconnect();
+    if (!document.getElementById("lab-app")) {
+      console.warn("[lab-app] Mount point #lab-app not found after 10s, giving up.");
+    }
+  }, 10000);
 }
 
 mount();

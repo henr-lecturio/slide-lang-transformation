@@ -39,6 +39,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Language label injected into the prompt. Falls back to source language of the text.",
     )
+    parser.add_argument("--speaking-rate", type=float, default=1.0, help="TTS speaking rate (0.25–4.0, default 1.0).")
     return parser.parse_args()
 
 
@@ -160,6 +161,7 @@ def main() -> int:
                 language_code=str(args.language_code).strip(),
                 prompt=prompt,
                 text=tts_text,
+                speaking_rate=float(args.speaking_rate),
             )
             item["duration_sec"] = write_wave_bytes(audio_path, audio_bytes)
         except Exception as exc:  # noqa: BLE001

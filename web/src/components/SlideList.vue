@@ -10,23 +10,23 @@
           <div class="slide-compare-grid">
             <div class="slide-compare-panel">
               <div class="slide-compare-label">{{ compareImages(item).left.slideSourceLabel }} | native</div>
-              <img v-if="compareImages(item).left.url" loading="lazy" :src="compareImages(item).left.url" :alt="compareImages(item).left.name || fallbackName(item)" @click="$emit('open-image', compareImages(item).left.url, compareImages(item).left.name || fallbackName(item))" />
+              <ImagePreview v-if="compareImages(item).left.url" :src="compareImages(item).left.url" :alt="compareImages(item).left.name || fallbackName(item)" loading="lazy" />
               <div v-else class="slide-missing muted">{{ compareImages(item).left.missingReason || 'No image' }}</div>
             </div>
             <div class="slide-compare-panel">
               <div class="slide-compare-label">{{ compareImages(item).left.slideSourceLabel }} | x4</div>
-              <img v-if="compareImages(item).right.url" loading="lazy" :src="compareImages(item).right.url" :alt="compareImages(item).right.name || fallbackName(item)" @click="$emit('open-image', compareImages(item).right.url, compareImages(item).right.name || fallbackName(item))" />
+              <ImagePreview v-if="compareImages(item).right.url" :src="compareImages(item).right.url" :alt="compareImages(item).right.name || fallbackName(item)" loading="lazy" />
               <div v-else class="slide-missing muted">{{ compareImages(item).right.missingReason || 'No image' }}</div>
             </div>
           </div>
         </template>
         <!-- Single/base mode -->
         <template v-else-if="slidesMode === 'final'">
-          <img v-if="singleImage(item).url" loading="lazy" :src="singleImage(item).url" :alt="singleImage(item).name || fallbackName(item)" @click="$emit('open-image', singleImage(item).url, singleImage(item).name || fallbackName(item))" />
+          <ImagePreview v-if="singleImage(item).url" :src="singleImage(item).url" :alt="singleImage(item).name || fallbackName(item)" loading="lazy" />
           <div v-else class="slide-missing muted">No image</div>
         </template>
         <template v-else>
-          <img v-if="item.image_url" loading="lazy" :src="item.image_url" :alt="item.image_name || fallbackName(item)" @click="$emit('open-image', item.image_url, item.image_name || fallbackName(item))" />
+          <ImagePreview v-if="item.image_url" :src="item.image_url" :alt="item.image_name || fallbackName(item)" loading="lazy" />
           <div v-else class="slide-missing muted">No image</div>
         </template>
 
@@ -63,27 +63,32 @@ frame_id_1: {{ item.frame_id_1 }}</div>
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { h, ref, watch } from "vue";
 import { apiGet } from "../composables/useApi.js";
 import { resolveRenderedFinalImage, resolveCompareRenderedImages } from "../stores/runStore.js";
+import ImagePreview from "./ImagePreview.vue";
 
 const SlideDetails = {
   props: { facts: Array },
-  template: `<section class="output-info-panel slide-details-panel" :class="{ 'is-open': open }">
-    <button type="button" class="output-info-toggle" :aria-expanded="open ? 'true' : 'false'" @click="open = !open">
-      <span>Slide Details</span>
-      <span class="step-section-chevron" aria-hidden="true"></span>
-    </button>
-    <div class="output-info-body" :hidden="!open">
-      <div class="output-info-grid">
-        <div v-for="[label, value] in facts" :key="label" class="output-info-item">
-          <div class="output-info-label">{{ label }}</div>
-          <div class="output-info-value">{{ value }}</div>
-        </div>
-      </div>
-    </div>
-  </section>`,
-  data() { return { open: false }; },
+  setup(props) {
+    const open = ref(false);
+    return () => h("section", { class: ["output-info-panel", "slide-details-panel", { "is-open": open.value }] }, [
+      h("button", { type: "button", class: "output-info-toggle", "aria-expanded": open.value ? "true" : "false", onClick: () => { open.value = !open.value; } }, [
+        h("span", null, "Slide Details"),
+        h("span", { class: "step-section-chevron", "aria-hidden": "true" }),
+      ]),
+      h("div", { class: "output-info-body", hidden: !open.value },
+        h("div", { class: "output-info-grid" },
+          (props.facts || []).map(([label, value]) =>
+            h("div", { class: "output-info-item", key: label }, [
+              h("div", { class: "output-info-label" }, label),
+              h("div", { class: "output-info-value" }, value),
+            ])
+          )
+        )
+      ),
+    ]);
+  },
 };
 
 const props = defineProps({

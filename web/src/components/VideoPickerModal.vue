@@ -1,9 +1,6 @@
 <template>
   <AppModal :open="open" base-class="video-picker-modal" dialog-class="video-picker-dialog" backdrop-class="video-picker-backdrop" aria-label="Video picker" @close="$emit('close')">
-    <div class="modal-head">
-      <h3>Select Video</h3>
-      <button class="modal-close" type="button" aria-label="Close video picker" @click="$emit('close')">&times;</button>
-    </div>
+    <ModalHeader title="Select Video" @close="$emit('close')" />
     <div class="video-picker-list">
       <div v-if="items.length === 0" class="muted">No videos found under videos/.</div>
       <template v-for="item in items" :key="item.path">
@@ -25,6 +22,7 @@
 
 <script setup>
 import AppModal from "./AppModal.vue";
+import ModalHeader from "./ModalHeader.vue";
 
 defineProps({
   open: { type: Boolean, default: false },

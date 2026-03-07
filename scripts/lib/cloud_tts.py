@@ -47,6 +47,7 @@ def synthesize_cloud_tts_audio(
     language_code: str,
     prompt: str,
     text: str,
+    speaking_rate: float = 1.0,
 ) -> bytes:
     synthesis_input = texttospeech.SynthesisInput(
         text=text,
@@ -60,6 +61,7 @@ def synthesize_cloud_tts_audio(
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.LINEAR16,
         sample_rate_hertz=DEFAULT_SAMPLE_RATE,
+        speaking_rate=float(speaking_rate),
     )
     response = client.synthesize_speech(
         input=synthesis_input,

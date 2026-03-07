@@ -3,9 +3,9 @@
     <section class="card home-top-card run-control-card">
       <h2>Run Control</h2>
       <div class="row wrap">
-        <button ref="startBtn" :disabled="isBusyRun || !hasVideo" @click="onStartRun">Start New Run</button>
-        <button ref="refreshBtn" @click="onRefreshRuns">Refresh Runs</button>
-        <button @click="onPickVideo">Select Video</button>
+        <AppButton ref="startBtn" :disabled="isBusyRun || !hasVideo" @click="onStartRun">Start New Run</AppButton>
+        <AppButton ref="refreshBtn" @click="onRefreshRuns">Refresh Runs</AppButton>
+        <AppButton @click="onPickVideo">Select Video</AppButton>
       </div>
       <section class="quick-settings-panel" aria-label="Quick Settings">
         <div class="quick-settings-head">Quick Settings</div>
@@ -64,10 +64,7 @@
           </label>
         </div>
       </section>
-      <div class="image-wrap video-preview-wrap">
-        <img v-if="videoThumb" :src="videoThumb" alt="Selected video thumbnail" style="cursor: zoom-in" @click="$emit('open-image', videoThumb, videoPathLabel)" />
-        <img v-else alt="Selected video thumbnail" />
-      </div>
+      <ImagePreview :src="videoThumb" alt="Selected video thumbnail" :zoom-caption="videoPathLabel" wrap-class="video-preview-wrap" />
       <div class="muted">{{ videoPathLabel }}</div>
     </section>
 
@@ -78,9 +75,9 @@
           <div class="muted">{{ statusSummary }}</div>
         </div>
         <div class="status-actions">
-          <button type="button" @click="statusModalOpen = true">Open Terminal</button>
-          <button type="button" :disabled="runs.currentRunStatus !== 'running'" @click="onStopRun">{{ runs.currentRunStatus === 'stopping' ? 'Stopping...' : 'Stop Run' }}</button>
-          <button type="button" :disabled="runs.currentRunStatus !== 'error' && runs.currentRunStatus !== 'stopped'" @click="onRetryRun">Retry</button>
+          <AppButton @click="statusModalOpen = true">Open Terminal</AppButton>
+          <AppButton variant="danger" :disabled="runs.currentRunStatus !== 'running'" @click="onStopRun">{{ runs.currentRunStatus === 'stopping' ? 'Stopping...' : 'Stop Run' }}</AppButton>
+          <AppButton :disabled="runs.currentRunStatus !== 'error' && runs.currentRunStatus !== 'stopped'" @click="onRetryRun">Retry</AppButton>
         </div>
       </div>
       <div class="step-list" aria-live="polite">
@@ -100,15 +97,9 @@
 
   <section class="card home-main">
     <h2>Latest Output</h2>
-    <section class="output-info-panel" :class="{ 'is-open': runs.latestInfoExpanded }">
-      <button class="output-info-toggle" type="button" :aria-expanded="runs.latestInfoExpanded ? 'true' : 'false'" @click="runs.latestInfoExpanded = !runs.latestInfoExpanded">
-        <span>Run Details</span>
-        <span class="step-section-chevron" aria-hidden="true"></span>
-      </button>
-      <div class="output-info-body" :hidden="!runs.latestInfoExpanded">
-        <RunInfoGrid :detail="runs.latestRunDetail" />
-      </div>
-    </section>
+    <CollapsiblePanel title="Run Details" v-model:open="runs.latestInfoExpanded">
+      <RunInfoGrid :detail="runs.latestRunDetail" />
+    </CollapsiblePanel>
     <section class="output-link-section">
       <div class="output-link-heading">Artifacts</div>
       <DownloadLinks :detail="runs.latestRunDetail" :include-video="false" :include-non-video="true" />
@@ -161,7 +152,9 @@
 import { ref, computed, inject } from "vue";
 import { configStore as config, videoThumbUrl, formatRunIdLabel, saveConfig, findTtsLanguageOptionByCode } from "../stores/configStore.js";
 import { runStore as runs, startRun, stopRun, retryRun, loadRuns, setFinalSlideImageMode } from "../stores/runStore.js";
-import { showButtonSuccess } from "../composables/useButtonSuccess.js";
+import AppButton from "../components/AppButton.vue";
+import CollapsiblePanel from "../components/CollapsiblePanel.vue";
+import ImagePreview from "../components/ImagePreview.vue";
 import RunInfoGrid from "../components/RunInfoGrid.vue";
 import DownloadLinks from "../components/DownloadLinks.vue";
 import SlideList from "../components/SlideList.vue";
@@ -176,6 +169,7 @@ const latestRefreshKey = ref(0);
 const homeTargetLanguage = ref("");
 const startBtn = ref(null);
 const refreshBtn = ref(null);
+
 
 const hasVideo = computed(() => Boolean((config.selectedVideoPath || "").trim()));
 const isBusyRun = computed(() => runs.currentRunStatus === "running" || runs.currentRunStatus === "stopping");
@@ -215,7 +209,7 @@ async function applyQuickSettings() {
 async function onStartRun() {
   await runTask(async () => {
     await startRun();
-    showButtonSuccess(startBtn.value, "Started");
+    startBtn.value?.flashSuccess("Started");
   });
 }
 
@@ -230,7 +224,7 @@ async function onRetryRun() {
 async function onRefreshRuns() {
   await runTask(async () => {
     await loadRuns();
-    showButtonSuccess(refreshBtn.value, "Refreshed");
+    refreshBtn.value?.flashSuccess("Refreshed");
   });
 }
 

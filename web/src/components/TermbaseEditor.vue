@@ -1,10 +1,5 @@
 <template>
-  <div class="output-info-panel termbase-editor-panel" :class="{ 'is-open': editorOpen }">
-    <button class="output-info-toggle" type="button" :aria-expanded="editorOpen ? 'true' : 'false'" @click="editorOpen = !editorOpen">
-      <span>Translation Termbase Table</span>
-      <span class="step-section-chevron" aria-hidden="true"></span>
-    </button>
-    <div class="output-info-body" :hidden="!editorOpen">
+  <CollapsiblePanel title="Translation Termbase Table" v-model:open="editorOpen" panel-class="termbase-editor-panel">
       <div class="termbase-editor-toolbar">
         <button type="button" @click="addRow">Add Row</button>
       </div>
@@ -41,13 +36,13 @@
           </tbody>
         </table>
       </div>
-    </div>
-  </div>
+  </CollapsiblePanel>
   <textarea id="translation_termbase_csv" :value="modelValue" rows="12" spellcheck="false" hidden></textarea>
 </template>
 
 <script setup>
 import { ref, watch, onMounted } from "vue";
+import CollapsiblePanel from "./CollapsiblePanel.vue";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },

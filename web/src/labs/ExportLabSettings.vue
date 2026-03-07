@@ -1,13 +1,11 @@
 <template>
   <AppModal :open="open" base-class="video-picker-modal" dialog-class="video-picker-dialog lab-settings-dialog" backdrop-class="video-picker-backdrop" aria-label="Export Lab test settings" @close="$emit('close')">
-      <div class="modal-head lab-settings-head">
-        <h3>Export Lab Test Settings</h3>
-        <div class="lab-settings-head-actions">
+      <ModalHeader title="Export Lab Test Settings" head-class="lab-settings-head" @close="$emit('close')">
+        <template #actions>
           <button type="button" @click="reset">Reset from Settings</button>
           <button type="button" @click="save">Save Test Settings</button>
-          <button class="modal-close" type="button" aria-label="Close export test settings" @click="$emit('close')">&times;</button>
-        </div>
-      </div>
+        </template>
+      </ModalHeader>
       <div class="status-modal-body lab-settings-body">
         <div class="muted">These values apply only to <strong>Export Lab</strong> tests and never modify the main settings.</div>
         <div class="step-sections lab-step-sections">
@@ -27,13 +25,10 @@
             </div>
             <div class="step-section-body" :hidden="!sections.timing">
               <div class="settings-list">
-                <div class="settings-row" v-for="f in timingFields" :key="f.key">
-                  <label class="settings-key" :for="'el_' + f.key">{{ f.label }}</label>
-                  <div class="settings-value">
-                    <input v-if="f.type === 'number'" :id="'el_' + f.key" type="number" :step="f.step" :min="f.min" v-model.number="form[f.key]" />
-                    <input v-else :id="'el_' + f.key" type="text" v-model="form[f.key]" />
-                  </div>
-                </div>
+                <SettingsRow v-for="f in timingFields" :key="f.key" :label="f.label" :field-id="'el_' + f.key">
+                  <input v-if="f.type === 'number'" :id="'el_' + f.key" type="number" :step="f.step" :min="f.min" v-model.number="form[f.key]" />
+                  <input v-else :id="'el_' + f.key" type="text" v-model="form[f.key]" />
+                </SettingsRow>
               </div>
             </div>
           </section>
@@ -53,13 +48,10 @@
             </div>
             <div class="step-section-body" :hidden="!sections.introOutro">
               <div class="settings-list">
-                <div class="settings-row" v-for="f in introOutroFields" :key="f.key">
-                  <label class="settings-key" :for="'el_' + f.key">{{ f.label }}</label>
-                  <div class="settings-value">
-                    <input v-if="f.type === 'number'" :id="'el_' + f.key" type="number" :step="f.step" :min="f.min" v-model.number="form[f.key]" />
-                    <input v-else :id="'el_' + f.key" type="text" v-model="form[f.key]" />
-                  </div>
-                </div>
+                <SettingsRow v-for="f in introOutroFields" :key="f.key" :label="f.label" :field-id="'el_' + f.key">
+                  <input v-if="f.type === 'number'" :id="'el_' + f.key" type="number" :step="f.step" :min="f.min" v-model.number="form[f.key]" />
+                  <input v-else :id="'el_' + f.key" type="text" v-model="form[f.key]" />
+                </SettingsRow>
               </div>
             </div>
           </section>
@@ -79,13 +71,10 @@
             </div>
             <div class="step-section-body" :hidden="!sections.outputFormat">
               <div class="settings-list">
-                <div class="settings-row" v-for="f in outputFormatFields" :key="f.key">
-                  <label class="settings-key" :for="'el_' + f.key">{{ f.label }}</label>
-                  <div class="settings-value">
-                    <input v-if="f.type === 'number'" :id="'el_' + f.key" type="number" :step="f.step" :min="f.min" v-model.number="form[f.key]" />
-                    <input v-else :id="'el_' + f.key" type="text" v-model="form[f.key]" />
-                  </div>
-                </div>
+                <SettingsRow v-for="f in outputFormatFields" :key="f.key" :label="f.label" :field-id="'el_' + f.key">
+                  <input v-if="f.type === 'number'" :id="'el_' + f.key" type="number" :step="f.step" :min="f.min" v-model.number="form[f.key]" />
+                  <input v-else :id="'el_' + f.key" type="text" v-model="form[f.key]" />
+                </SettingsRow>
               </div>
             </div>
           </section>
@@ -98,6 +87,8 @@
 <script setup>
 import { reactive, watch } from "vue";
 import AppModal from "../components/AppModal.vue";
+import ModalHeader from "../components/ModalHeader.vue";
+import SettingsRow from "../components/SettingsRow.vue";
 
 const STORAGE_KEY = "slide-transform-export-lab-test-settings";
 

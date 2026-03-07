@@ -42,6 +42,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-prompt-bytes", type=int, default=DEFAULT_TTS_MAX_PROMPT_BYTES, help="Hard maximum UTF-8 prompt bytes per TTS request.")
     parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_TTS_MAX_REQUEST_BYTES, help="Hard maximum combined prompt+text UTF-8 bytes per TTS request.")
     parser.add_argument("--single-request-max-estimated-sec", type=float, default=DEFAULT_TTS_SINGLE_REQUEST_MAX_ESTIMATED_SEC, help="Try a single TTS request only if the original transcript duration stays below this estimate.")
+    parser.add_argument("--speaking-rate", type=float, default=1.0, help="TTS speaking rate (0.25–4.0, default 1.0).")
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume: skip chunks already generated in a previous run.")
     return parser.parse_args()
 
 
@@ -264,11 +266,38 @@ def main() -> int:
     failed_count = 0
     current_start = 0.0
 
+    # Resume support: load existing manifest and identify completed chunks
+    existing_chunks: dict[int, dict[str, Any]] = {}
+    if args.resume and out_manifest_json.exists():
+        try:
+            prev = json.loads(out_manifest_json.read_text(encoding="utf-8"))
+            for item in prev.get("chunks", []):
+                if item.get("status") == "generated":
+                    ci = int(item["chunk_index"])
+                    wav = output_dir / item["audio_file"]
+                    if wav.exists():
+                        existing_chunks[ci] = item
+            if existing_chunks:
+                print(f"[TTS] Resume: {len(existing_chunks)} chunks already generated, skipping.", flush=True)
+        except Exception:
+            pass  # corrupted manifest → regenerate everything
+
     for idx, chunk in enumerate(chunks, start=1):
         chunk_text = " ".join(str(item["tts_text"]).strip() for item in chunk if str(item["tts_text"]).strip()).strip()
         audio_name = f"chunk_{idx:03d}.wav"
         audio_path = output_dir / audio_name
         segment_ids = [int(item["segment_id"]) for item in chunk]
+
+        # Resume: reuse previously generated chunk
+        if idx in existing_chunks:
+            prev_item = existing_chunks[idx]
+            manifest_items.append(prev_item)
+            chunk_paths.append(audio_path)
+            generated_count += 1
+            current_start += float(prev_item.get("duration_sec", 0.0))
+            print(f"[TTS] Reused {audio_name} (resume)", flush=True)
+            continue
+
         manifest_item = {
             "chunk_index": idx,
             "audio_file": audio_name,
@@ -292,6 +321,7 @@ def main() -> int:
                 language_code=str(args.language_code).strip(),
                 prompt=prompt,
                 text=chunk_text,
+                speaking_rate=float(args.speaking_rate),
             )
             duration_sec = write_wave_bytes(audio_path, audio_bytes)
             manifest_item["duration_sec"] = duration_sec

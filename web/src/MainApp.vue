@@ -52,7 +52,6 @@ import { configStore as config, loadConfig, saveConfig } from "./stores/configSt
 import { runStore, loadRuns, pollCurrent, deriveLatestAutoPreview, shouldAutoPreviewLatest } from "./stores/runStore.js";
 import { apiGet } from "./composables/useApi.js";
 import { usePolling } from "./composables/usePolling.js";
-import { showButtonSuccess } from "./composables/useButtonSuccess.js";
 import TabNav from "./components/TabNav.vue";
 import HomeTab from "./tabs/HomeTab.vue";
 import AllRunsTab from "./tabs/AllRunsTab.vue";
@@ -132,7 +131,7 @@ async function onSaveSettings() {
   await runTask(async () => {
     await saveConfig();
     config.configMeta = "Settings saved.";
-    showButtonSuccess(tabNavRef.value?.saveBtn, "Saved");
+    tabNavRef.value?.saveBtn?.flashSuccess("Saved");
   });
 }
 

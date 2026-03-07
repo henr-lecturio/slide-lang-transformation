@@ -5,16 +5,17 @@
     </div>
     <div class="lab-toolbar-side">
       <StatusLine :status="status" :has-selection="hasSelection" :idle-label="idleLabel" />
-      <button type="button" @click="$emit('open-terminal')">Open Terminal</button>
-      <button type="button" :disabled="status !== 'running'" @click="$emit('stop')">
+      <AppButton @click="$emit('open-terminal')">Open Terminal</AppButton>
+      <AppButton variant="danger" :disabled="status !== 'running'" @click="$emit('stop')">
         {{ status === 'stopping' ? 'Stopping...' : 'Stop Execution' }}
-      </button>
+      </AppButton>
     </div>
   </div>
 </template>
 
 <script setup>
 import StatusLine from "./StatusLine.vue";
+import AppButton from "./AppButton.vue";
 
 defineProps({
   status: { type: String, default: "idle" },

@@ -16,12 +16,11 @@
             @click="$emit('switch', tab.key)"
           >{{ tab.label }}</button>
         </nav>
-        <button
+        <AppButton
           ref="saveBtn"
           v-show="activeTab === 'settings'"
-          type="button"
           @click="$emit('save')"
-        >Save Settings</button>
+        >Save Settings</AppButton>
       </div>
     </div>
   </header>
@@ -29,6 +28,7 @@
 
 <script setup>
 import { ref } from "vue";
+import AppButton from "./AppButton.vue";
 
 const tabs = [
   { key: "home", label: "Control" },

@@ -1,14 +1,12 @@
 <template>
   <AppModal :open="open" base-class="video-picker-modal" dialog-class="video-picker-dialog lab-settings-dialog" backdrop-class="video-picker-backdrop" aria-label="Image Lab test settings" @close="$emit('close')">
-      <div class="modal-head lab-settings-head">
-        <h3>Image Lab Test Settings</h3>
-        <div class="lab-settings-head-actions">
+      <ModalHeader title="Image Lab Test Settings" head-class="lab-settings-head" @close="$emit('close')">
+        <template #actions>
           <button type="button" @click="reset">Reset from Settings</button>
           <button type="button" @click="save">Save Test Settings</button>
           <button type="button" @click="saveToMain">Save to Main Settings</button>
-          <button class="modal-close" type="button" aria-label="Close test settings" @click="$emit('close')">&times;</button>
-        </div>
-      </div>
+        </template>
+      </ModalHeader>
       <div class="status-modal-body lab-settings-body">
         <div class="muted">These values apply only to <strong>Image Lab</strong> tests and never modify the main settings.</div>
         <div class="step-sections lab-step-sections">
@@ -29,18 +27,12 @@
             </div>
             <div class="step-section-body" :hidden="!sections.slideEdit">
               <div class="settings-list">
-                <div class="settings-row">
-                  <label class="settings-key" for="lab_gemini_edit_model_v">LAB_SLIDE_EDIT_MODEL</label>
-                  <div class="settings-value">
-                    <select id="lab_gemini_edit_model_v" v-model="form.slide_edit_model">
-                      <option v-for="m in ALLOWED_IMAGE_MODELS" :key="m" :value="m">{{ m }}</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="settings-key" for="lab_gemini_edit_prompt_v">LAB_SLIDE_EDIT_PROMPT</label>
-                  <div class="settings-value"><textarea id="lab_gemini_edit_prompt_v" rows="5" v-model="form.slide_edit_prompt"></textarea></div>
-                </div>
+                <SettingsRow label="LAB_SLIDE_EDIT_MODEL" field-id="lab_gemini_edit_model_v">
+                  <select id="lab_gemini_edit_model_v" v-model="form.slide_edit_model">
+                    <option v-for="m in ALLOWED_IMAGE_MODELS" :key="m" :value="m">{{ m }}</option>
+                  </select>
+                </SettingsRow>
+                <SettingsRow label="LAB_SLIDE_EDIT_PROMPT" field-id="lab_gemini_edit_prompt_v"><textarea id="lab_gemini_edit_prompt_v" rows="5" v-model="form.slide_edit_prompt"></textarea></SettingsRow>
               </div>
             </div>
           </section>
@@ -61,38 +53,22 @@
             </div>
             <div class="step-section-body" :hidden="!sections.slideTranslate">
               <div class="settings-list">
-                <div class="settings-row">
-                  <label class="settings-key" for="lab_target_language_v">LAB_TARGET_LANGUAGE</label>
-                  <div class="settings-value">
-                    <select id="lab_target_language_v" v-model="form.target_language">
-                      <option v-if="languageOptions.length === 0" value="">No languages available</option>
-                      <option v-for="opt in languageOptions" :key="opt.tts_language_code" :value="opt.label">
-                        {{ opt.launch_readiness ? `${opt.label} [${opt.tts_language_code}] (${opt.launch_readiness})` : `${opt.label} [${opt.tts_language_code}]` }}
-                      </option>
-                    </select>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="settings-key" for="lab_translate_model_v">LAB_SLIDE_TRANSLATE_MODEL</label>
-                  <div class="settings-value">
-                    <select id="lab_translate_model_v" v-model="form.slide_translate_model" :disabled="!isGeminiTranslateMode">
-                      <option v-for="m in ALLOWED_IMAGE_MODELS" :key="m" :value="m">{{ m }}</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="settings-row">
-                  <label class="settings-key" for="lab_translate_prompt_v">LAB_SLIDE_TRANSLATE_PROMPT</label>
-                  <div class="settings-value"><textarea id="lab_translate_prompt_v" rows="5" v-model="form.slide_translate_prompt" :disabled="!isGeminiTranslateMode"></textarea></div>
-                </div>
-                <div class="settings-row termbase-settings-row">
-                  <label class="settings-key" for="lab_styles_json_v">LAB_SLIDE_TRANSLATE_STYLING</label>
-                  <div class="settings-value">
-                    <div class="output-info-panel termbase-editor-panel" :class="{ 'is-open': styleEditorOpen }">
-                      <button class="output-info-toggle" type="button" :aria-expanded="styleEditorOpen ? 'true' : 'false'" @click="styleEditorOpen = !styleEditorOpen" :disabled="!isDeterministicMode">
-                        <span>Text Styling</span>
-                        <span class="step-section-chevron" aria-hidden="true"></span>
-                      </button>
-                      <div class="output-info-body" :hidden="!styleEditorOpen">
+                <SettingsRow label="LAB_TARGET_LANGUAGE" field-id="lab_target_language_v">
+                  <select id="lab_target_language_v" v-model="form.target_language">
+                    <option v-if="languageOptions.length === 0" value="">No languages available</option>
+                    <option v-for="opt in languageOptions" :key="opt.tts_language_code" :value="opt.label">
+                      {{ opt.launch_readiness ? `${opt.label} [${opt.tts_language_code}] (${opt.launch_readiness})` : `${opt.label} [${opt.tts_language_code}]` }}
+                    </option>
+                  </select>
+                </SettingsRow>
+                <SettingsRow label="LAB_SLIDE_TRANSLATE_MODEL" field-id="lab_translate_model_v">
+                  <select id="lab_translate_model_v" v-model="form.slide_translate_model" :disabled="!isGeminiTranslateMode">
+                    <option v-for="m in ALLOWED_IMAGE_MODELS" :key="m" :value="m">{{ m }}</option>
+                  </select>
+                </SettingsRow>
+                <SettingsRow label="LAB_SLIDE_TRANSLATE_PROMPT" field-id="lab_translate_prompt_v"><textarea id="lab_translate_prompt_v" rows="5" v-model="form.slide_translate_prompt" :disabled="!isGeminiTranslateMode"></textarea></SettingsRow>
+                <SettingsRow label="LAB_SLIDE_TRANSLATE_STYLING" field-id="lab_styles_json_v" class="termbase-settings-row">
+                    <CollapsiblePanel title="Text Styling" v-model:open="styleEditorOpen" :disabled="!isDeterministicMode" panel-class="termbase-editor-panel">
                         <div class="termbase-table-wrap">
                           <table class="termbase-table slide-style-table">
                             <thead>
@@ -115,11 +91,9 @@
                             </tbody>
                           </table>
                         </div>
-                      </div>
-                    </div>
+                    </CollapsiblePanel>
                     <textarea id="lab_styles_json_v" rows="12" spellcheck="false" hidden v-model="form.slide_translate_styles_json"></textarea>
-                  </div>
-                </div>
+                </SettingsRow>
               </div>
             </div>
           </section>
@@ -140,43 +114,22 @@
             </div>
             <div class="step-section-body" :hidden="!sections.slideUpscale">
               <div class="settings-list">
-                <div class="settings-row">
-                  <label class="settings-key" for="lab_upscale_mode_v">LAB_SLIDE_UPSCALE_MODE</label>
-                  <div class="settings-value">
-                    <select id="lab_upscale_mode_v" v-model="form.slide_upscale_mode">
-                      <option value="swin2sr">Local Swin2SR</option>
-                      <option value="replicate_nightmare_realesrgan">Replicate nightmareai/real-esrgan</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="settings-row lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'">
-                  <label class="settings-key" for="lab_upscale_model_v">LAB_LOCAL_UPSCALE_MODEL</label>
-                  <div class="settings-value"><input id="lab_upscale_model_v" type="text" v-model="form.slide_upscale_model" /></div>
-                </div>
-                <div class="settings-row lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'">
-                  <label class="settings-key" for="lab_upscale_device_v">LAB_LOCAL_UPSCALE_DEVICE</label>
-                  <div class="settings-value">
-                    <select id="lab_upscale_device_v" v-model="form.slide_upscale_device">
-                      <option value="auto">auto</option><option value="cuda">cuda</option><option value="cpu">cpu</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="settings-row lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'">
-                  <label class="settings-key" for="lab_upscale_tile_size_v">LAB_LOCAL_UPSCALE_TILE_SIZE</label>
-                  <div class="settings-value"><input id="lab_upscale_tile_size_v" type="number" min="0" step="1" v-model.number="form.slide_upscale_tile_size" /></div>
-                </div>
-                <div class="settings-row lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'">
-                  <label class="settings-key" for="lab_upscale_tile_overlap_v">LAB_LOCAL_UPSCALE_TILE_OVERLAP</label>
-                  <div class="settings-value"><input id="lab_upscale_tile_overlap_v" type="number" min="0" step="1" v-model.number="form.slide_upscale_tile_overlap" /></div>
-                </div>
-                <div class="settings-row lab-upscale-replicate-row" :hidden="form.slide_upscale_mode !== 'replicate_nightmare_realesrgan'">
-                  <label class="settings-key" for="lab_rep_model_v">LAB_REPLICATE_MODEL_REF</label>
-                  <div class="settings-value"><input id="lab_rep_model_v" type="text" v-model="form.replicate_model_ref" /></div>
-                </div>
-                <div class="settings-row lab-upscale-replicate-row" :hidden="form.slide_upscale_mode !== 'replicate_nightmare_realesrgan'">
-                  <label class="settings-key" for="lab_rep_version_v">LAB_REPLICATE_VERSION_ID</label>
-                  <div class="settings-value"><input id="lab_rep_version_v" type="text" v-model="form.replicate_version_id" /></div>
-                </div>
+                <SettingsRow label="LAB_SLIDE_UPSCALE_MODE" field-id="lab_upscale_mode_v">
+                  <select id="lab_upscale_mode_v" v-model="form.slide_upscale_mode">
+                    <option value="swin2sr">Local Swin2SR</option>
+                    <option value="replicate_nightmare_realesrgan">Replicate nightmareai/real-esrgan</option>
+                  </select>
+                </SettingsRow>
+                <SettingsRow label="LAB_LOCAL_UPSCALE_MODEL" field-id="lab_upscale_model_v" class="lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'"><input id="lab_upscale_model_v" type="text" v-model="form.slide_upscale_model" /></SettingsRow>
+                <SettingsRow label="LAB_LOCAL_UPSCALE_DEVICE" field-id="lab_upscale_device_v" class="lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'">
+                  <select id="lab_upscale_device_v" v-model="form.slide_upscale_device">
+                    <option value="auto">auto</option><option value="cuda">cuda</option><option value="cpu">cpu</option>
+                  </select>
+                </SettingsRow>
+                <SettingsRow label="LAB_LOCAL_UPSCALE_TILE_SIZE" field-id="lab_upscale_tile_size_v" class="lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'"><input id="lab_upscale_tile_size_v" type="number" min="0" step="1" v-model.number="form.slide_upscale_tile_size" /></SettingsRow>
+                <SettingsRow label="LAB_LOCAL_UPSCALE_TILE_OVERLAP" field-id="lab_upscale_tile_overlap_v" class="lab-upscale-local-row" :hidden="form.slide_upscale_mode !== 'swin2sr'"><input id="lab_upscale_tile_overlap_v" type="number" min="0" step="1" v-model.number="form.slide_upscale_tile_overlap" /></SettingsRow>
+                <SettingsRow label="LAB_REPLICATE_MODEL_REF" field-id="lab_rep_model_v" class="lab-upscale-replicate-row" :hidden="form.slide_upscale_mode !== 'replicate_nightmare_realesrgan'"><input id="lab_rep_model_v" type="text" v-model="form.replicate_model_ref" /></SettingsRow>
+                <SettingsRow label="LAB_REPLICATE_VERSION_ID" field-id="lab_rep_version_v" class="lab-upscale-replicate-row" :hidden="form.slide_upscale_mode !== 'replicate_nightmare_realesrgan'"><input id="lab_rep_version_v" type="text" v-model="form.replicate_version_id" /></SettingsRow>
               </div>
             </div>
           </section>
@@ -189,6 +142,9 @@
 <script setup>
 import { reactive, ref, computed, watch } from "vue";
 import AppModal from "../components/AppModal.vue";
+import ModalHeader from "../components/ModalHeader.vue";
+import SettingsRow from "../components/SettingsRow.vue";
+import CollapsiblePanel from "../components/CollapsiblePanel.vue";
 
 const STORAGE_KEY = "slide-transform-lab-test-settings";
 const ALLOWED_IMAGE_MODELS = [

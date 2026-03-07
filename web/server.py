@@ -3349,6 +3349,7 @@ class Handler(BaseHTTPRequestHandler):
                     "GCLOUD_VERTEX_PROJECTID": resolve_vertex_project_id_from_mapping(env),
                     "FINAL_SLIDE_POSTPROCESS_MODE": env.get("FINAL_SLIDE_POSTPROCESS_MODE", "local"),
                     "GEMINI_EDIT_MODEL": normalize_image_model(env.get("GEMINI_EDIT_MODEL", DEFAULT_IMAGE_MODEL)),
+                    "GEMINI_EDIT_REVIEW_RETRIES": int(env.get("GEMINI_EDIT_REVIEW_RETRIES", "2")),
                     "GEMINI_EDIT_PROMPT": read_text_file(GEMINI_PROMPT_PATH).rstrip("\n"),
                     "FINAL_SLIDE_TRANSLATION_MODE": env.get("FINAL_SLIDE_TRANSLATION_MODE", "none"),
                     "FINAL_SLIDE_TARGET_LANGUAGE": env.get("FINAL_SLIDE_TARGET_LANGUAGE", "German (Germany)"),
@@ -3372,6 +3373,7 @@ class Handler(BaseHTTPRequestHandler):
                     "GEMINI_TEXT_TRANSLATE_PROMPT": read_text_file(GEMINI_TEXT_TRANSLATE_PROMPT_PATH).rstrip("\n"),
                     "GEMINI_TTS_MODEL": env.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-tts"),
                     "GEMINI_TTS_VOICE": env.get("GEMINI_TTS_VOICE", "Kore"),
+                    "GEMINI_TTS_SPEAKING_RATE": float(env.get("GEMINI_TTS_SPEAKING_RATE", "1.0")),
                     "GCLOUD_TTS_PROJECTID": resolve_tts_project_id_from_mapping(env),
                     "GOOGLE_TTS_LANGUAGE_CODE": env.get("GOOGLE_TTS_LANGUAGE_CODE", "de-DE"),
                     "GEMINI_TTS_LANGUAGE_OPTIONS": load_gemini_tts_language_options(),
@@ -3612,6 +3614,7 @@ class Handler(BaseHTTPRequestHandler):
                     ).strip(),
                     "FINAL_SLIDE_POSTPROCESS_MODE": str(data["FINAL_SLIDE_POSTPROCESS_MODE"]).strip(),
                     "GEMINI_EDIT_MODEL": str(data["GEMINI_EDIT_MODEL"]).strip(),
+                    "GEMINI_EDIT_REVIEW_RETRIES": str(max(0, int(data.get("GEMINI_EDIT_REVIEW_RETRIES", 2)))),
                     "FINAL_SLIDE_TRANSLATION_MODE": str(data["FINAL_SLIDE_TRANSLATION_MODE"]).strip(),
                     "FINAL_SLIDE_TARGET_LANGUAGE": str(data["FINAL_SLIDE_TARGET_LANGUAGE"]).strip(),
                     "GEMINI_TRANSLATE_MODEL": str(data["GEMINI_TRANSLATE_MODEL"]).strip(),
@@ -3632,6 +3635,7 @@ class Handler(BaseHTTPRequestHandler):
                     "GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE": str(data["GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE"]).strip(),
                     "GEMINI_TTS_MODEL": str(data["GEMINI_TTS_MODEL"]).strip(),
                     "GEMINI_TTS_VOICE": str(data["GEMINI_TTS_VOICE"]).strip(),
+                    "GEMINI_TTS_SPEAKING_RATE": str(max(0.25, min(4.0, float(data.get("GEMINI_TTS_SPEAKING_RATE", 1.0))))),
                     "GCLOUD_TTS_PROJECTID": str(
                         data.get("GCLOUD_TTS_PROJECTID", data.get("GOOGLE_TTS_PROJECT_ID", ""))
                     ).strip(),

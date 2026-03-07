@@ -51,6 +51,8 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional Gemini location for Vertex fallback (e.g. global or us-central1).",
     )
+    parser.add_argument("--out-manifest-json", default="", help="Output JSON manifest path for per-slide status.")
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume: skip slides already translated in a previous run.")
     # Legacy args accepted but ignored (kept for CLI compatibility)
     parser.add_argument("--prompt-file", default="", help=argparse.SUPPRESS)
     parser.add_argument("--termbase-file", default="", help=argparse.SUPPRESS)
@@ -370,20 +372,68 @@ def main() -> int:
     print(f"[Translate] Gemini endpoint/location: {location_used}", flush=True)
     print(f"[Translate] Extract/Translate model: {args.extract_model}", flush=True)
     print(f"[Translate] Render model: {args.model}", flush=True)
-    clear_pngs(output_dir)
+    out_manifest_path = Path(args.out_manifest_json).resolve() if args.out_manifest_json else None
+
+    # Resume support: load existing manifest to skip completed slides
+    existing_status: dict[str, str] = {}
+    if args.resume and out_manifest_path and out_manifest_path.exists():
+        try:
+            prev = json.loads(out_manifest_path.read_text(encoding="utf-8"))
+            for item in prev.get("items", []):
+                name = item.get("name", "")
+                status = item.get("status", "")
+                if status in ("translated", "no_text") and (output_dir / name).exists():
+                    existing_status[name] = status
+            if existing_status:
+                print(f"[Translate] Resume: {len(existing_status)} slides already processed, skipping.", flush=True)
+        except Exception:
+            pass
+
+    if not args.resume:
+        clear_pngs(output_dir)
 
     slide_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")
     translated_count = 0
     fallback_count = 0
     glossary: dict[str, str] = {}
+    manifest_items: list[dict[str, str]] = []
+
+    # Resume: rebuild glossary from existing _mapping.json files (in slide order)
+    if existing_status:
+        for sp in slide_paths:
+            if sp.name in existing_status and existing_status[sp.name] == "translated":
+                mapping_file = output_dir / f"{sp.stem}_mapping.json"
+                if mapping_file.exists():
+                    try:
+                        mapping_data = json.loads(mapping_file.read_text(encoding="utf-8"))
+                        for entry in mapping_data:
+                            orig = entry.get("original", "").strip()
+                            trans = entry.get("translated", "").strip()
+                            if orig and trans and orig != trans:
+                                glossary[orig] = trans
+                    except Exception:
+                        pass
+        if glossary:
+            print(f"[Translate] Resume: rebuilt glossary with {len(glossary)} entries.", flush=True)
 
     for slide_path in slide_paths:
         dst_path = output_dir / slide_path.name
         print(f"@@STEP DETAIL translate {slide_path.name}")
+
+        # Resume: reuse previously processed slide
+        if slide_path.name in existing_status:
+            prev_status = existing_status[slide_path.name]
+            manifest_items.append({"name": slide_path.name, "status": prev_status, "reason": "resume"})
+            if prev_status == "translated":
+                translated_count += 1
+            print(f"[Translate] Reused {slide_path.name} (resume, status={prev_status})")
+            continue
+
         original = cv2.imread(str(slide_path), cv2.IMREAD_COLOR)
         if original is None or original.size == 0:
             shutil.copy2(slide_path, dst_path)
             fallback_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": "read_failed"})
             print(f"[Translate] Fallback {slide_path.name}: failed to read image.")
             continue
 
@@ -391,16 +441,19 @@ def main() -> int:
 
         try:
             # Step 1: Extract text elements
+            print(f"@@STEP DETAIL translate {slide_path.name}: Extract", flush=True)
             print(f"[Translate] [{slide_path.name}] Step 1/3: Extracting text ...", flush=True)
             extracted = extract_slide_json(text_client, str(args.extract_model), image_bytes, args.extract_prompt)
             text_elements = extracted.get("text_elements", [])
 
             if not text_elements:
                 shutil.copy2(slide_path, dst_path)
+                manifest_items.append({"name": slide_path.name, "status": "no_text"})
                 print(f"[Translate] [{slide_path.name}] No text found — keeping original.")
                 continue
 
             # Step 2: Translate text elements
+            print(f"@@STEP DETAIL translate {slide_path.name}: Translate", flush=True)
             print(f"[Translate] [{slide_path.name}] Step 2/3: Translating {len(text_elements)} text elements ...", flush=True)
             mapping = translate_slide_json(
                 text_client, str(args.extract_model), text_elements, target_language, glossary,
@@ -408,11 +461,13 @@ def main() -> int:
             )
 
             # Step 3: Render translated image
+            print(f"@@STEP DETAIL translate {slide_path.name}: Render", flush=True)
             print(f"[Translate] [{slide_path.name}] Step 3/3: Rendering translated image ...", flush=True)
             translated = render_translated_image(image_client, types, str(args.model), original, mapping, args.render_prompt)
 
             cv2.imwrite(str(dst_path), translated)
             translated_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "translated"})
 
             # Update glossary for next slides
             for entry in mapping:
@@ -434,6 +489,7 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             shutil.copy2(slide_path, dst_path)
             fallback_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": str(exc)})
             print(f"[Translate] Fallback {slide_path.name}: {exc}")
             continue
 
@@ -442,6 +498,11 @@ def main() -> int:
         (output_dir / "_glossary.json").write_text(
             json.dumps(glossary, indent=2, ensure_ascii=False), encoding="utf-8",
         )
+
+    if out_manifest_path:
+        manifest = {"items": manifest_items, "translated_count": translated_count, "fallback_count": fallback_count}
+        out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        out_manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[Translate] Slides processed: {len(slide_paths)}")
     print(f"[Translate] Translated: {translated_count}")

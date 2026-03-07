@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "python web/server.py & vite --open; kill $!",
+    "dev": "fuser -k 8000/tcp 2>/dev/null; sleep 0.3; python web/server.py & vite --open; kill $!",
     "build": "vite build"
   },
   "dependencies": {

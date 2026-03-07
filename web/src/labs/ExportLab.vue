@@ -10,9 +10,9 @@
       @stop="stop"
     >
       <template #actions>
-        <button type="button" :disabled="isBusy" @click="openPicker">Select Run</button>
-        <button type="button" :disabled="isBusy" @click="openSettings">Test Settings</button>
-        <button type="button" :disabled="isBusy || !canExport" @click="runExport">Run Export</button>
+        <AppButton :disabled="isBusy" @click="openPicker">Select Run</AppButton>
+        <AppButton :disabled="isBusy" @click="openSettings">Test Settings</AppButton>
+        <AppButton :disabled="isBusy || !canExport" @click="runExport">Run Export</AppButton>
       </template>
     </LabToolbar>
 
@@ -76,6 +76,7 @@
 <script setup>
 import { ref, computed, watch } from "vue";
 import LabAccordion from "../components/LabAccordion.vue";
+import AppButton from "../components/AppButton.vue";
 import LabToolbar from "../components/LabToolbar.vue";
 import PickerModal from "../components/PickerModal.vue";
 import LogTerminal from "../components/LogTerminal.vue";

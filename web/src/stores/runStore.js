@@ -1,7 +1,7 @@
 import { reactive } from "vue";
 import { apiGet, apiPost } from "../composables/useApi.js";
 import { formatRunIdLabel, formatUsd } from "./configStore.js";
-import { syncFavicon } from "../../js/favicon.js";
+import { syncFavicon } from "../composables/useFavicon.js";
 
 export const runStore = reactive({
   currentRunId: null,

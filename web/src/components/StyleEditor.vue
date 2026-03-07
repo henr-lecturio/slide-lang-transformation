@@ -1,16 +1,5 @@
 <template>
-  <div class="output-info-panel termbase-editor-panel" :class="{ 'is-open': editorOpen }">
-    <button
-      class="output-info-toggle"
-      type="button"
-      :disabled="disabled"
-      :aria-expanded="editorOpen ? 'true' : 'false'"
-      @click="editorOpen = !editorOpen"
-    >
-      <span>Text Styling</span>
-      <span class="step-section-chevron" aria-hidden="true"></span>
-    </button>
-    <div class="output-info-body" :hidden="!editorOpen">
+  <CollapsiblePanel title="Text Styling" v-model:open="editorOpen" :disabled="disabled" panel-class="termbase-editor-panel">
       <div class="termbase-table-wrap">
         <table class="termbase-table slide-style-table">
           <thead>
@@ -43,13 +32,13 @@
           </tbody>
         </table>
       </div>
-    </div>
-  </div>
+  </CollapsiblePanel>
   <textarea id="slide_translate_styles_json" :value="modelValue" rows="12" spellcheck="false" hidden></textarea>
 </template>
 
 <script setup>
 import { ref, watch, onMounted } from "vue";
+import CollapsiblePanel from "./CollapsiblePanel.vue";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },

@@ -319,8 +319,8 @@
   width: 100%;
 }
 
-#gemini_text_translate_prompt {
-  max-height: 128px;
+.settings-value > textarea {
+  max-height: none;
 }
 
 #termbase-editor-panel {

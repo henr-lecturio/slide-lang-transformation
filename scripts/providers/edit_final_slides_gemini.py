@@ -5,6 +5,7 @@ import argparse
 import base64
 import csv
 import io
+import json
 import os
 import re
 import shutil
@@ -66,6 +67,9 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional output directory for red overlay guide images.",
     )
+    parser.add_argument("--out-manifest-json", default="", help="Output JSON manifest path for per-slide status.")
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume: skip slides already processed in a previous run.")
+    parser.add_argument("--review-retries", type=int, default=2, help="Number of retries when review detects a bad edit (e.g. matte instead of image). 0 disables review.")
     return parser.parse_args()
 
 
@@ -225,6 +229,26 @@ def generate_edited_image(
     return edited
 
 
+REVIEW_HISTOGRAM_THRESHOLD = 0.55
+
+
+def review_edit_quality(original: np.ndarray, edited: np.ndarray) -> tuple[bool, float]:
+    """Compare color histograms of original and edited image.
+
+    Returns (passed, similarity).  A correct edit should look very similar to the
+    original (similarity > REVIEW_HISTOGRAM_THRESHOLD).  A matte or broken
+    output has a completely different color distribution (similarity < threshold).
+    """
+    ranges = [0, 256, 0, 256, 0, 256]
+    bins = [8, 8, 8]
+    hist_orig = cv2.calcHist([original], [0, 1, 2], None, bins, ranges)
+    hist_edit = cv2.calcHist([edited], [0, 1, 2], None, bins, ranges)
+    cv2.normalize(hist_orig, hist_orig)
+    cv2.normalize(hist_edit, hist_edit)
+    similarity = cv2.compareHist(hist_orig, hist_edit, cv2.HISTCMP_CORREL)
+    return similarity >= REVIEW_HISTOGRAM_THRESHOLD, round(similarity, 4)
+
+
 def clear_pngs(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     for p in path.glob("*.png"):
@@ -248,30 +272,62 @@ def main() -> int:
     print(f"[GeminiEdit] Gemini backend: {project_id_used}", flush=True)
     print(f"[GeminiEdit] Gemini endpoint/location: {location_used}", flush=True)
     source_modes = load_source_manifest(source_manifest_csv)
-    clear_pngs(output_dir)
-    if mask_debug_dir is not None:
-        clear_pngs(mask_debug_dir)
-    if overlay_debug_dir is not None:
-        clear_pngs(overlay_debug_dir)
+    out_manifest_path = Path(args.out_manifest_json).resolve() if args.out_manifest_json else None
+
+    # Resume support: load existing manifest to skip completed slides
+    existing_status: dict[str, str] = {}
+    if args.resume and out_manifest_path and out_manifest_path.exists():
+        try:
+            prev = json.loads(out_manifest_path.read_text(encoding="utf-8"))
+            for item in prev.get("items", []):
+                name = item.get("name", "")
+                status = item.get("status", "")
+                if status in ("edited", "skipped") and (output_dir / name).exists():
+                    existing_status[name] = status
+            if existing_status:
+                print(f"[Gemini] Resume: {len(existing_status)} slides already processed, skipping.", flush=True)
+        except Exception:
+            pass
+
+    if not args.resume:
+        clear_pngs(output_dir)
+        if mask_debug_dir is not None:
+            clear_pngs(mask_debug_dir)
+        if overlay_debug_dir is not None:
+            clear_pngs(overlay_debug_dir)
 
     slide_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")
     edited_count = 0
     skipped_count = 0
     fallback_count = 0
+    manifest_items: list[dict[str, str]] = []
 
     for slide_path in slide_paths:
         dst_path = output_dir / slide_path.name
         slide_idx = slide_index_from_name(slide_path)
         print(f"@@STEP DETAIL edit {slide_path.name}")
 
+        # Resume: reuse previously processed slide
+        if slide_path.name in existing_status:
+            prev_status = existing_status[slide_path.name]
+            manifest_items.append({"name": slide_path.name, "status": prev_status, "reason": "resume"})
+            if prev_status == "edited":
+                edited_count += 1
+            else:
+                skipped_count += 1
+            print(f"[Gemini] Reused {slide_path.name} (resume, status={prev_status})")
+            continue
+
         if slide_idx is not None and slide_idx <= max(0, int(args.skip_first_slide)):
             shutil.copy2(slide_path, dst_path)
             skipped_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "skipped", "reason": "skip_window"})
             print(f"[Gemini] Skip {slide_path.name}: configured skip window.")
             continue
         if slide_idx is not None and source_modes.get(slide_idx) == "full":
             shutil.copy2(slide_path, dst_path)
             skipped_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "skipped", "reason": "full_source"})
             print(f"[Gemini] Skip {slide_path.name}: final source is full.")
             continue
 
@@ -279,6 +335,7 @@ def main() -> int:
         if original is None or original.size == 0:
             shutil.copy2(slide_path, dst_path)
             fallback_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": "read_failed"})
             print(f"[Gemini] Fallback {slide_path.name}: failed to read image.")
             continue
 
@@ -286,6 +343,7 @@ def main() -> int:
         if mask is None or not np.any(mask):
             shutil.copy2(slide_path, dst_path)
             skipped_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "skipped", "reason": "no_mask"})
             print(f"[Gemini] Skip {slide_path.name}: no cleanup mask.")
             continue
 
@@ -295,17 +353,51 @@ def main() -> int:
         if overlay_debug_dir is not None:
             cv2.imwrite(str(overlay_debug_dir / slide_path.name), overlay)
 
-        try:
-            edited = generate_edited_image(client, types, str(args.model), prompt, original, overlay, mask)
-        except Exception as exc:  # noqa: BLE001
+        max_attempts = 1 + max(0, int(args.review_retries))
+        accepted = False
+        for attempt in range(1, max_attempts + 1):
+            try:
+                print(f"@@STEP DETAIL edit {slide_path.name}: Generate" + (f" (retry {attempt - 1})" if attempt > 1 else ""), flush=True)
+                edited = generate_edited_image(client, types, str(args.model), prompt, original, overlay, mask)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[Gemini] Attempt {attempt}/{max_attempts} failed {slide_path.name}: {exc}")
+                if attempt == max_attempts:
+                    shutil.copy2(slide_path, dst_path)
+                    fallback_count += 1
+                    manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": str(exc)})
+                    print(f"[Gemini] Fallback {slide_path.name}: {exc}")
+                continue
+
+            # Review: check that the edit looks like the original (not a matte)
+            if int(args.review_retries) > 0:
+                print(f"@@STEP DETAIL edit {slide_path.name}: Review", flush=True)
+                passed, similarity = review_edit_quality(original, edited)
+                if not passed:
+                    print(f"[Gemini] Review FAILED {slide_path.name}: similarity={similarity} (attempt {attempt}/{max_attempts})")
+                    if attempt == max_attempts:
+                        shutil.copy2(slide_path, dst_path)
+                        fallback_count += 1
+                        manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": f"review_failed:similarity={similarity}"})
+                        print(f"[Gemini] Fallback {slide_path.name}: review failed after {max_attempts} attempts")
+                    continue
+                print(f"[Gemini] Review OK {slide_path.name}: similarity={similarity}")
+
+            cv2.imwrite(str(dst_path), edited)
+            edited_count += 1
+            manifest_items.append({"name": slide_path.name, "status": "edited"})
+            print(f"[Gemini] Edited {slide_path.name}")
+            accepted = True
+            break
+
+        if not accepted and not any(m["name"] == slide_path.name for m in manifest_items):
             shutil.copy2(slide_path, dst_path)
             fallback_count += 1
-            print(f"[Gemini] Fallback {slide_path.name}: {exc}")
-            continue
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": "all_attempts_failed"})
 
-        cv2.imwrite(str(dst_path), edited)
-        edited_count += 1
-        print(f"[Gemini] Edited {slide_path.name}")
+    if out_manifest_path:
+        manifest = {"items": manifest_items, "edited_count": edited_count, "skipped_count": skipped_count, "fallback_count": fallback_count}
+        out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        out_manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[Gemini] Slides processed: {len(slide_paths)}")
     print(f"[Gemini] Edited: {edited_count}")

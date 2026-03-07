@@ -10,8 +10,8 @@
       @stop="stop"
     >
       <template #actions>
-        <button type="button" :disabled="isBusy" @click="openPicker">Select Run</button>
-        <button type="button" :disabled="isBusy || !canReview" @click="runReview">Run Consistency Review</button>
+        <AppButton :disabled="isBusy" @click="openPicker">Select Run</AppButton>
+        <AppButton :disabled="isBusy || !canReview" @click="runReview">Run Consistency Review</AppButton>
       </template>
     </LabToolbar>
 
@@ -50,6 +50,7 @@
 <script setup>
 import { ref, computed } from "vue";
 import LabAccordion from "../components/LabAccordion.vue";
+import AppButton from "../components/AppButton.vue";
 import LabToolbar from "../components/LabToolbar.vue";
 import PickerModal from "../components/PickerModal.vue";
 import LogTerminal from "../components/LogTerminal.vue";

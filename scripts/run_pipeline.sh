@@ -72,6 +72,7 @@ fi
 
 FINAL_SLIDE_POSTPROCESS_MODE="${FINAL_SLIDE_POSTPROCESS_MODE:-local}"
 GEMINI_EDIT_MODEL="${GEMINI_EDIT_MODEL:-gemini-3-pro-image-preview}"
+GEMINI_EDIT_REVIEW_RETRIES="${GEMINI_EDIT_REVIEW_RETRIES:-2}"
 FINAL_SLIDE_TRANSLATION_MODE="${FINAL_SLIDE_TRANSLATION_MODE:-none}"
 FINAL_SLIDE_TARGET_LANGUAGE="${FINAL_SLIDE_TARGET_LANGUAGE:-German}"
 GEMINI_TRANSLATE_MODEL="${GEMINI_TRANSLATE_MODEL:-gemini-3-pro-image-preview}"
@@ -97,6 +98,7 @@ SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS="${SLIDE_TRANSLATE_LAYOUT_MAX_ATTEMPTS:-5000
 SLIDE_TRANSLATE_LAYOUT_MAX_MS="${SLIDE_TRANSLATE_LAYOUT_MAX_MS:-15000}"
 GEMINI_TTS_MODEL="${GEMINI_TTS_MODEL:-gemini-2.5-flash-tts}"
 GEMINI_TTS_VOICE="${GEMINI_TTS_VOICE:-Kore}"
+GEMINI_TTS_SPEAKING_RATE="${GEMINI_TTS_SPEAKING_RATE:-1.0}"
 GCLOUD_TTS_PROJECTID="${GCLOUD_TTS_PROJECTID:-${GOOGLE_TTS_PROJECT_ID:-${GOOGLE_SPEECH_PROJECT_ID:-}}}"
 GOOGLE_TTS_LANGUAGE_CODE="${GOOGLE_TTS_LANGUAGE_CODE:-en-US}"
 FINAL_SLIDE_UPSCALE_MODE="${FINAL_SLIDE_UPSCALE_MODE:-none}"
@@ -244,6 +246,10 @@ should_skip_step() {
     return 1  # this is the step to resume from → run
   fi
   return 0  # not yet reached → skip
+}
+
+is_resume_step() {
+  [ -n "$RESUME_FROM_STEP" ] && [ "$1" = "$RESUME_FROM_STEP" ]
 }
 
 is_gemini_text_translate_model() {
@@ -582,6 +588,9 @@ VIDEO_EXPORT_DIR="$OUT_BASE/video_export"
 VIDEO_EXPORT_TIMELINE_JSON="$VIDEO_EXPORT_DIR/timeline.json"
 VIDEO_EXPORT_TIMELINE_CSV="$VIDEO_EXPORT_DIR/timeline.csv"
 UPSCALE_TRANSLATED_MANIFEST_JSON="$OUT_BASE/keyframes/final/upscale_translated_manifest.json"
+EDIT_MANIFEST_JSON="$OUT_BASE/keyframes/final/edit_manifest.json"
+TRANSLATE_MANIFEST_JSON="$OUT_BASE/keyframes/final/translate_manifest.json"
+UPSCALE_SWIN2SR_MANIFEST_JSON="$OUT_BASE/keyframes/final/upscale_swin2sr_manifest.json"
 
 lang_slug() {
   local raw="$1"
@@ -691,7 +700,12 @@ elif [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" 
   echo "[Gemini] Editing raw final slides with model $GEMINI_EDIT_MODEL ..."
   step_start edit
   step_detail edit "gemini-image-edit"
-  rm -rf "$FINAL_SLIDE_DIR.__tmp"
+  if ! is_resume_step edit; then
+    rm -rf "$FINAL_SLIDE_DIR.__tmp"
+    rm -f "$EDIT_MANIFEST_JSON.__tmp"
+  fi
+  RESUME_FLAG=""
+  if is_resume_step edit; then RESUME_FLAG="--resume"; fi
   "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/edit_final_slides_gemini.py" \
     --input-dir "$FINAL_SLIDE_RAW_DIR" \
     --output-dir "$FINAL_SLIDE_DIR.__tmp" \
@@ -701,8 +715,12 @@ elif [ "$RUN_STEP_EDIT" = "1" ] && [ "$FINAL_SLIDE_POSTPROCESS_MODE" = "gemini" 
     --location "$GOOGLE_GEMINI_LOCATION" \
     --source-manifest-csv "$FINAL_SOURCE_MANIFEST_CSV" \
     --mask-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_mask" \
-    --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay"
+    --overlay-debug-dir "$OUT_BASE/keyframes/final/slide_gemini_overlay" \
+    --out-manifest-json "$EDIT_MANIFEST_JSON.__tmp" \
+    --review-retries "$GEMINI_EDIT_REVIEW_RETRIES" \
+    $RESUME_FLAG
   publish_dir "$FINAL_SLIDE_DIR.__tmp" "$FINAL_SLIDE_DIR"
+  publish_file "$EDIT_MANIFEST_JSON.__tmp" "$EDIT_MANIFEST_JSON"
   step_done edit
   echo "[Gemini] Editing finished."
 elif [ "$RUN_STEP_EDIT" = "0" ]; then
@@ -731,7 +749,12 @@ elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
       echo "[Translate] Translating final slides to $FINAL_SLIDE_TARGET_LANGUAGE with model $GEMINI_TRANSLATE_MODEL ..."
       step_start translate
       step_detail translate "$FINAL_SLIDE_TARGET_LANGUAGE"
-      rm -rf "$FINAL_SLIDE_TRANSLATED_DIR.__tmp"
+      if ! is_resume_step translate; then
+        rm -rf "$FINAL_SLIDE_TRANSLATED_DIR.__tmp"
+        rm -f "$TRANSLATE_MANIFEST_JSON.__tmp"
+      fi
+      RESUME_FLAG=""
+      if is_resume_step translate; then RESUME_FLAG="--resume"; fi
       "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/translate_final_slides_gemini.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" \
@@ -742,8 +765,11 @@ elif [ "$RUN_STEP_TRANSLATE" = "1" ]; then
         --extract-model "$GEMINI_EXTRACT_MODEL" \
         --extract-prompt "$(cat "$GEMINI_SLIDE_EXTRACT_PROMPT_FILE")" \
         --translate-prompt "$(cat "$GEMINI_SLIDE_TRANSLATE_PROMPT_FILE")" \
-        --render-prompt "$(cat "$GEMINI_SLIDE_RENDER_PROMPT_FILE")"
+        --render-prompt "$(cat "$GEMINI_SLIDE_RENDER_PROMPT_FILE")" \
+        --out-manifest-json "$TRANSLATE_MANIFEST_JSON.__tmp" \
+        $RESUME_FLAG
       publish_dir "$FINAL_SLIDE_TRANSLATED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_DIR"
+      publish_file "$TRANSLATE_MANIFEST_JSON.__tmp" "$TRANSLATE_MANIFEST_JSON"
       step_done translate
       echo "[Translate] Translation finished."
       ;;
@@ -872,15 +898,23 @@ elif [ "$RUN_STEP_UPSCALE" = "1" ]; then
       echo "[Upscale] Upscaling processed final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
       step_start upscale
       step_detail upscale "processed-final-slides"
-      rm -rf "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp"
+      if ! is_resume_step upscale; then
+        rm -rf "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp"
+        rm -f "$UPSCALE_SWIN2SR_MANIFEST_JSON.__tmp"
+      fi
+      RESUME_FLAG=""
+      if is_resume_step upscale; then RESUME_FLAG="--resume"; fi
       "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_swin2sr.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" \
         --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
         --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
         --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
-        --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+        --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP" \
+        --out-manifest-json "$UPSCALE_SWIN2SR_MANIFEST_JSON.__tmp" \
+        $RESUME_FLAG
       publish_dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_UPSCALED_DIR"
+      publish_file "$UPSCALE_SWIN2SR_MANIFEST_JSON.__tmp" "$UPSCALE_SWIN2SR_MANIFEST_JSON"
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
         echo "[Upscale] Upscaling translated final slides with model $FINAL_SLIDE_UPSCALE_MODEL ..."
         step_detail upscale "translated-final-slides"
@@ -890,7 +924,9 @@ elif [ "$RUN_STEP_UPSCALE" = "1" ]; then
           --model-id "$FINAL_SLIDE_UPSCALE_MODEL" \
           --device "$FINAL_SLIDE_UPSCALE_DEVICE" \
           --tile-size "$FINAL_SLIDE_UPSCALE_TILE_SIZE" \
-          --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP"
+          --tile-overlap "$FINAL_SLIDE_UPSCALE_TILE_OVERLAP" \
+          --out-manifest-json "$UPSCALE_SWIN2SR_MANIFEST_JSON.__tmp" \
+          $RESUME_FLAG
         publish_dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
       fi
       step_done upscale
@@ -912,15 +948,20 @@ elif [ "$RUN_STEP_UPSCALE" = "1" ]; then
       echo "[Upscale] Upscaling processed final slides with Replicate provider $REPLICATE_PROVIDER ..."
       step_start upscale
       step_detail upscale "processed-final-slides:$REPLICATE_PROVIDER"
-      rm -rf "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp"
-      rm -f "$UPSCALE_MANIFEST_JSON.__tmp" "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp"
+      if ! is_resume_step upscale; then
+        rm -rf "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp"
+        rm -f "$UPSCALE_MANIFEST_JSON.__tmp" "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp"
+      fi
+      RESUME_FLAG=""
+      if is_resume_step upscale; then RESUME_FLAG="--resume"; fi
       "$PYTHON_BIN" "$ROOT_DIR/scripts/providers/upscale_final_slides_replicate.py" \
         --input-dir "$FINAL_SLIDE_DIR" \
         --output-dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" \
         --provider "$REPLICATE_PROVIDER" \
         --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
         --manifest-path "$UPSCALE_MANIFEST_JSON.__tmp" \
-        "${REPLICATE_EXTRA_ARGS[@]}"
+        "${REPLICATE_EXTRA_ARGS[@]}" \
+        $RESUME_FLAG
       publish_dir "$FINAL_SLIDE_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_UPSCALED_DIR"
       publish_file "$UPSCALE_MANIFEST_JSON.__tmp" "$UPSCALE_MANIFEST_JSON"
       if [ -d "$FINAL_SLIDE_TRANSLATED_DIR" ] && find "$FINAL_SLIDE_TRANSLATED_DIR" -maxdepth 1 -type f -name '*.png' | grep -q .; then
@@ -932,7 +973,8 @@ elif [ "$RUN_STEP_UPSCALE" = "1" ]; then
           --concurrency "${REPLICATE_UPSCALE_CONCURRENCY:-2}" \
           --manifest-path "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp" \
           --provider "$REPLICATE_PROVIDER" \
-          "${REPLICATE_EXTRA_ARGS[@]}"
+          "${REPLICATE_EXTRA_ARGS[@]}" \
+          $RESUME_FLAG
         publish_dir "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR.__tmp" "$FINAL_SLIDE_TRANSLATED_UPSCALED_DIR"
         publish_file "$UPSCALE_TRANSLATED_MANIFEST_JSON.__tmp" "$UPSCALE_TRANSLATED_MANIFEST_JSON"
       fi
@@ -972,8 +1014,12 @@ elif [ "$RUN_STEP_TTS" = "1" ]; then
   echo "[TTS] Generating voiceover with model $GEMINI_TTS_MODEL and voice $GEMINI_TTS_VOICE ..."
   step_start tts
   step_detail tts "$GEMINI_TTS_VOICE"
-  rm -rf "$TTS_AUDIO_DIR.__tmp"
-  rm -f "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_CSV.__tmp"
+  if ! is_resume_step tts; then
+    rm -rf "$TTS_AUDIO_DIR.__tmp"
+    rm -f "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_CSV.__tmp"
+  fi
+  RESUME_FLAG=""
+  if is_resume_step tts; then RESUME_FLAG="--resume"; fi
   "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/generate_transcript_tts.py" \
     --input-json "$TTS_INPUT_JSON" \
     --output-dir "$TTS_AUDIO_DIR.__tmp" \
@@ -986,7 +1032,9 @@ elif [ "$RUN_STEP_TTS" = "1" ]; then
     --prompt-file "$GEMINI_TTS_PROMPT_FILE" \
     --language-label "$TTS_LANGUAGE_LABEL" \
     --max-chars "${TTS_TRANSCRIPT_MAX_CHARS:-3200}" \
-    --max-segments-per-chunk "${TTS_TRANSCRIPT_MAX_SEGMENTS:-40}"
+    --max-segments-per-chunk "${TTS_TRANSCRIPT_MAX_SEGMENTS:-40}" \
+    --speaking-rate "$GEMINI_TTS_SPEAKING_RATE" \
+    $RESUME_FLAG
   publish_dir "$TTS_AUDIO_DIR.__tmp" "$TTS_AUDIO_DIR"
   publish_file "$TTS_MANIFEST_JSON.__tmp" "$TTS_MANIFEST_JSON"
   publish_file "$TTS_MANIFEST_CSV.__tmp" "$TTS_MANIFEST_CSV"

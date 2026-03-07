@@ -15,6 +15,12 @@ function mount() {
     }
   });
   observer.observe(document.body, { childList: true, subtree: true });
+  setTimeout(() => {
+    observer.disconnect();
+    if (!document.getElementById("health-app")) {
+      console.warn("[health-app] Mount point #health-app not found after 10s, giving up.");
+    }
+  }, 10000);
 }
 
 mount();

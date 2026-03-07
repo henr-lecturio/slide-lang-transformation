@@ -404,6 +404,15 @@ def detect_final_source_modes(
                 "side_diff_bottom": "",
             }
 
+            # Slide 1 (thumbnail) is always full-frame — skip detection
+            if slide_index == 1:
+                info["source_mode_auto"] = "full"
+                info["source_mode_final"] = "full"
+                info["source_reason"] = "thumbnail_always_full"
+                info["source_confidence"] = 1.0
+                source_rows.append(info)
+                continue
+
             if final_source_mode_auto != "auto":
                 source_rows.append(info)
                 continue

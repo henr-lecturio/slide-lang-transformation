@@ -126,7 +126,8 @@ button:disabled {
 
 #stop-run,
 #lab-stop-run,
-#export-lab-stop-run {
+#export-lab-stop-run,
+.app-btn--danger {
   border-color: rgba(236, 95, 63, 0.55);
   color: #ffad99;
 }
@@ -137,7 +138,8 @@ button:disabled {
 
 #stop-run:hover:not(:disabled),
 #lab-stop-run:hover:not(:disabled),
-#export-lab-stop-run:hover:not(:disabled) {
+#export-lab-stop-run:hover:not(:disabled),
+.app-btn--danger:hover:not(:disabled) {
   background: rgba(236, 95, 63, 0.12);
   border-color: rgba(236, 95, 63, 0.75);
   color: #ffd5ca;

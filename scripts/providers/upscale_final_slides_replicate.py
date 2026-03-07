@@ -73,6 +73,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND,
         help="Estimated USD per second for Replicate nightmareai/real-esrgan prediction time.",
     )
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume: skip slides already upscaled in a previous run.")
     return parser.parse_args()
 
 
@@ -287,14 +288,32 @@ def main() -> int:
         raise RuntimeError("--concurrency must be >= 1.")
 
     slide_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")
-    clear_pngs(output_dir)
+
+    # Resume support: load existing manifest to skip completed slides
+    existing_results: dict[str, dict] = {}
+    manifest_path = Path(args.manifest_path).resolve() if args.manifest_path else None
+    if args.resume and manifest_path and manifest_path.exists():
+        try:
+            prev = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for item in prev.get("items", []):
+                if item.get("status") == "upscaled" and (output_dir / item["name"]).exists():
+                    existing_results[item["name"]] = item
+            if existing_results:
+                print(f"[Upscale] Resume: {len(existing_results)} slides already upscaled, skipping.", flush=True)
+        except Exception:
+            pass
+
+    if not args.resume:
+        clear_pngs(output_dir)
+
+    slides_to_process = [p for p in slide_paths if p.name not in existing_results]
+    results: list[dict] = list(existing_results.values())
 
     log_lock = threading.Lock()
-    results: list[dict] = []
     with ThreadPoolExecutor(max_workers=int(args.concurrency)) as executor:
         futures = {
             executor.submit(process_one, slide_path, output_dir, args, log_lock): slide_path
-            for slide_path in slide_paths
+            for slide_path in slides_to_process
         }
         for future in as_completed(futures):
             results.append(future.result())

@@ -114,6 +114,7 @@
               <option value="none">none</option>
             </select>
           </SettingsRow>
+          <SettingsRow label="SLIDE_EDIT_REVIEW_RETRIES" field-id="gemini_edit_review_retries"><input id="gemini_edit_review_retries" type="number" min="0" max="5" step="1" v-model="f.GEMINI_EDIT_REVIEW_RETRIES" :disabled="!f.RUN_STEP_EDIT" /></SettingsRow>
           <SettingsRow label="SLIDE_EDIT_MODEL" field-id="gemini_edit_model">
             <select id="gemini_edit_model" v-model="f.GEMINI_EDIT_MODEL" :disabled="!f.RUN_STEP_EDIT">
               <option value="gemini-3.1-flash-image-preview">gemini-3.1-flash-image-preview</option>
@@ -241,6 +242,7 @@
             </select>
           </SettingsRow>
           <SettingsRow label="GEMINI_TTS_VOICE" field-id="gemini_tts_voice"><input id="gemini_tts_voice" type="text" v-model="f.GEMINI_TTS_VOICE" :disabled="!f.RUN_STEP_TTS" /></SettingsRow>
+          <SettingsRow label="GEMINI_TTS_SPEAKING_RATE" field-id="gemini_tts_speaking_rate"><input id="gemini_tts_speaking_rate" type="number" min="0.25" max="4.0" step="0.05" v-model="f.GEMINI_TTS_SPEAKING_RATE" :disabled="!f.RUN_STEP_TTS" /></SettingsRow>
           <div class="settings-row settings-row-textarea">
             <label class="settings-key" for="gemini_tts_prompt">TTS_PROMPT</label>
             <div class="settings-value"><textarea id="gemini_tts_prompt" rows="8" v-model="f.GEMINI_TTS_PROMPT" :disabled="!f.RUN_STEP_TTS"></textarea></div>
@@ -282,9 +284,10 @@
 </template>
 
 <script setup>
-import { h, reactive, computed, watch } from "vue";
+import { reactive, computed, watch } from "vue";
 import { configStore as store, findTtsLanguageOptionByCode } from "../stores/configStore.js";
 import StepSection from "../components/StepSection.vue";
+import SettingsRow from "../components/SettingsRow.vue";
 import TtsLanguageSelector from "../components/TtsLanguageSelector.vue";
 import TermbaseEditor from "../components/TermbaseEditor.vue";
 import StyleEditor from "../components/StyleEditor.vue";
@@ -304,16 +307,6 @@ const expanded = reactive({
   videoExport: false,
   testApis: false,
 });
-
-const SettingsRow = {
-  props: { label: String, fieldId: String },
-  setup(props, { slots }) {
-    return () => h("div", { class: "settings-row" }, [
-      h("label", { class: "settings-key", for: props.fieldId, title: props.label }, props.label),
-      h("div", { class: "settings-value" }, slots.default?.()),
-    ]);
-  },
-};
 
 const googleTranscription = computed(() => f.TRANSCRIPTION_PROVIDER === "google_chirp_3");
 const geminiSlideTranslate = computed(() => f.FINAL_SLIDE_TRANSLATION_MODE === "gemini");

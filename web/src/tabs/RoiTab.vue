@@ -5,30 +5,15 @@
         <h2>ROI</h2>
       </div>
       <div class="settings-list roi-settings-list">
-        <div class="settings-row">
-          <label class="settings-key" for="roi_x0">ROI_X0</label>
-          <div class="settings-value"><input id="roi_x0" type="number" v-model="f.ROI_X0" /></div>
-        </div>
-        <div class="settings-row">
-          <label class="settings-key" for="roi_y0">ROI_Y0</label>
-          <div class="settings-value"><input id="roi_y0" type="number" v-model="f.ROI_Y0" /></div>
-        </div>
-        <div class="settings-row">
-          <label class="settings-key" for="roi_x1">ROI_X1</label>
-          <div class="settings-value"><input id="roi_x1" type="number" v-model="f.ROI_X1" /></div>
-        </div>
-        <div class="settings-row">
-          <label class="settings-key" for="roi_y1">ROI_Y1</label>
-          <div class="settings-value"><input id="roi_y1" type="number" v-model="f.ROI_Y1" /></div>
-        </div>
-        <div class="settings-row">
-          <label class="settings-key" for="overlay-time">Time (sec)</label>
-          <div class="settings-value"><input id="overlay-time" type="number" step="0.1" v-model.number="overlayTime" /></div>
-        </div>
+        <SettingsRow label="ROI_X0" field-id="roi_x0"><input id="roi_x0" type="number" v-model="f.ROI_X0" /></SettingsRow>
+        <SettingsRow label="ROI_Y0" field-id="roi_y0"><input id="roi_y0" type="number" v-model="f.ROI_Y0" /></SettingsRow>
+        <SettingsRow label="ROI_X1" field-id="roi_x1"><input id="roi_x1" type="number" v-model="f.ROI_X1" /></SettingsRow>
+        <SettingsRow label="ROI_Y1" field-id="roi_y1"><input id="roi_y1" type="number" v-model="f.ROI_Y1" /></SettingsRow>
+        <SettingsRow label="Time (sec)" field-id="overlay-time"><input id="overlay-time" type="number" step="0.1" v-model.number="overlayTime" /></SettingsRow>
       </div>
       <div class="roi-actions">
-        <button ref="saveRoiBtn" @click="onSaveRoi">Save ROI</button>
-        <button type="button" @click="$emit('pick-video')">Select Video</button>
+        <AppButton ref="saveRoiBtn" @click="onSaveRoi">Save ROI</AppButton>
+        <AppButton @click="$emit('pick-video')">Select Video</AppButton>
         <span class="muted" aria-live="polite">{{ config.configMeta }}</span>
       </div>
     </section>
@@ -37,17 +22,14 @@
       <div class="all-runs-head">
         <h2>ROI Overlay</h2>
         <div class="status-actions">
-          <button type="button" @click="roiTerminalOpen = true">Open Terminal</button>
+          <AppButton @click="roiTerminalOpen = true">Open Terminal</AppButton>
         </div>
       </div>
       <div class="row wrap">
-        <button ref="genOverlayBtn" :disabled="!hasVideo" @click="onRegenOverlay">Generate Overlay</button>
-        <button ref="refreshOverlayBtn" @click="onRefreshOverlay">Refresh Image</button>
+        <AppButton ref="genOverlayBtn" :disabled="!hasVideo" @click="onRegenOverlay">Generate Overlay</AppButton>
+        <AppButton ref="refreshOverlayBtn" @click="onRefreshOverlay">Refresh Image</AppButton>
       </div>
-      <div class="image-wrap">
-        <img v-if="overlayUrl" :src="overlayUrl" alt="ROI overlay preview" style="cursor: zoom-in" @click="$emit('open-image', overlayRawUrl, overlayName)" />
-        <img v-else alt="ROI overlay preview" />
-      </div>
+      <ImagePreview :src="overlayUrl" alt="ROI overlay preview" :zoom-src="overlayRawUrl" :zoom-caption="overlayName" />
     </section>
   </div>
 
@@ -58,7 +40,9 @@
 import { ref, computed, inject } from "vue";
 import { configStore as config, saveConfig } from "../stores/configStore.js";
 import { apiGet, apiPost } from "../composables/useApi.js";
-import { showButtonSuccess } from "../composables/useButtonSuccess.js";
+import AppButton from "../components/AppButton.vue";
+import SettingsRow from "../components/SettingsRow.vue";
+import ImagePreview from "../components/ImagePreview.vue";
 import LogTerminal from "../components/LogTerminal.vue";
 
 const f = config.form;
@@ -93,7 +77,7 @@ async function loadOverlay() {
 async function onSaveRoi() {
   await runTask(async () => {
     await saveConfig();
-    showButtonSuccess(saveRoiBtn.value, "Saved");
+    saveRoiBtn.value?.flashSuccess("Saved");
   });
 }
 
@@ -105,14 +89,14 @@ async function onRegenOverlay() {
       roiLogs.value = String(result.output).trim().split("\n");
     }
     await loadOverlay();
-    showButtonSuccess(genOverlayBtn.value, "Generated");
+    genOverlayBtn.value?.flashSuccess("Generated");
   });
 }
 
 async function onRefreshOverlay() {
   await runTask(async () => {
     await loadOverlay();
-    showButtonSuccess(refreshOverlayBtn.value, "Refreshed");
+    refreshOverlayBtn.value?.flashSuccess("Refreshed");
   });
 }
 

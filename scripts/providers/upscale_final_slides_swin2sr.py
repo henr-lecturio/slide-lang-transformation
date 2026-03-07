@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -38,6 +39,8 @@ def parse_args() -> argparse.Namespace:
         default=24,
         help="Extra context pixels around each tile core.",
     )
+    parser.add_argument("--out-manifest-json", default="", help="Output JSON manifest path for per-slide status.")
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume: skip slides already upscaled in a previous run.")
     return parser.parse_args()
 
 
@@ -144,18 +147,33 @@ def upscale_directory(
     scale: int,
     tile_size: int,
     tile_overlap: int,
+    existing_status: dict[str, str] | None = None,
+    manifest_items: list[dict[str, str]] | None = None,
 ) -> tuple[int, int]:
     slide_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and p.suffix.lower() == ".png")
     processed = 0
     fallback = 0
+    if existing_status is None:
+        existing_status = {}
+    if manifest_items is None:
+        manifest_items = []
 
     for slide_path in slide_paths:
         dst_path = output_dir / slide_path.name
         print(f"@@STEP DETAIL upscale {slide_path.name}")
+
+        # Resume: skip already upscaled slides
+        if slide_path.name in existing_status:
+            processed += 1
+            manifest_items.append({"name": slide_path.name, "status": "upscaled", "reason": "resume"})
+            print(f"[Upscale] Reused {slide_path.name} (resume)")
+            continue
+
         image_bgr = cv2.imread(str(slide_path), cv2.IMREAD_COLOR)
         if image_bgr is None or image_bgr.size == 0:
             shutil.copy2(slide_path, dst_path)
             fallback += 1
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": "read_failed"})
             print(f"[Upscale] Fallback {slide_path.name}: failed to read image.")
             continue
 
@@ -173,6 +191,7 @@ def upscale_directory(
         except Exception as exc:  # noqa: BLE001
             shutil.copy2(slide_path, dst_path)
             fallback += 1
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": str(exc)})
             print(f"[Upscale] Fallback {slide_path.name}: {exc}")
             continue
 
@@ -180,9 +199,11 @@ def upscale_directory(
         if not cv2.imwrite(str(dst_path), upscaled_bgr):
             shutil.copy2(slide_path, dst_path)
             fallback += 1
+            manifest_items.append({"name": slide_path.name, "status": "fallback", "reason": "write_failed"})
             print(f"[Upscale] Fallback {slide_path.name}: failed to write image.")
             continue
         processed += 1
+        manifest_items.append({"name": slide_path.name, "status": "upscaled"})
         print(f"[Upscale] Upscaled {slide_path.name}")
 
     return processed, fallback
@@ -205,7 +226,25 @@ def main() -> int:
     processor, model = load_model(str(args.model_id), device)
     scale = int(getattr(model.config, "upscale", 4) or 4)
 
-    clear_pngs(output_dir)
+    out_manifest_path = Path(args.out_manifest_json).resolve() if args.out_manifest_json else None
+
+    # Resume support: load existing manifest to skip completed slides
+    existing_status: dict[str, str] = {}
+    if args.resume and out_manifest_path and out_manifest_path.exists():
+        try:
+            prev = json.loads(out_manifest_path.read_text(encoding="utf-8"))
+            for item in prev.get("items", []):
+                if item.get("status") == "upscaled" and (output_dir / item["name"]).exists():
+                    existing_status[item["name"]] = "upscaled"
+            if existing_status:
+                print(f"[Upscale] Resume: {len(existing_status)} slides already upscaled, skipping.", flush=True)
+        except Exception:
+            pass
+
+    if not args.resume:
+        clear_pngs(output_dir)
+
+    manifest_items: list[dict[str, str]] = []
     processed, fallback = upscale_directory(
         input_dir,
         output_dir,
@@ -215,7 +254,14 @@ def main() -> int:
         scale,
         int(args.tile_size),
         int(args.tile_overlap),
+        existing_status=existing_status,
+        manifest_items=manifest_items,
     )
+
+    if out_manifest_path:
+        manifest = {"items": manifest_items, "upscaled_count": processed, "fallback_count": fallback}
+        out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        out_manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     print(f"[Upscale] Slides processed: {processed + fallback}")
     print(f"[Upscale] Upscaled: {processed}")

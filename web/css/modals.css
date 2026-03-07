@@ -51,9 +51,9 @@
 
 .image-modal-dialog img {
   max-height: calc(94vh - 110px);
-  max-width: 100%;
-  width: auto;
+  width: 100%;
   height: auto;
+  object-fit: contain;
   margin: 0 auto;
   transform-origin: 50% 50%;
   transition: transform 80ms ease-out;

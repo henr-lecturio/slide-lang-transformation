@@ -10,15 +10,13 @@
       @stop="stopJob"
     >
       <template #actions>
-        <button type="button" :disabled="isBusy" @click="openPicker">Select Image</button>
-        <button type="button" :disabled="isBusy" @click="openSettings">Test Settings</button>
-        <button type="button" :disabled="isBusy || !hasImage" @click="runAction('edit')">Test Slide Edit</button>
-        <button type="button" :disabled="isBusy || !hasImage" @click="runAction('translate')">Test Slide Translate</button>
-        <button type="button" :disabled="isBusy || !hasImage" @click="runAction('upscale')">Test Slide Upscale</button>
+        <AppButton :disabled="isBusy" @click="openPicker">Select Image</AppButton>
+        <AppButton :disabled="isBusy" @click="openSettings">Test Settings</AppButton>
+        <AppButton :disabled="isBusy || !hasImage" @click="runAction('edit')">Test Slide Edit</AppButton>
+        <AppButton :disabled="isBusy || !hasImage" @click="runAction('translate')">Test Slide Translate</AppButton>
+        <AppButton :disabled="isBusy || !hasImage" @click="runAction('upscale')">Test Slide Upscale</AppButton>
       </template>
     </LabToolbar>
-
-    <div id="lab-job-meta" class="muted lab-meta-line">{{ metaText }}</div>
 
     <div class="lab-preview-grid">
       <section class="lab-preview-panel">
@@ -26,13 +24,7 @@
           <div class="slide-compare-label">Original</div>
           <div class="muted lab-selection-meta">{{ selectionMeta }}</div>
         </div>
-        <div class="image-wrap lab-preview-wrap">
-          <img
-            :src="originalImageUrl"
-            alt="Selected lab input image"
-            @click="originalImageUrl && openImageModal(selectedImage?.image_url, selectedImage?.name || 'lab-input')"
-          />
-        </div>
+        <ImagePreview :src="originalImageUrl" alt="Selected lab input image" :zoom-src="selectedImage?.image_url" :zoom-caption="selectedImage?.name || 'lab-input'" wrap-class="lab-preview-wrap" />
       </section>
       <section class="lab-preview-panel">
         <div class="lab-preview-label-row">
@@ -51,13 +43,7 @@
             >OCR Debug</button>
           </div>
         </div>
-        <div class="image-wrap lab-preview-wrap">
-          <img
-            :src="resultImageUrl"
-            alt="Latest lab result image"
-            @click="resultImageUrl && openImageModal(resolvedResultUrl, resolvedResultName)"
-          />
-        </div>
+        <ImagePreview :src="resultImageUrl" alt="Latest lab result image" :zoom-src="resolvedResultUrl" :zoom-caption="resolvedResultName" wrap-class="lab-preview-wrap" />
       </section>
     </div>
 
@@ -92,9 +78,11 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import LabAccordion from "../components/LabAccordion.vue";
 import LabToolbar from "../components/LabToolbar.vue";
+import AppButton from "../components/AppButton.vue";
+import ImagePreview from "../components/ImagePreview.vue";
 import PickerModal from "../components/PickerModal.vue";
 import LogTerminal from "../components/LogTerminal.vue";
 import ImageLabSettings from "./ImageLabSettings.vue";
@@ -159,19 +147,6 @@ const resultImageUrl = computed(() => {
   return `${resolvedResultUrl.value}?v=${cacheKey.value}`;
 });
 
-const metaText = computed(() => {
-  const cur = currentData.value;
-  const parts = [];
-  if (cur?.message) parts.push(cur.message);
-  if (cur?.input_name) parts.push(`input=${cur.input_name}`);
-  if (cur?.result_name) parts.push(`result=${cur.result_name}`);
-  if (cur?.estimated_cost_usd) {
-    const n = Number(cur.estimated_cost_usd || 0);
-    if (n > 0) parts.push(`est_cost=$${n.toFixed(4)}`);
-  }
-  if (parts.length > 0) return parts.join(" | ");
-  return `Test settings: ${settingsRef.value?.buildSettingsSummary() || "..."}`;
-});
 
 function formatRunIdLabel(runId) {
   const raw = String(runId || "").trim();
@@ -180,12 +155,6 @@ function formatRunIdLabel(runId) {
   const monthNames = { "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec" };
   const [, year, month, day, hour, minute] = match;
   return `${day}-${monthNames[month] || month}-${year}, ${hour}:${minute}`;
-}
-
-function openImageModal(url, name) {
-  if (typeof window.__openImageModal === "function") {
-    window.__openImageModal(url, name);
-  }
 }
 
 function setStatus(data) {
@@ -218,8 +187,8 @@ async function loadStatus() {
 async function loadTtsLanguageOptions() {
   try {
     const data = await apiGet("/api/config");
-    if (Array.isArray(data.tts_language_options)) {
-      ttsLanguageOptions.value = data.tts_language_options;
+    if (Array.isArray(data.GEMINI_TTS_LANGUAGE_OPTIONS)) {
+      ttsLanguageOptions.value = data.GEMINI_TTS_LANGUAGE_OPTIONS;
     }
   } catch { /* ignore */ }
 }
@@ -243,9 +212,10 @@ function selectImage(item) {
 }
 
 function openSettings() {
-  loadTtsLanguageOptions();
   settingsOpen.value = true;
 }
+
+onMounted(loadTtsLanguageOptions);
 
 function onSettingsSave() {
   settingsOpen.value = false;

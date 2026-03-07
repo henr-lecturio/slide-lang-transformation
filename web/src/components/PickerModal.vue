@@ -1,9 +1,6 @@
 <template>
   <AppModal :open="open" base-class="video-picker-modal" dialog-class="video-picker-dialog" backdrop-class="video-picker-backdrop" :aria-label="title" @close="$emit('close')">
-    <div class="modal-head">
-      <h3>{{ title }}</h3>
-      <button class="modal-close" type="button" :aria-label="`Close ${title}`" @click="$emit('close')">&times;</button>
-    </div>
+    <ModalHeader :title="title" @close="$emit('close')" />
     <div class="video-picker-list">
       <div v-if="items.length === 0" class="muted">{{ emptyText }}</div>
       <button
@@ -23,6 +20,7 @@
 
 <script setup>
 import AppModal from "./AppModal.vue";
+import ModalHeader from "./ModalHeader.vue";
 
 defineProps({
   open: { type: Boolean, default: false },
