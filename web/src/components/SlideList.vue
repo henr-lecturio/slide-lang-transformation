@@ -63,33 +63,11 @@ frame_id_1: {{ item.frame_id_1 }}</div>
 </template>
 
 <script setup>
-import { h, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import { apiGet } from "../composables/useApi.js";
 import { resolveRenderedFinalImage, resolveCompareRenderedImages } from "../stores/runStore.js";
 import ImagePreview from "./ImagePreview.vue";
-
-const SlideDetails = {
-  props: { facts: Array },
-  setup(props) {
-    const open = ref(false);
-    return () => h("section", { class: ["output-info-panel", "slide-details-panel", { "is-open": open.value }] }, [
-      h("button", { type: "button", class: "output-info-toggle", "aria-expanded": open.value ? "true" : "false", onClick: () => { open.value = !open.value; } }, [
-        h("span", null, "Slide Details"),
-        h("span", { class: "step-section-chevron", "aria-hidden": "true" }),
-      ]),
-      h("div", { class: "output-info-body", hidden: !open.value },
-        h("div", { class: "output-info-grid" },
-          (props.facts || []).map(([label, value]) =>
-            h("div", { class: "output-info-item", key: label }, [
-              h("div", { class: "output-info-label" }, label),
-              h("div", { class: "output-info-value" }, value),
-            ])
-          )
-        )
-      ),
-    ]);
-  },
-};
+import SlideDetails from "./SlideDetails.vue";
 
 const props = defineProps({
   runId: { type: String, default: "" },

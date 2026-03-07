@@ -82,14 +82,11 @@ import PickerModal from "../components/PickerModal.vue";
 import LogTerminal from "../components/LogTerminal.vue";
 import ExportLabSettings from "./ExportLabSettings.vue";
 import { apiGet, apiPost } from "../composables/useApi.js";
-import { usePolling } from "../composables/usePolling.js";
-import { syncFavicon } from "../composables/useFavicon.js";
+import { useLabStatus } from "../composables/useLabStatus.js";
+import { formatRunIdLabel } from "../stores/configStore.js";
 
-const status = ref("idle");
-const current = ref(null);
 const selectedRun = ref(null);
 const runs = ref([]);
-const logs = ref([]);
 const pickerOpen = ref(false);
 const settingsOpen = ref(false);
 const terminalOpen = ref(false);
@@ -97,8 +94,14 @@ const videoEl = ref(null);
 const settingsRef = ref(null);
 const videoRefreshKey = ref("");
 
+const { status, currentData: current, logs, isBusy, setStatus, stop } = useLabStatus({
+  faviconLabel: "export-lab",
+  statusEndpoint: "/api/export-lab/status",
+  stopEndpoint: "/api/export-lab/stop",
+  fallbackPrefix: "Export Lab",
+});
+
 const hasRun = computed(() => Boolean(selectedRun.value?.run_id));
-const isBusy = computed(() => status.value === "running" || status.value === "stopping");
 const canExport = computed(() => hasRun.value && Boolean(selectedRun.value?.export_ready));
 
 const selectionMeta = computed(() => {
@@ -125,31 +128,10 @@ const downloadLinks = computed(() => {
   ].filter((item) => item.url);
 });
 
-function formatRunIdLabel(runId) {
-  const raw = String(runId || "").trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:-(\d{2}))?$/);
-  if (!match) return raw || "-";
-  const monthNames = { "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec" };
-  const [, year, month, day, hour, minute] = match;
-  return `${day}-${monthNames[month] || month}-${year}, ${hour}:${minute}`;
-}
-
 function appendCacheKey(url, cacheKey) {
   if (!url) return "";
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}v=${encodeURIComponent(cacheKey)}`;
-}
-
-function setStatus(data) {
-  current.value = data || null;
-  status.value = data?.status || "idle";
-  syncFavicon("export-lab", data?.status || "idle");
-
-  const logTail = (data?.log_tail || []).slice(-120);
-  if (logTail.length === 0 && data?.message) {
-    logTail.push(`[Export Lab] ${data.message}`);
-  }
-  logs.value = logTail;
 }
 
 watch(visibleCurrent, (cur) => {
@@ -172,13 +154,6 @@ watch(visibleCurrent, (cur) => {
     }
   }
 });
-
-async function loadStatus() {
-  try {
-    const data = await apiGet("/api/export-lab/status");
-    setStatus(data);
-  } catch { /* ignore polling errors */ }
-}
 
 async function openPicker() {
   try {
@@ -215,15 +190,6 @@ async function runExport() {
   }
 }
 
-async function stop() {
-  try {
-    const res = await apiPost("/api/export-lab/stop", {});
-    setStatus(res.current || res);
-  } catch (err) {
-    alert(err.message || String(err));
-  }
-}
-
 function runLabel(item) {
   const parts = [item.label || item.run_id, item.run_status || "-"];
   if (!item.export_ready && Array.isArray(item.missing_requirements) && item.missing_requirements.length > 0) {
@@ -232,5 +198,4 @@ function runLabel(item) {
   return parts.join(" | ");
 }
 
-usePolling(loadStatus, 2000);
 </script>

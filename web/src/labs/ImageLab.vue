@@ -87,14 +87,11 @@ import PickerModal from "../components/PickerModal.vue";
 import LogTerminal from "../components/LogTerminal.vue";
 import ImageLabSettings from "./ImageLabSettings.vue";
 import { apiGet, apiPost } from "../composables/useApi.js";
-import { usePolling } from "../composables/usePolling.js";
-import { syncFavicon } from "../composables/useFavicon.js";
+import { useLabStatus } from "../composables/useLabStatus.js";
+import { formatRunIdLabel } from "../stores/configStore.js";
 
-const status = ref("idle");
-const currentData = ref(null);
 const selectedImage = ref(null);
 const images = ref([]);
-const logs = ref([]);
 const pickerOpen = ref(false);
 const settingsOpen = ref(false);
 const terminalOpen = ref(false);
@@ -103,8 +100,23 @@ const resultViewMode = ref("result");
 const ttsLanguageOptions = ref([]);
 const cacheKey = ref(Date.now());
 
+const { status, currentData, logs, isBusy, setStatus } = useLabStatus({
+  faviconLabel: "lab",
+  statusEndpoint: "/api/lab/status",
+  onUpdate(data) {
+    cacheKey.value = Date.now();
+    if (!selectedImage.value && data?.original_url && data?.run_id) {
+      selectedImage.value = {
+        run_id: data.run_id,
+        event_id: data.event_id,
+        image_url: data.original_url,
+        name: data.input_name || "lab-input",
+      };
+    }
+  },
+});
+
 const hasImage = computed(() => Boolean(selectedImage.value?.image_url));
-const isBusy = computed(() => status.value === "running" || status.value === "stopping");
 
 const selectionMeta = computed(() => {
   const item = selectedImage.value;
@@ -147,42 +159,6 @@ const resultImageUrl = computed(() => {
   return `${resolvedResultUrl.value}?v=${cacheKey.value}`;
 });
 
-
-function formatRunIdLabel(runId) {
-  const raw = String(runId || "").trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:-(\d{2}))?$/);
-  if (!match) return raw || "-";
-  const monthNames = { "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec" };
-  const [, year, month, day, hour, minute] = match;
-  return `${day}-${monthNames[month] || month}-${year}, ${hour}:${minute}`;
-}
-
-function setStatus(data) {
-  currentData.value = data || null;
-  status.value = data?.status || "idle";
-  syncFavicon("lab", data?.status || "idle");
-  cacheKey.value = Date.now();
-
-  const logTail = (data?.log_tail || []).slice(-120);
-  logs.value = logTail;
-
-  // If no selected image but current has original, show it
-  if (!selectedImage.value && data?.original_url && data?.run_id) {
-    selectedImage.value = {
-      run_id: data.run_id,
-      event_id: data.event_id,
-      image_url: data.original_url,
-      name: data.input_name || "lab-input",
-    };
-  }
-}
-
-async function loadStatus() {
-  try {
-    const data = await apiGet("/api/lab/status");
-    setStatus(data);
-  } catch { /* ignore polling errors */ }
-}
 
 async function loadTtsLanguageOptions() {
   try {
@@ -269,5 +245,4 @@ function imageLabel(item) {
   return `event ${item.event_id} | ${Number(item.slide_start || 0).toFixed(2)}s - ${Number(item.slide_end || 0).toFixed(2)}s | ${item.name}`;
 }
 
-usePolling(loadStatus, 2000);
 </script>

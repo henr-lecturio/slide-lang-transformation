@@ -1,23 +1,28 @@
-# Slide Detection (SliTraNet Wrapper)
+# Lecture Slide Language Transformation Pipeline
 
 Dieses Projekt nutzt das originale SliTraNet unter `./slitranet` und ergänzt einen lokalen Workflow für:
 - Slide Detection mit festem ROI
 - Transkription und Mapping auf Slides
-- optionale Slide-Nachbearbeitung, Übersetzung und Upscaling
+- optionale Slide-Nachbearbeitung, Übersetzung (Gemini oder deterministisch via Google OCR + Glossary) und Upscaling
+- Konsistenzprüfung übersetzter Slides
 - Textübersetzung, TTS und Export eines narratierten Slide-Videos
-- lokale Web-UI für Runs, Konfiguration und Tests
+- automatisches Backup nach Google Drive
+- lokale Web-UI mit Vue 3 Frontend für Runs, Konfiguration, Labs und API-Tests
 
 ## Struktur
 
 - `config/pipeline.env`: zentrale Run-Konfiguration
 - `config/prompts/`: Prompt-Dateien für Gemini/Text/TTS
-- `config/language/`: Sprachkatalog und Termbase
+- `config/language/`: Sprachkatalog (`gemini_tts_languages.json`) und Termbase (`translation_termbase.csv`)
+- `config/fonts/`: Schriftarten für deterministische Slide-Übersetzung
+- `config/slide_translate_styles.json`: Styling-Konfiguration für Glossary-basierte Slide-Übersetzung
 - `videos/`: Input-Videos
 - `weights/`: SliTraNet-Gewichte (`*.pth`)
 - `scripts/`: Run-Skripte, Pipeline-Stufen, Provider und Tools
+- `scripts/pipeline/`: einzelne Pipeline-Schritte (Detection, Transcription, Mapping, Edit, Translate, Upscale, TTS, Export, Backup, Consistency)
 - `output/runs/<YYYY-MM-DD_HH-MM-SS>/`: Ergebnisse pro Run
 - `output/translation_memory/translation_memory.sqlite`: automatisch gepflegtes Translation Memory
-- `web/`: lokaler API-Server und Frontend
+- `web/`: lokaler API-Server (`server.py`) und Vue 3 Frontend (`web/src/`)
 
 ## Voraussetzungen
 
@@ -104,14 +109,24 @@ Wichtige Blöcke:
 - `SPEAKER_FILTER_MAX_LAPLACIAN_VAR`
 - `SPEAKER_FILTER_MAX_DURATION_SEC`
 
-### Slide Edit / Slide Translate
+### Slide Edit
 - `FINAL_SLIDE_POSTPROCESS_MODE` (`none`, `local`, `gemini`)
 - `GEMINI_EDIT_MODEL`
+- `GEMINI_EDIT_REVIEW_RETRIES`
 - `config/prompts/gemini_edit_prompt.txt`
-- `FINAL_SLIDE_TRANSLATION_MODE` (`none`, `gemini`)
+
+### Slide Translate
+- `FINAL_SLIDE_TRANSLATION_MODE` (`none`, `gemini`, `deterministic_glossary`)
 - `FINAL_SLIDE_TARGET_LANGUAGE`
-- `GEMINI_TRANSLATE_MODEL`
-- `config/prompts/gemini_translate_prompt.txt`
+- Gemini-Modus (3-Step: Extract → Translate → Render):
+  - `GEMINI_EXTRACT_MODEL`
+  - `GEMINI_TRANSLATE_MODEL`
+  - `config/prompts/gemini_slide_extract_prompt.txt`
+  - `config/prompts/gemini_slide_translate_prompt.txt`
+  - `config/prompts/gemini_slide_render_prompt.txt`
+- Deterministischer Glossary-Modus:
+  - `SLIDE_TRANSLATE_MAX_FONT_SIZE`
+  - `config/slide_translate_styles.json`
 
 ### Slide Upscale
 - `FINAL_SLIDE_UPSCALE_MODE` (`none`, `swin2sr`, `replicate_nightmare_realesrgan`)
@@ -124,33 +139,44 @@ Wichtige Blöcke:
 - `REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND`
 - `REPLICATE_UPSCALE_CONCURRENCY`
 
-### Transcript Translate / TTS / Video Export
-- Step-Toggles:
-  - `RUN_STEP_TEXT_TRANSLATE`
-  - `RUN_STEP_TTS`
-  - `RUN_STEP_VIDEO_EXPORT`
-- Transcript Translate:
-  - `GCLOUD_TRANSLATE_PROJECTID`
-  - `GOOGLE_TRANSLATE_LOCATION`
-  - `GOOGLE_TRANSLATE_MODEL`
-  - `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`
-- TTS:
-  - `GEMINI_TTS_MODEL`
-  - `GEMINI_TTS_VOICE`
-  - `GCLOUD_TTS_PROJECTID`
-  - `GOOGLE_TTS_LANGUAGE_CODE`
-  - `config/prompts/gemini_tts_prompt.txt`
-- Video Export:
-  - `VIDEO_EXPORT_MIN_SLIDE_SEC`
-  - `VIDEO_EXPORT_TAIL_PAD_SEC`
-  - `VIDEO_EXPORT_WIDTH`
-  - `VIDEO_EXPORT_HEIGHT`
-  - `VIDEO_EXPORT_FPS`
-  - `VIDEO_EXPORT_BG_COLOR`
+### Step-Toggles
+- `RUN_STEP_TEXT_TRANSLATE`
+- `RUN_STEP_EDIT`
+- `RUN_STEP_TRANSLATE`
+- `RUN_STEP_UPSCALE`
+- `RUN_STEP_TTS`
+- `RUN_STEP_VIDEO_EXPORT`
+- `RUN_STEP_BACKUP`
+
+### Transcript Translate
+- `TRANSCRIPT_TRANSLATE_MODEL` (`gemini-2.5-pro`, `general/translation-llm`)
+- `GCLOUD_TRANSLATE_PROJECTID`
+- `GOOGLE_TRANSLATE_LOCATION`
+- `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`
+- `config/prompts/gemini_text_translate_prompt.txt`
+
+### TTS
+- `GEMINI_TTS_MODEL`
+- `GEMINI_TTS_VOICE`
+- `GEMINI_TTS_SPEAKING_RATE`
+- `GCLOUD_TTS_PROJECTID`
+- `GOOGLE_TTS_LANGUAGE_CODE`
+- `config/prompts/gemini_tts_prompt.txt`
+
+### Video Export
+- `VIDEO_EXPORT_MIN_SLIDE_SEC`
+- `VIDEO_EXPORT_TAIL_PAD_SEC`
+- `VIDEO_EXPORT_INTRO_WHITE_SEC`, `VIDEO_EXPORT_INTRO_FADE_SEC`, `VIDEO_EXPORT_INTRO_COLOR`
+- `VIDEO_EXPORT_THUMBNAIL_DURATION_SEC`, `VIDEO_EXPORT_THUMBNAIL_FADE_SEC`, `VIDEO_EXPORT_THUMBNAIL_TEXT_LEADIN_SEC`
+- `VIDEO_EXPORT_OUTRO_HOLD_SEC`, `VIDEO_EXPORT_OUTRO_FADE_SEC`, `VIDEO_EXPORT_OUTRO_FADE_COLOR`, `VIDEO_EXPORT_OUTRO_BLACK_SEC`
+- `VIDEO_EXPORT_WIDTH`, `VIDEO_EXPORT_HEIGHT`, `VIDEO_EXPORT_FPS`, `VIDEO_EXPORT_BG_COLOR`
+
+### Backup (Google Drive)
+- `GDRIVE_FOLDER_ID`
 
 Hinweis:
 - Slide Detection, Transcription und Transcript Mapping laufen immer.
-- Die späteren Postprocess-Schritte können für Testläufe deaktiviert werden.
+- Die späteren Postprocess-Schritte können über Step-Toggles für Testläufe deaktiviert werden.
 
 ## Provider / Secrets
 
@@ -236,6 +262,17 @@ gcloud auth application-default set-quota-project <PROJECT_ID>
 - `GOOGLE_TRANSLATE_MODEL`
 - optional `GOOGLE_TRANSLATE_SOURCE_LANGUAGE_CODE`
 
+### Google Drive Backup
+
+Wenn `RUN_STEP_BACKUP=1` genutzt wird, brauchst du:
+
+1. eine Google Drive OAuth-Authentifizierung über die Web-UI (Settings → Backup → Authenticate)
+2. eine `GDRIVE_FOLDER_ID` in der Konfiguration
+3. aktivierte APIs im Google-Cloud-Projekt:
+- `drive.googleapis.com`
+
+Die OAuth-Credentials werden über `web/gdrive_auth.py` verwaltet.
+
 ## Translation Memory und Termbase
 
 Das Projekt nutzt zwei getrennte Konzepte:
@@ -284,22 +321,47 @@ Ein Run erzeugt einen neuen Ordner:
 - `output/runs/<timestamp>/slitranet/video_export/timeline.{json,csv}`
 - `output/runs/<timestamp>/slitranet/video_export/final_<sprache>.mp4`
 - `output/runs/<timestamp>/slitranet/video_export/final_<sprache>.srt`
+- `output/runs/<timestamp>/slitranet/consistency_report.json`
 
 `output/latest` zeigt auf den neuesten Run.
+
+Wenn `RUN_STEP_BACKUP=1`, wird der gesamte Run-Ordner automatisch nach Google Drive hochgeladen.
 
 Wenn ein später Step fehlschlägt, zeigt die Home-Ansicht trotzdem den bis dahin verfügbaren Stand des neuesten Runs.
 
 ## Web UI
 
-Start:
+Das Frontend ist eine Vue 3 SPA (Vite) und wird vom Python-Server bedient.
+
+### Produktion
 
 ```bash
 source .venv/bin/activate
+cd web && npm run build && cd ..
 .venv/bin/python web/server.py
 ```
 
 Dann öffnen:
 - `http://127.0.0.1:8000`
+
+### Entwicklung (HMR)
+
+```bash
+source .venv/bin/activate
+.venv/bin/python web/server.py &
+cd web && npm run dev
+```
+
+Dann öffnen:
+- `http://localhost:5173`
+
+### Features
+
+- **Home Tab**: Run-Steuerung, Pipeline-Fortschritt, Slide-Vorschau (Single/Compare/ROI-Toggle)
+- **Settings Tab**: alle Pipeline-Parameter, Step-Toggles, Google Cloud + Drive Auth, API-Health-Checks
+- **Image Lab**: einzelne Slides testen (Edit, Translate, Upscale) mit Live-Vorschau und OCR-Debug-Overlay
+- **Export Lab**: Video-Export testen mit Video-Player und Download-Links
+- **Consistency Lab**: Konsistenzprüfung übersetzter Slides mit Glossar-Extraktion
 
 Weitere Details:
 - `web/README.md`

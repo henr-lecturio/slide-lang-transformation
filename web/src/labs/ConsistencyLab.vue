@@ -55,36 +55,31 @@ import LabToolbar from "../components/LabToolbar.vue";
 import PickerModal from "../components/PickerModal.vue";
 import LogTerminal from "../components/LogTerminal.vue";
 import { apiGet, apiPost } from "../composables/useApi.js";
-import { usePolling } from "../composables/usePolling.js";
-import { syncFavicon } from "../composables/useFavicon.js";
+import { useLabStatus } from "../composables/useLabStatus.js";
+import { formatRunIdLabel } from "../stores/configStore.js";
 
-const status = ref("idle");
-const current = ref(null);
 const selectedRun = ref(null);
 const runs = ref([]);
-const logs = ref([]);
 const reportText = ref("");
 const pickerOpen = ref(false);
 const terminalOpen = ref(false);
 const reportRefreshKey = ref("");
 
+const { status, currentData: current, logs, isBusy, setStatus, stop } = useLabStatus({
+  faviconLabel: "consistency-lab",
+  statusEndpoint: "/api/consistency-lab/status",
+  stopEndpoint: "/api/consistency-lab/stop",
+  fallbackPrefix: "Consistency Lab",
+  onUpdate: () => renderReport(),
+});
+
 const hasRun = computed(() => Boolean(selectedRun.value?.run_id));
-const isBusy = computed(() => status.value === "running" || status.value === "stopping");
 const canReview = computed(() => hasRun.value && Boolean(selectedRun.value?.consistency_ready));
 
 const selectionMeta = computed(() => {
   if (!selectedRun.value) return "";
   return `| selected: ${formatRunIdLabel(selectedRun.value.run_id)}`;
 });
-
-function formatRunIdLabel(runId) {
-  const raw = String(runId || "").trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})(?:-(\d{2}))?$/);
-  if (!match) return raw || "-";
-  const monthNames = { "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec" };
-  const [, year, month, day, hour, minute] = match;
-  return `${day}-${monthNames[month] || month}-${year}, ${hour}:${minute}`;
-}
 
 function formatReport(report) {
   if (!report) return "";
@@ -123,20 +118,6 @@ function formatReport(report) {
   return lines.length > 0 ? lines.join("\n") : JSON.stringify(report, null, 2);
 }
 
-function setStatus(data) {
-  current.value = data || null;
-  status.value = data?.status || "idle";
-  syncFavicon("consistency-lab", data?.status || "idle");
-
-  const logTail = (data?.log_tail || []).slice(-120);
-  if (logTail.length === 0 && data?.message) {
-    logTail.push(`[Consistency Lab] ${data.message}`);
-  }
-  logs.value = logTail;
-
-  renderReport();
-}
-
 function renderReport() {
   const sel = selectedRun.value;
   const cur = current.value;
@@ -165,13 +146,6 @@ function renderReport() {
     reportRefreshKey.value = "";
     reportText.value = "";
   }
-}
-
-async function loadStatus() {
-  try {
-    const data = await apiGet("/api/consistency-lab/status");
-    setStatus(data);
-  } catch { /* ignore polling errors */ }
 }
 
 async function openPicker() {
@@ -208,15 +182,6 @@ async function runReview() {
   }
 }
 
-async function stop() {
-  try {
-    const res = await apiPost("/api/consistency-lab/stop", {});
-    setStatus(res.current || res);
-  } catch (err) {
-    alert(err.message || String(err));
-  }
-}
-
 function runLabel(item) {
   const parts = [item.label || item.run_id, item.run_status || "-"];
   if (!item.consistency_ready && Array.isArray(item.missing_requirements) && item.missing_requirements.length > 0) {
@@ -225,5 +190,4 @@ function runLabel(item) {
   return parts.join(" | ");
 }
 
-usePolling(loadStatus, 2000);
 </script>

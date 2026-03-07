@@ -39,6 +39,11 @@
 <script setup>
 import { ref, watch, onMounted } from "vue";
 import CollapsiblePanel from "./CollapsiblePanel.vue";
+import {
+  parseStylesJson, displayColor, displayPadding, inferWeight,
+  deletePaddingKeys, normalizePadding, parseIntOrUndef, parseFloatOrUndef,
+  styleToVisibleValues,
+} from "../utils/styleEditorUtils.js";
 
 const props = defineProps({
   modelValue: { type: String, default: "" },
@@ -51,106 +56,27 @@ const editorOpen = ref(false);
 const visibleRows = ref([]);
 let modelSnapshot = { version: 1, defaults: {}, roles: {}, slots: {} };
 
-function parseStylesJson(jsonText) {
-  const text = String(jsonText || "").trim();
-  if (!text) return { version: 1, defaults: {}, roles: {}, slots: {} };
-  try {
-    const p = JSON.parse(text);
-    return {
-      version: Number(p?.version) > 0 ? Number(p.version) : 1,
-      defaults: p && typeof p.defaults === "object" && p.defaults ? structuredClone(p.defaults) : {},
-      roles: p && typeof p.roles === "object" && p.roles ? structuredClone(p.roles) : {},
-      slots: p && typeof p.slots === "object" && p.slots ? structuredClone(p.slots) : {},
-    };
-  } catch {
-    return { version: 1, defaults: {}, roles: {}, slots: {} };
-  }
-}
-
-function displayColor(style = {}) {
-  const mode = String(style.text_color_mode ?? "").trim();
-  const color = String(style.text_color ?? "").trim();
-  if (mode === "fixed" && color) return color;
-  if (color && color.toLowerCase() !== "auto") return color;
-  return "auto";
-}
-
-function displayPadding(style = {}) {
-  const padding = String(style.padding ?? "").trim();
-  if (padding) return padding;
-  const top = style.box_padding_top_ratio ?? style.box_padding_y_ratio;
-  const right = style.box_padding_right_ratio ?? style.box_padding_x_ratio;
-  const bottom = style.box_padding_bottom_ratio ?? style.box_padding_y_ratio;
-  const left = style.box_padding_left_ratio ?? style.box_padding_x_ratio;
-  const values = [top, right, bottom, left].map((v) => (v === undefined || v === null || v === "" ? "" : String(v).trim()));
-  if (values.every((v) => v !== "")) return values.join(" ");
-  return "";
-}
-
-function inferWeight(style = {}) {
-  const explicit = String(style.font_weight ?? "").trim().toLowerCase();
-  if (explicit === "medium") return "Medium";
-  if (explicit === "bold") return "Bold";
-  if (explicit === "regular") return "Regular";
-  const fontPath = String(style.font_path ?? "").toLowerCase();
-  if (fontPath.includes("bold")) return "Bold";
-  if (fontPath.includes("medium")) return "Medium";
-  return "Regular";
-}
-
 function buildVisibleRows(model) {
   const entries = [
     { scopeType: "defaults", scopeKey: "defaults", displayKey: "defaults", style: model.defaults || {} },
     ...Object.entries(model.roles || {}).map(([key, val]) => ({ scopeType: "role", scopeKey: key, displayKey: key, style: val || {} })),
     ...Object.entries(model.slots || {}).map(([key, val]) => ({ scopeType: "slot", scopeKey: key, displayKey: key, style: val || {} })),
   ];
-  return entries.map((entry) => ({
-    scopeType: entry.scopeType,
-    scopeKey: entry.scopeKey,
-    displayKey: entry.displayKey,
-    font_weight: inferWeight(entry.style),
-    font_size: entry.style.font_size === undefined || entry.style.font_size === null ? "" : String(entry.style.font_size),
-    min_font_size: entry.style.min_font_size === undefined || entry.style.min_font_size === null ? "" : String(entry.style.min_font_size),
-    line_spacing_ratio: entry.style.line_spacing_ratio === undefined || entry.style.line_spacing_ratio === null ? "" : String(entry.style.line_spacing_ratio),
-    text_color: displayColor(entry.style),
-    padding: displayPadding(entry.style),
-    _initialWeight: inferWeight(entry.style),
-    _initialFontSize: entry.style.font_size === undefined || entry.style.font_size === null ? "" : String(entry.style.font_size),
-    _initialMinFontSize: entry.style.min_font_size === undefined || entry.style.min_font_size === null ? "" : String(entry.style.min_font_size),
-    _initialLineSpacing: entry.style.line_spacing_ratio === undefined || entry.style.line_spacing_ratio === null ? "" : String(entry.style.line_spacing_ratio),
-    _initialColor: displayColor(entry.style),
-    _initialPadding: displayPadding(entry.style),
-  }));
-}
-
-function parseIntOrUndef(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return undefined;
-  const num = Number(text);
-  return Number.isFinite(num) ? Math.round(num) : undefined;
-}
-
-function parseFloatOrUndef(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return undefined;
-  const num = Number(text);
-  return Number.isFinite(num) ? num : undefined;
-}
-
-function normalizePadding(value) {
-  const text = String(value ?? "").trim().replace(/,/g, " ");
-  if (!text) return "";
-  return text.split(/\s+/).filter(Boolean).join(" ");
-}
-
-function deletePaddingKeys(style) {
-  delete style.padding;
-  delete style.box_padding_x_ratio;
-  delete style.box_padding_y_ratio;
-  delete style.box_padding_top_ratio;
-  delete style.box_padding_right_ratio;
-  delete style.box_padding_bottom_ratio;
-  delete style.box_padding_left_ratio;
+  return entries.map((entry) => {
+    const vis = styleToVisibleValues(entry.style);
+    return {
+      scopeType: entry.scopeType,
+      scopeKey: entry.scopeKey,
+      displayKey: entry.displayKey,
+      ...vis,
+      _initialWeight: vis.font_weight,
+      _initialFontSize: vis.font_size,
+      _initialMinFontSize: vis.min_font_size,
+      _initialLineSpacing: vis.line_spacing_ratio,
+      _initialColor: vis.text_color,
+      _initialPadding: vis.padding,
+    };
+  });
 }
 
 function syncJson() {

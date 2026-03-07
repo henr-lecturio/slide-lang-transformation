@@ -251,63 +251,17 @@ function persist() {
 
 const form = reactive(normalize(readFromStorage() || defaultsFromMainUi()));
 
-// Style editor helpers
-function parseStylesJson(jsonText) {
-  const text = String(jsonText || "").trim();
-  if (!text) return { version: 1, defaults: {}, roles: {}, slots: {} };
-  try {
-    const p = JSON.parse(text);
-    return {
-      version: Number(p?.version) > 0 ? Number(p.version) : 1,
-      defaults: p?.defaults && typeof p.defaults === "object" ? structuredClone(p.defaults) : {},
-      roles: p?.roles && typeof p.roles === "object" ? structuredClone(p.roles) : {},
-      slots: p?.slots && typeof p.slots === "object" ? structuredClone(p.slots) : {},
-    };
-  } catch { return { version: 1, defaults: {}, roles: {}, slots: {} }; }
-}
+// Style editor helpers (shared utils)
+import {
+  parseStylesJson, deletePaddingKeys, normalizePadding,
+  styleToVisibleValues,
+} from "../utils/styleEditorUtils.js";
 
 function buildStyleRows(model) {
   const rows = [{ scope_type: "defaults", scope_key: "defaults", display_key: "defaults", style: model.defaults || {} }];
   for (const [k, v] of Object.entries(model.roles || {})) rows.push({ scope_type: "role", scope_key: k, display_key: k, style: v || {} });
   for (const [k, v] of Object.entries(model.slots || {})) rows.push({ scope_type: "slot", scope_key: k, display_key: k, style: v || {} });
   return rows;
-}
-
-function styleToVisibleValues(style = {}) {
-  let weight = "Regular";
-  const ew = String(style.font_weight ?? "").trim().toLowerCase();
-  if (ew === "medium") weight = "Medium";
-  else if (ew === "bold") weight = "Bold";
-  else if (ew === "regular") weight = "Regular";
-  else {
-    const fp = String(style.font_path ?? "").toLowerCase();
-    if (fp.includes("bold")) weight = "Bold";
-    else if (fp.includes("medium")) weight = "Medium";
-  }
-  const colorMode = String(style.text_color_mode ?? "").trim();
-  const color = String(style.text_color ?? "").trim();
-  let displayColor = "auto";
-  if (colorMode === "fixed" && color) displayColor = color;
-  else if (color && color.toLowerCase() !== "auto") displayColor = color;
-
-  let padding = String(style.padding ?? "").trim();
-  if (!padding) {
-    const t = style.box_padding_top_ratio ?? style.box_padding_y_ratio;
-    const r = style.box_padding_right_ratio ?? style.box_padding_x_ratio;
-    const b = style.box_padding_bottom_ratio ?? style.box_padding_y_ratio;
-    const l = style.box_padding_left_ratio ?? style.box_padding_x_ratio;
-    const vals = [t, r, b, l].map((v) => v == null || v === "" ? "" : String(v).trim());
-    if (vals.every((v) => v !== "")) padding = vals.join(" ");
-  }
-
-  return {
-    font_weight: weight,
-    font_size: style.font_size == null ? "" : String(style.font_size),
-    min_font_size: style.min_font_size == null ? "" : String(style.min_font_size),
-    line_spacing_ratio: style.line_spacing_ratio == null ? "" : String(style.line_spacing_ratio),
-    text_color: displayColor,
-    padding,
-  };
 }
 
 function refreshStyleRows() {
@@ -332,9 +286,8 @@ function syncStylesJson() {
     const tc = String(row.text_color ?? "").trim();
     if (!tc || tc.toLowerCase() === "auto" || tc.toLowerCase() === "inherit") { delete style.text_color; if (String(style.text_color_mode ?? "").trim() === "fixed") delete style.text_color_mode; }
     else { style.text_color = tc; style.text_color_mode = "fixed"; }
-    const pad = String(row.padding ?? "").trim().replace(/,/g, " ");
-    delete style.padding; delete style.box_padding_x_ratio; delete style.box_padding_y_ratio;
-    delete style.box_padding_top_ratio; delete style.box_padding_right_ratio; delete style.box_padding_bottom_ratio; delete style.box_padding_left_ratio;
+    const pad = normalizePadding(row.padding);
+    deletePaddingKeys(style);
     if (pad) style.padding = pad;
   }
   form.slide_translate_styles_json = JSON.stringify(model, null, 2);
