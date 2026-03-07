@@ -272,16 +272,22 @@
   margin-top: 14px;
 }
 
+.video-preview-wrap,
+.image-wrap {
+  overflow: hidden;
+}
+
 .video-preview-wrap {
   min-height: 180px;
   width: 100%;
-  overflow: hidden;
 }
 
 #selected-video-thumb,
 #overlay-image,
 #lab-original-image,
-#lab-result-image {
+#lab-result-image,
+.image-wrap img,
+.lab-preview-wrap img {
   display: block;
   width: 100%;
   height: 100%;
@@ -363,7 +369,8 @@
   background: #000;
 }
 
-.export-lab-status-line {
+.export-lab-status-line,
+.status-line {
   display: flex;
   align-items: center;
   min-height: 28px;
@@ -435,7 +442,8 @@
   background: transparent;
 }
 
-.export-lab-status-chip {
+.export-lab-status-chip,
+.status-chip {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -446,20 +454,25 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
-.export-lab-status-line.is-running .export-lab-status-chip {
+.export-lab-status-line.is-running .export-lab-status-chip,
+.status-line.is-running .status-chip {
   border-color: rgba(255, 255, 255, 0.25);
 }
 
-.export-lab-status-line.is-done .export-lab-status-chip {
+.export-lab-status-line.is-done .export-lab-status-chip,
+.status-line.is-done .status-chip {
   border-color: rgba(24, 178, 107, 0.55);
 }
 
 .export-lab-status-line.is-error .export-lab-status-chip,
-.export-lab-status-line.is-stopped .export-lab-status-chip {
+.export-lab-status-line.is-stopped .export-lab-status-chip,
+.status-line.is-error .status-chip,
+.status-line.is-stopped .status-chip {
   border-color: rgba(236, 95, 63, 0.55);
 }
 
-.export-lab-status-label {
+.export-lab-status-label,
+.status-label {
   color: var(--text);
   font-size: 0.84rem;
   font-weight: 600;

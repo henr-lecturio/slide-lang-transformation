@@ -183,18 +183,9 @@ function formatRunIdLabel(runId) {
 }
 
 function openImageModal(url, name) {
-  // Delegate to vanilla openImageModal from modals.js (still in DOM)
-  const modal = document.getElementById("image-modal");
-  const img = document.getElementById("image-modal-img");
-  const caption = document.getElementById("image-modal-caption");
-  if (!modal || !img) return;
-  const sep = url.includes("?") ? "&" : "?";
-  img.src = `${url}${sep}v=${Date.now()}`;
-  img.style.transform = "";
-  img.style.transformOrigin = "";
-  if (caption) caption.textContent = name || "";
-  modal.classList.add("open");
-  modal.setAttribute("aria-hidden", "false");
+  if (typeof window.__openImageModal === "function") {
+    window.__openImageModal(url, name);
+  }
 }
 
 function setStatus(data) {

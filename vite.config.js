@@ -14,10 +14,14 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     rollupOptions: {
-      input: "web/src/main.js",
+      input: {
+        "main-app": "web/src/main-app.js",
+        "lab-app": "web/src/main.js",
+        "health-app": "web/src/health-main.js",
+      },
       output: {
-        entryFileNames: "lab-app.js",
-        assetFileNames: "lab-app[extname]",
+        entryFileNames: "[name].js",
+        assetFileNames: "[name][extname]",
       },
     },
   },

@@ -10,27 +10,17 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted } from "vue";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   ariaLabel: { type: String, default: "" },
-  variant: { type: String, default: "status" },
+  baseClass: { type: String, default: "status-modal" },
+  dialogClass: { type: String, default: "status-modal-dialog" },
+  backdropClass: { type: String, default: "status-modal-backdrop" },
 });
 
 const emit = defineEmits(["close"]);
-
-const baseClass = computed(() =>
-  props.variant === "picker" ? "video-picker-modal" : "status-modal"
-);
-
-const backdropClass = computed(() =>
-  props.variant === "picker" ? "video-picker-backdrop" : "status-modal-backdrop"
-);
-
-const dialogClass = computed(() =>
-  props.variant === "picker" ? "video-picker-dialog" : "status-modal-dialog"
-);
 
 function onKeydown(e) {
   if (e.key === "Escape" && props.open) {

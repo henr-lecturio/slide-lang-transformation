@@ -1,6 +1,5 @@
 <template>
-  <AppModal :open="open" variant="picker" aria-label="Image Lab test settings" @close="$emit('close')">
-    <div class="video-picker-dialog lab-settings-dialog">
+  <AppModal :open="open" base-class="video-picker-modal" dialog-class="video-picker-dialog lab-settings-dialog" backdrop-class="video-picker-backdrop" aria-label="Image Lab test settings" @close="$emit('close')">
       <div class="modal-head lab-settings-head">
         <h3>Image Lab Test Settings</h3>
         <div class="lab-settings-head-actions">
@@ -184,7 +183,6 @@
 
         </div>
       </div>
-    </div>
   </AppModal>
 </template>
 

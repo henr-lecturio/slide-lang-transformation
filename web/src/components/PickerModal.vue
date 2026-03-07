@@ -1,5 +1,5 @@
 <template>
-  <AppModal :open="open" variant="picker" :aria-label="title" @close="$emit('close')">
+  <AppModal :open="open" base-class="video-picker-modal" dialog-class="video-picker-dialog" backdrop-class="video-picker-backdrop" :aria-label="title" @close="$emit('close')">
     <div class="modal-head">
       <h3>{{ title }}</h3>
       <button class="modal-close" type="button" :aria-label="`Close ${title}`" @click="$emit('close')">&times;</button>

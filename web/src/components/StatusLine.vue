@@ -1,8 +1,8 @@
 <template>
-  <div :class="['export-lab-status-line', 'lab-toolbar-status', meta.lineClass]">
-    <div class="export-lab-status-chip">
+  <div :class="['status-line', 'lab-toolbar-status', meta.lineClass]">
+    <div class="status-chip">
       <span :class="meta.iconClass ? `step-icon ${meta.iconClass}` : 'step-icon'" aria-hidden="true"></span>
-      <span class="export-lab-status-label">{{ meta.label }}</span>
+      <span class="status-label">{{ meta.label }}</span>
     </div>
   </div>
 </template>
