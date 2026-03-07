@@ -68,7 +68,7 @@
                 </SettingsRow>
                 <SettingsRow label="LAB_SLIDE_TRANSLATE_PROMPT" field-id="lab_translate_prompt_v"><textarea id="lab_translate_prompt_v" rows="5" v-model="form.slide_translate_prompt" :disabled="!isGeminiTranslateMode"></textarea></SettingsRow>
                 <SettingsRow label="LAB_SLIDE_TRANSLATE_STYLING" field-id="lab_styles_json_v" class="termbase-settings-row">
-                    <CollapsiblePanel title="Text Styling" v-model:open="styleEditorOpen" :disabled="!isDeterministicMode" panel-class="termbase-editor-panel">
+                    <CollapsiblePanel title="Text Styling" name="labStyleEditor" v-model:open="styleEditorOpen" :disabled="!isDeterministicMode" panel-class="termbase-editor-panel">
                         <div class="termbase-table-wrap">
                           <table class="termbase-table slide-style-table">
                             <thead>
@@ -161,7 +161,18 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "save", "save-to-main"]);
 
-const sections = reactive({ slideEdit: false, slideTranslate: false, slideUpscale: false });
+const LAB_SECTIONS_KEY = "lab-settings-sections";
+function loadLabSections() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LAB_SECTIONS_KEY));
+    if (s && typeof s === "object") return { slideEdit: false, slideTranslate: false, slideUpscale: false, ...s };
+  } catch { /* ignore */ }
+  return { slideEdit: false, slideTranslate: false, slideUpscale: false };
+}
+const sections = reactive(loadLabSections());
+watch(() => ({ ...sections }), (val) => {
+  localStorage.setItem(LAB_SECTIONS_KEY, JSON.stringify(val));
+});
 const styleEditorOpen = ref(false);
 const styleRows = ref([]);
 

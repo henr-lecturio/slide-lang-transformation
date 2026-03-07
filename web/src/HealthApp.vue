@@ -162,6 +162,20 @@ const checks = [
       r.estimated_cost_usd != null && r.estimated_cost_usd > 0 ? `est_cost=${formatUsd(r.estimated_cost_usd)}` : "",
     ].filter(Boolean).join(" | "),
   },
+  {
+    ref: "gdrive",
+    label: "Google Drive API",
+    buttonLabel: "Test Google Drive API",
+    endpoint: "/api/gdrive/health",
+    payloadFn: () => ({
+      GDRIVE_FOLDER_ID: val("gdrive_folder_id"),
+    }),
+    formatMeta: (r) => [
+      `folder="${r.folder_name || "-"}"`,
+      `id=${r.folder_id || "-"}`,
+      `${r.latency_ms || 0} ms`,
+    ].join(" | "),
+  },
 ];
 
 function clearRefs(...keys) {
@@ -180,7 +194,7 @@ onMounted(() => {
   }
 
   // GCLOUD_PROJECT_ID clears all
-  listen("gcloud_project_id", ["gemini", "speechToText", "cloudTranslation", "cloudVision", "cloudTts", "replicate"]);
+  listen("gcloud_project_id", ["gemini", "speechToText", "cloudTranslation", "cloudVision", "cloudTts", "replicate", "gdrive"]);
 
   // Gemini-specific
   listen("gemini_edit_model", ["gemini"]);
@@ -211,9 +225,12 @@ onMounted(() => {
     listen(id, ["replicate"]);
   }
 
+  // Google Drive
+  listen("gdrive_folder_id", ["gdrive"]);
+
   // Custom events from vanilla settings.js
   document.addEventListener("health-clear-all", () => {
-    clearRefs("gemini", "speechToText", "cloudTranslation", "cloudVision", "cloudTts", "replicate");
+    clearRefs("gemini", "speechToText", "cloudTranslation", "cloudVision", "cloudTts", "replicate", "gdrive");
   });
 
   document.addEventListener("health-stt-sync", (e) => {

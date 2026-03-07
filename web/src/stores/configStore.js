@@ -14,6 +14,8 @@ export const configStore = reactive({
     RUN_STEP_TEXT_TRANSLATE: false,
     RUN_STEP_TTS: false,
     RUN_STEP_VIDEO_EXPORT: false,
+    RUN_STEP_BACKUP: false,
+    GDRIVE_FOLDER_ID: "",
     TRANSCRIPTION_PROVIDER: "whisper",
     WHISPER_MODEL: "medium",
     WHISPER_DEVICE: "cuda",
@@ -109,6 +111,8 @@ export function setConfigFromApi(cfg) {
   f.RUN_STEP_TEXT_TRANSLATE = Boolean(cfg.RUN_STEP_TEXT_TRANSLATE);
   f.RUN_STEP_TTS = Boolean(cfg.RUN_STEP_TTS);
   f.RUN_STEP_VIDEO_EXPORT = Boolean(cfg.RUN_STEP_VIDEO_EXPORT);
+  f.RUN_STEP_BACKUP = Boolean(cfg.RUN_STEP_BACKUP);
+  f.GDRIVE_FOLDER_ID = cfg.GDRIVE_FOLDER_ID || "";
   f.TRANSCRIPTION_PROVIDER = cfg.TRANSCRIPTION_PROVIDER || "whisper";
   f.WHISPER_MODEL = cfg.WHISPER_MODEL || "medium";
   f.WHISPER_DEVICE = cfg.WHISPER_DEVICE || "cuda";
@@ -219,6 +223,8 @@ function buildSavePayload() {
     RUN_STEP_TEXT_TRANSLATE: f.RUN_STEP_TEXT_TRANSLATE ? 1 : 0,
     RUN_STEP_TTS: f.RUN_STEP_TTS ? 1 : 0,
     RUN_STEP_VIDEO_EXPORT: f.RUN_STEP_VIDEO_EXPORT ? 1 : 0,
+    RUN_STEP_BACKUP: f.RUN_STEP_BACKUP ? 1 : 0,
+    GDRIVE_FOLDER_ID: String(f.GDRIVE_FOLDER_ID || "").trim(),
     TRANSCRIPTION_PROVIDER: f.TRANSCRIPTION_PROVIDER,
     WHISPER_MODEL: String(f.WHISPER_MODEL || "").trim(),
     WHISPER_DEVICE: String(f.WHISPER_DEVICE || "").trim(),

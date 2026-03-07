@@ -1,5 +1,5 @@
 <template>
-  <CollapsiblePanel title="Translation Termbase Table" v-model:open="editorOpen" panel-class="termbase-editor-panel">
+  <CollapsiblePanel title="Translation Termbase Table" name="termbaseEditor" v-model:open="editorOpen" panel-class="termbase-editor-panel">
       <div class="termbase-editor-toolbar">
         <button type="button" @click="addRow">Add Row</button>
       </div>

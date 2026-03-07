@@ -97,6 +97,7 @@ STEP_DEFS = [
     ("tts", "TTS"),
     ("tts-alignment", "TTS Alignment"),
     ("video-export", "Video Export"),
+    ("backup", "Backup"),
 ]
 STEP_LABELS = {step_id: label for step_id, label in STEP_DEFS}
 
@@ -3222,7 +3223,7 @@ def run_replicate_health_check(payload: dict) -> dict:
     if not version_id:
         raise ValueError("REPLICATE_NIGHTMARE_REALESRGAN_VERSION_ID must not be empty")
     try:
-        from scripts.upscale_final_slides_replicate import download_output_bytes, ensure_client, run_provider
+        from scripts.providers.upscale_final_slides_replicate import download_output_bytes, ensure_client, run_provider
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("Replicate upscale dependencies are not installed.") from exc
 
@@ -3271,6 +3272,34 @@ def run_replicate_health_check(payload: dict) -> dict:
         }
 
 
+def run_gdrive_health_check(payload: dict) -> dict:
+    folder_id = str(payload.get("GDRIVE_FOLDER_ID", "") or "").strip()
+    if not folder_id:
+        raise ValueError("GDRIVE_FOLDER_ID must not be empty")
+    try:
+        from web.gdrive_auth import get_valid_credentials
+        from googleapiclient.discovery import build
+
+        start = time.perf_counter()
+        creds = get_valid_credentials()
+        service = build("drive", "v3", credentials=creds)
+        folder = service.files().get(fileId=folder_id, fields="id,name,mimeType").execute()
+        latency_ms = int(round((time.perf_counter() - start) * 1000))
+        return {
+            "ok": True,
+            "folder_id": folder["id"],
+            "folder_name": folder.get("name", ""),
+            "latency_ms": latency_ms,
+            "message": "Google Drive API reachable.",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error_message": str(exc),
+        }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SceneDetectionUI/0.1"
 
@@ -3303,6 +3332,173 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/fonts/"):
                 return self._serve_font(path.removeprefix("/fonts/"))
 
+            # ── Google Cloud ADC OAuth ─────────────────────────────────
+            if path == "/api/gcloud/status":
+                try:
+                    import google.auth
+                    from google.auth.transport.requests import Request as AuthRequest
+                    creds, _ = google.auth.default()
+                    creds.refresh(AuthRequest())
+                    # Try to get email
+                    email = getattr(creds, "service_account_email", "")
+                    if not email:
+                        try:
+                            from googleapiclient.discovery import build as _build
+                            svc = _build("oauth2", "v2", credentials=creds)
+                            info = svc.userinfo().get().execute()
+                            email = info.get("email", "Authenticated")
+                        except Exception:
+                            email = "Authenticated"
+                    return self._send_json(200, {"configured": True, "email": email})
+                except Exception:
+                    return self._send_json(200, {"configured": False, "email": ""})
+
+            if path == "/api/gcloud/auth/start":
+                from web.gdrive_auth import get_oauth_client_credentials
+                from google_auth_oauthlib.flow import Flow
+                client_id, client_secret = get_oauth_client_credentials()
+                if not client_id or not client_secret:
+                    return self._send_json(400, {
+                        "error": "GCLOUD_OAUTH_CLIENT_ID and GCLOUD_OAUTH_CLIENT_SECRET must be set in .env.local"
+                    })
+                server_port = self.server.server_address[1]
+                redirect_uri = f"http://localhost:{server_port}/api/gcloud/auth/callback"
+                client_config = {
+                    "web": {
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": [redirect_uri],
+                    }
+                }
+                scopes = [
+                    "https://www.googleapis.com/auth/cloud-platform",
+                    "openid",
+                    "https://www.googleapis.com/auth/userinfo.email",
+                ]
+                flow = Flow.from_client_config(client_config, scopes=scopes, redirect_uri=redirect_uri)
+                auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+                Handler._gcloud_pending_flow = flow
+                Handler._gcloud_auth_origin = self.headers.get("Referer", "/")
+                self.send_response(302)
+                self.send_header("Location", auth_url)
+                self.end_headers()
+                return
+
+            if path.startswith("/api/gcloud/auth/callback"):
+                from pathlib import Path as _P
+                import json as _json
+                qs_cb = parse_qs(parsed.query)
+                error = qs_cb.get("error", [None])[0]
+                code = qs_cb.get("code", [None])[0]
+                origin = getattr(Handler, "_gcloud_auth_origin", "/")
+                Handler._gcloud_auth_origin = None
+                base = origin.split("?")[0].split("#")[0].rstrip("/")
+                if error or not code:
+                    redirect_to = f"{base}?gcloud_auth=failed" if base and base != "/" else "/?gcloud_auth=failed"
+                    self.send_response(302)
+                    self.send_header("Location", redirect_to)
+                    self.end_headers()
+                    return
+                flow = getattr(Handler, "_gcloud_pending_flow", None)
+                if flow is None:
+                    redirect_to = f"{base}?gcloud_auth=failed" if base and base != "/" else "/?gcloud_auth=failed"
+                    self.send_response(302)
+                    self.send_header("Location", redirect_to)
+                    self.end_headers()
+                    return
+                flow.fetch_token(code=code)
+                Handler._gcloud_pending_flow = None
+                creds = flow.credentials
+                from web.gdrive_auth import get_oauth_client_credentials
+                client_id, client_secret = get_oauth_client_credentials()
+                # Save as ADC
+                adc_path = _P.home() / ".config" / "gcloud" / "application_default_credentials.json"
+                env = parse_env(CONFIG_PATH) if CONFIG_PATH.exists() else {}
+                adc_data = {
+                    "account": "",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "quota_project_id": env.get("GCLOUD_PROJECT_ID", ""),
+                    "refresh_token": creds.refresh_token,
+                    "type": "authorized_user",
+                    "universe_domain": "googleapis.com",
+                }
+                adc_path.parent.mkdir(parents=True, exist_ok=True)
+                adc_path.write_text(_json.dumps(adc_data, indent=4), encoding="utf-8")
+                redirect_to = f"{base}?gcloud_auth=done" if base and base != "/" else "/?gcloud_auth=done"
+                self.send_response(302)
+                self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
+
+            # ── Google Drive OAuth ─────────────────────────────────────
+            if path == "/api/gdrive/status":
+                from web.gdrive_auth import get_auth_status
+                return self._send_json(200, get_auth_status())
+
+            if path == "/api/gdrive/auth/start":
+                from web.gdrive_auth import SCOPES, get_oauth_client_credentials
+                from google_auth_oauthlib.flow import Flow
+                client_id, client_secret = get_oauth_client_credentials()
+                if not client_id or not client_secret:
+                    return self._send_json(400, {
+                        "error": "GCLOUD_OAUTH_CLIENT_ID and GCLOUD_OAUTH_CLIENT_SECRET must be set in .env.local"
+                    })
+                server_port = self.server.server_address[1]
+                redirect_uri = f"http://localhost:{server_port}/api/gdrive/auth/callback"
+                client_config = {
+                    "web": {
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                        "redirect_uris": [redirect_uri],
+                    }
+                }
+                flow = Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=redirect_uri)
+                auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
+                # Store flow so the callback can reuse it (preserves PKCE code_verifier)
+                Handler._gdrive_pending_flow = flow
+                Handler._gdrive_auth_origin = self.headers.get("Referer", "/")
+                self.send_response(302)
+                self.send_header("Location", auth_url)
+                self.end_headers()
+                return
+
+            if path.startswith("/api/gdrive/auth/callback"):
+                from web.gdrive_auth import save_credentials, get_oauth_client_credentials
+                qs_cb = parse_qs(parsed.query)
+                error = qs_cb.get("error", [None])[0]
+                code = qs_cb.get("code", [None])[0]
+                if error or not code:
+                    origin = getattr(Handler, "_gdrive_auth_origin", "/")
+                    Handler._gdrive_auth_origin = None
+                    base = origin.split("?")[0].split("#")[0].rstrip("/")
+                    redirect_to = f"{base}?gdrive_auth=failed" if base and base != "/" else "/?gdrive_auth=failed"
+                    self.send_response(302)
+                    self.send_header("Location", redirect_to)
+                    self.end_headers()
+                    return
+                flow = getattr(Handler, "_gdrive_pending_flow", None)
+                if flow is None:
+                    return self._send_json(400, {"error": "No pending auth flow. Click Authenticate again."})
+                flow.fetch_token(code=code)
+                Handler._gdrive_pending_flow = None
+                creds = flow.credentials
+                client_id, client_secret = get_oauth_client_credentials()
+                save_credentials(client_id, client_secret, creds.refresh_token)
+                origin = getattr(Handler, "_gdrive_auth_origin", "/")
+                Handler._gdrive_auth_origin = None
+                # Build redirect with query param
+                base = origin.split("?")[0].split("#")[0].rstrip("/")
+                redirect_to = f"{base}?gdrive_auth=done" if base and base != "/" else "/?gdrive_auth=done"
+                self.send_response(302)
+                self.send_header("Location", redirect_to)
+                self.end_headers()
+                return
+
             if path == "/api/config":
                 env = parse_env(CONFIG_PATH)
                 slide_translate_style_config_path = resolve_slide_translate_style_config_path(
@@ -3332,6 +3528,8 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_TEXT_TRANSLATE": int(env.get("RUN_STEP_TEXT_TRANSLATE", "1")),
                     "RUN_STEP_TTS": int(env.get("RUN_STEP_TTS", "1")),
                     "RUN_STEP_VIDEO_EXPORT": int(env.get("RUN_STEP_VIDEO_EXPORT", "1")),
+                    "RUN_STEP_BACKUP": int(env.get("RUN_STEP_BACKUP", "0")),
+                    "GDRIVE_FOLDER_ID": env.get("GDRIVE_FOLDER_ID", ""),
                     "FINAL_SOURCE_MODE_AUTO": env.get("FINAL_SOURCE_MODE_AUTO", "auto"),
                     "FULLSLIDE_SAMPLE_FRAMES": int(env.get("FULLSLIDE_SAMPLE_FRAMES", "3")),
                     "FULLSLIDE_BORDER_STRIP_PX": int(env.get("FULLSLIDE_BORDER_STRIP_PX", "24")),
@@ -3526,6 +3724,7 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
 
         try:
+
             if path.startswith("/api/runs/") and path.endswith("/final-slide-image-mode"):
                 rest = path[len("/api/runs/") :]
                 parts = rest.split("/")
@@ -3595,6 +3794,8 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_TEXT_TRANSLATE": int(data["RUN_STEP_TEXT_TRANSLATE"]),
                     "RUN_STEP_TTS": int(data["RUN_STEP_TTS"]),
                     "RUN_STEP_VIDEO_EXPORT": int(data["RUN_STEP_VIDEO_EXPORT"]),
+                    "RUN_STEP_BACKUP": int(data.get("RUN_STEP_BACKUP", 0)),
+                    "GDRIVE_FOLDER_ID": str(data.get("GDRIVE_FOLDER_ID", "")).strip(),
                     "FINAL_SOURCE_MODE_AUTO": str(data["FINAL_SOURCE_MODE_AUTO"]).strip(),
                     "FULLSLIDE_SAMPLE_FRAMES": int(data["FULLSLIDE_SAMPLE_FRAMES"]),
                     "FULLSLIDE_BORDER_STRIP_PX": int(data["FULLSLIDE_BORDER_STRIP_PX"]),
@@ -3690,6 +3891,7 @@ class Handler(BaseHTTPRequestHandler):
                     "RUN_STEP_TEXT_TRANSLATE",
                     "RUN_STEP_TTS",
                     "RUN_STEP_VIDEO_EXPORT",
+                    "RUN_STEP_BACKUP",
                 ):
                     if cfg[key] not in {0, 1}:
                         raise ValueError(f"{key} must be 0 or 1")
@@ -3959,6 +4161,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/replicate/health":
                 data = self._read_json_body()
                 return self._send_json(200, run_replicate_health_check(data))
+
+            if path == "/api/gdrive/health":
+                data = self._read_json_body()
+                return self._send_json(200, run_gdrive_health_check(data))
 
             if path == "/api/runs":
                 ok, msg = start_run()

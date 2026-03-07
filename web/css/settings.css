@@ -427,3 +427,70 @@
   padding: 6px 10px;
   font-size: 0.84rem;
 }
+
+/* Google Drive auth result banner */
+.gdrive-auth-result {
+  padding: 8px 16px;
+  margin-bottom: 12px;
+  border-radius: 4px;
+  font-size: 0.84rem;
+}
+.gdrive-auth-result.is-ok {
+  background: rgba(24, 178, 107, 0.15);
+  color: #9bf0c4;
+}
+.gdrive-auth-result.is-error {
+  background: rgba(236, 95, 63, 0.15);
+  color: #ffb9aa;
+}
+
+/* Google Drive status row */
+.gdrive-auth-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.gdrive-auth-label {
+  font-size: 0.84rem;
+}
+.gdrive-auth-label.is-ok {
+  color: #9bf0c4;
+}
+.gdrive-auth-label.is-warning {
+  color: #ffcb6b;
+}
+.gdrive-auth-label.is-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.auth-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--text-muted);
+  border-radius: 50%;
+  animation: auth-spin 0.6s linear infinite;
+}
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+.gdrive-auth-row .btn-sm {
+  padding: 4px 12px;
+  font-size: 0.82rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  color: #e0e0e0;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.gdrive-auth-row .btn-sm:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.gdrive-auth-row .btn-sm:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

@@ -1,5 +1,5 @@
 <template>
-  <LabAccordion :start-open="true">
+  <LabAccordion name="imageLab" :start-open="true">
     <template #title>Image Lab</template>
 
     <LabToolbar

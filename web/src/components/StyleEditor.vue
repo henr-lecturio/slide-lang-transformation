@@ -1,5 +1,5 @@
 <template>
-  <CollapsiblePanel title="Text Styling" v-model:open="editorOpen" :disabled="disabled" panel-class="termbase-editor-panel">
+  <CollapsiblePanel title="Text Styling" name="styleEditor" v-model:open="editorOpen" :disabled="disabled" panel-class="termbase-editor-panel">
       <div class="termbase-table-wrap">
         <table class="termbase-table slide-style-table">
           <thead>

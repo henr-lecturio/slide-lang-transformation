@@ -119,6 +119,8 @@ RUN_STEP_UPSCALE="${RUN_STEP_UPSCALE:-1}"
 RUN_STEP_TEXT_TRANSLATE="${RUN_STEP_TEXT_TRANSLATE:-1}"
 RUN_STEP_TTS="${RUN_STEP_TTS:-1}"
 RUN_STEP_VIDEO_EXPORT="${RUN_STEP_VIDEO_EXPORT:-1}"
+RUN_STEP_BACKUP="${RUN_STEP_BACKUP:-0}"
+GDRIVE_FOLDER_ID="${GDRIVE_FOLDER_ID:-}"
 GOOGLE_SPEECH_FALLBACK_TO_WHISPER="${GOOGLE_SPEECH_FALLBACK_TO_WHISPER:-1}"
 REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND="${REPLICATE_NIGHTMARE_REALESRGAN_PRICE_PER_SECOND:-0.000225}"
 VIDEO_EXPORT_MIN_SLIDE_SEC="${VIDEO_EXPORT_MIN_SLIDE_SEC:-1.2}"
@@ -155,6 +157,7 @@ RUN_STEP_UPSCALE="$(toggle_to_flag "$RUN_STEP_UPSCALE")"
 RUN_STEP_TEXT_TRANSLATE="$(toggle_to_flag "$RUN_STEP_TEXT_TRANSLATE")"
 RUN_STEP_TTS="$(toggle_to_flag "$RUN_STEP_TTS")"
 RUN_STEP_VIDEO_EXPORT="$(toggle_to_flag "$RUN_STEP_VIDEO_EXPORT")"
+RUN_STEP_BACKUP="$(toggle_to_flag "$RUN_STEP_BACKUP")"
 SLIDE_TRANSLATE_BUILD_GLOSSARY="$(toggle_to_flag "$SLIDE_TRANSLATE_BUILD_GLOSSARY")"
 SLIDE_TRANSLATE_APPLY_GLOSSARY="$(toggle_to_flag "$SLIDE_TRANSLATE_APPLY_GLOSSARY")"
 
@@ -1138,6 +1141,28 @@ else
   step_skip video-export "disabled"
 fi
 
+# ── Backup to Google Drive ──────────────────────────────────────
+if should_skip_step backup; then
+  step_skip backup "resumed"
+elif [ "$RUN_STEP_BACKUP" = "1" ]; then
+  if [ -z "${GDRIVE_FOLDER_ID:-}" ]; then
+    echo "ERROR: GDRIVE_FOLDER_ID is required when Backup is enabled." >&2
+    exit 1
+  fi
+  echo "[Backup] Uploading run output to Google Drive ..."
+  step_start backup
+  step_detail backup "uploading to folder $GDRIVE_FOLDER_ID"
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/pipeline/backup_gdrive.py" \
+    --run-dir "$RUN_DIR" \
+    --folder-id "$GDRIVE_FOLDER_ID" \
+    --subfolder-name "$RUN_ID"
+  step_done backup
+  echo "[Backup] Upload finished."
+else
+  echo "[Step] backup: skipped"
+  step_skip backup "disabled"
+fi
+
 refresh_latest_link
 
 echo "Done."
@@ -1157,6 +1182,8 @@ echo "Run step upscale: $RUN_STEP_UPSCALE"
 echo "Run step text translate: $RUN_STEP_TEXT_TRANSLATE"
 echo "Run step tts: $RUN_STEP_TTS"
 echo "Run step video export: $RUN_STEP_VIDEO_EXPORT"
+echo "Run step backup: $RUN_STEP_BACKUP"
+echo "Google Drive folder ID: ${GDRIVE_FOLDER_ID:-}"
 echo "Final slide translated images: $FINAL_SLIDE_TRANSLATED_DIR"
 echo "Final slide translation mode: $FINAL_SLIDE_TRANSLATION_MODE"
 echo "Slide translate artifacts: $SLIDE_TRANSLATE_DIR"

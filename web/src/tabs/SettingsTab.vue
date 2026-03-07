@@ -1,9 +1,24 @@
 <template>
   <section class="card">
-    <!-- Global Language Block -->
-    <section class="settings-global-block" aria-label="Language settings">
-      <div class="settings-global-head">Language</div>
+    <div v-if="authResultMsg" :class="['gdrive-auth-result', authResultOk ? 'is-ok' : 'is-error']">
+      {{ authResultMsg }}
+    </div>
+
+    <!-- Global Main Block -->
+    <section class="settings-global-block" aria-label="Main settings">
+      <div class="settings-global-head">Main</div>
       <div class="settings-list settings-global-list">
+        <div class="settings-row">
+          <label class="settings-key">Google Cloud Auth</label>
+          <div class="settings-value gdrive-auth-row">
+            <span v-if="gcloudLoading" class="gdrive-auth-label is-loading"><span class="auth-spinner"></span> Checking...</span>
+            <span v-else-if="gcloudStatus.configured" class="gdrive-auth-label is-ok">{{ gcloudStatus.email }}</span>
+            <span v-else class="gdrive-auth-label is-warning">Not configured</span>
+            <a href="/api/gcloud/auth/start" class="btn-sm">
+              {{ gcloudStatus.configured ? 'Re-authenticate' : 'Authenticate' }}
+            </a>
+          </div>
+        </div>
         <div class="settings-row">
           <label class="settings-key" for="google_speech_language_codes">GOOGLE_SPEECH_LANGUAGE_CODES</label>
           <div class="settings-value"><input id="google_speech_language_codes" type="text" v-model="f.GOOGLE_SPEECH_LANGUAGE_CODES" /></div>
@@ -272,7 +287,25 @@
         </div>
       </StepSection>
 
-      <!-- 11. Test APIs (forced) -->
+      <!-- 11. Backup -->
+      <StepSection title="Backup" subtitle="Uploads all output files from the current run to a Google Drive folder." v-model:enabled="f.RUN_STEP_BACKUP" v-model:expanded="expanded.backup" @update:enabled="onFieldStateChange">
+        <div class="settings-list">
+          <div class="settings-row">
+            <label class="settings-key">Google Drive Auth</label>
+            <div class="settings-value gdrive-auth-row">
+              <span v-if="gdriveLoading" class="gdrive-auth-label is-loading"><span class="auth-spinner"></span> Checking...</span>
+              <span v-else-if="gdriveStatus.authenticated" class="gdrive-auth-label is-ok">{{ gdriveStatus.email }}</span>
+              <span v-else class="gdrive-auth-label is-warning">Not authenticated</span>
+              <a href="/api/gdrive/auth/start" class="btn-sm">
+                {{ gdriveStatus.authenticated ? 'Re-authenticate' : 'Authenticate' }}
+              </a>
+            </div>
+          </div>
+          <SettingsRow label="GDRIVE_FOLDER_ID" field-id="gdrive_folder_id"><input id="gdrive_folder_id" type="text" placeholder="Google Drive folder ID" v-model="f.GDRIVE_FOLDER_ID" :disabled="!f.RUN_STEP_BACKUP" /></SettingsRow>
+        </div>
+      </StepSection>
+
+      <!-- 12. Test APIs (forced) -->
       <StepSection title="Test APIs" subtitle="Test each pipeline API endpoint individually." :forced="true" v-model:expanded="expanded.testApis">
         <div class="settings-list">
           <SettingsRow label="GCLOUD_PROJECT_ID" field-id="gcloud_project_id"><input id="gcloud_project_id" type="text" placeholder="Google Cloud project id" v-model="f.GCLOUD_PROJECT_ID" /></SettingsRow>
@@ -284,7 +317,7 @@
 </template>
 
 <script setup>
-import { reactive, computed, watch } from "vue";
+import { reactive, ref, computed, watch, onMounted } from "vue";
 import { configStore as store, findTtsLanguageOptionByCode } from "../stores/configStore.js";
 import StepSection from "../components/StepSection.vue";
 import SettingsRow from "../components/SettingsRow.vue";
@@ -294,7 +327,8 @@ import StyleEditor from "../components/StyleEditor.vue";
 
 const f = store.form;
 
-const expanded = reactive({
+const EXPANDED_KEY = "settings-expanded";
+const defaultExpanded = {
   slideDetection: false,
   transcription: false,
   textTranslate: false,
@@ -305,7 +339,19 @@ const expanded = reactive({
   upscale: false,
   tts: false,
   videoExport: false,
+  backup: false,
   testApis: false,
+};
+function loadExpanded() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXPANDED_KEY));
+    if (saved && typeof saved === "object") return { ...defaultExpanded, ...saved };
+  } catch { /* ignore */ }
+  return { ...defaultExpanded };
+}
+const expanded = reactive(loadExpanded());
+watch(() => ({ ...expanded }), (val) => {
+  localStorage.setItem(EXPANDED_KEY, JSON.stringify(val));
 });
 
 const googleTranscription = computed(() => f.TRANSCRIPTION_PROVIDER === "google_chirp_3");
@@ -348,6 +394,52 @@ function onTtsLanguageChange(code) {
 function onFieldStateChange() {
   document.dispatchEvent(new CustomEvent("health-stt-sync", { detail: { googleTranscription: googleTranscription.value } }));
 }
+
+// Google Cloud ADC auth (for Gemini, TTS, Vision, etc.)
+const gcloudStatus = ref({ configured: false, email: "" });
+const gcloudLoading = ref(true);
+
+async function fetchGcloudStatus() {
+  gcloudLoading.value = true;
+  try {
+    const res = await fetch("/api/gcloud/status");
+    if (res.ok) gcloudStatus.value = await res.json();
+  } catch { /* ignore */ }
+  gcloudLoading.value = false;
+}
+
+// Google Drive auth (separate, for Backup step)
+const gdriveStatus = ref({ authenticated: false, email: "" });
+const gdriveLoading = ref(true);
+
+async function fetchGdriveStatus() {
+  gdriveLoading.value = true;
+  try {
+    const res = await fetch("/api/gdrive/status");
+    if (res.ok) gdriveStatus.value = await res.json();
+  } catch { /* ignore */ }
+  gdriveLoading.value = false;
+}
+
+const authResultMsg = ref("");
+const authResultOk = ref(false);
+
+onMounted(() => {
+  fetchGcloudStatus();
+  fetchGdriveStatus();
+  const params = new URLSearchParams(location.search);
+  if (params.has("gcloud_auth")) {
+    const ok = params.get("gcloud_auth") === "done";
+    authResultMsg.value = ok ? "Google Cloud auth: done" : "Google Cloud auth: failed";
+    authResultOk.value = ok;
+    history.replaceState(null, "", location.pathname);
+  } else if (params.has("gdrive_auth")) {
+    const ok = params.get("gdrive_auth") === "done";
+    authResultMsg.value = ok ? "Google Drive auth: done" : "Google Drive auth: failed";
+    authResultOk.value = ok;
+    history.replaceState(null, "", location.pathname);
+  }
+});
 
 watch(googleTranscription, () => {
   onFieldStateChange();

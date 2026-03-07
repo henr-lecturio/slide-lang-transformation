@@ -97,7 +97,7 @@
 
   <section class="card home-main">
     <h2>Latest Output</h2>
-    <CollapsiblePanel title="Run Details" v-model:open="runs.latestInfoExpanded">
+    <CollapsiblePanel title="Run Details" name="runDetailsHome" v-model:open="runs.latestInfoExpanded">
       <RunInfoGrid :detail="runs.latestRunDetail" />
     </CollapsiblePanel>
     <section class="output-link-section">

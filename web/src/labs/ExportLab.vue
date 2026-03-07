@@ -1,5 +1,5 @@
 <template>
-  <LabAccordion>
+  <LabAccordion name="exportLab">
     <template #title>Export Lab</template>
 
     <LabToolbar

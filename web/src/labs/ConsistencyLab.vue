@@ -1,5 +1,5 @@
 <template>
-  <LabAccordion>
+  <LabAccordion name="consistencyLab">
     <template #title>Consistency Lab</template>
 
     <LabToolbar
